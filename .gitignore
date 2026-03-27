@@ -1,0 +1,9 @@
+.DS_Store
+__pycache__/
+*.pyc
+.python-version
+.env
+.env.*
+data/shared_state.json
+logs/
+tmp/

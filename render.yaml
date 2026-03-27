@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: fithub-app
+    runtime: python
+    plan: starter
+    region: singapore
+    buildCommand: python -m compileall .
+    startCommand: python server.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PORT
+        value: 10000
+      - key: FITHUB_URL_PREFIX
+        value: /
+      - key: FITHUB_DATA_DIR
+        value: /var/data/fithub
+    disk:
+      name: fithub-data
+      mountPath: /var/data
+      sizeGB: 1
