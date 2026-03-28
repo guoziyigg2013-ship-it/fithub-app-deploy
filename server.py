@@ -22,8 +22,15 @@ def normalize_url_prefix(raw_value):
     return "/" + value.strip("/")
 
 
-URL_PREFIX = normalize_url_prefix(os.getenv("FITHUB_URL_PREFIX", "/fitness-app-prototype"))
-DATA_DIR = Path(os.getenv("FITHUB_DATA_DIR", str(ROOT / "data"))).expanduser().resolve()
+def default_data_dir():
+    render_disk_root = Path("/var/data")
+    if render_disk_root.exists():
+        return (render_disk_root / "fithub").resolve()
+    return (ROOT / "data").resolve()
+
+
+URL_PREFIX = normalize_url_prefix(os.getenv("FITHUB_URL_PREFIX", "/"))
+DATA_DIR = Path(os.getenv("FITHUB_DATA_DIR", str(default_data_dir()))).expanduser().resolve()
 STATE_FILE = DATA_DIR / "shared_state.json"
 
 

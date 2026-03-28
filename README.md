@@ -15,10 +15,14 @@ python3 server.py --port 8010
 
 本地默认使用：
 
-- 页面入口：`/fitness-app-prototype/`
-- API 入口：`/fitness-app-prototype/api`
+- 页面入口：`/`
+- API 入口：`/api`
 
-正式部署使用 Render 环境变量切到根路径：
+如果你想兼容旧的子路径访问，也可以显式设置：
+
+- `FITHUB_URL_PREFIX=/fitness-app-prototype`
+
+正式部署建议保持根路径：
 
 - 页面入口：`/`
 - API 入口：`/api`
@@ -40,3 +44,5 @@ python3 server.py --port 8010
 正式环境数据保存在：
 
 - `/var/data/fithub/shared_state.json`
+
+如果没有挂载 Render Persistent Disk，数据会写进实例本地文件系统，服务重启或重建后可能丢失。

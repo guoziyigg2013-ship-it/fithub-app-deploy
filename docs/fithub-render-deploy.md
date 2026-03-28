@@ -14,8 +14,8 @@
 ## 环境变量
 
 - `PORT=10000`
-- `FITHUB_URL_PREFIX=/`
-- `FITHUB_DATA_DIR=/var/data/fithub`
+- `FITHUB_URL_PREFIX=/`  `可选，当前代码已默认根路径`
+- `FITHUB_DATA_DIR=/var/data/fithub`  `建议保留，未填写时会优先尝试 /var/data/fithub`
 
 ## 自定义域名建议
 
@@ -33,3 +33,5 @@
 ## 注意
 
 `data/shared_state.json` 是运行期文件，不要提交到 GitHub。
+
+如果没有挂载 Persistent Disk，即使页面能打开，注册、关注、评论、私信、预约等共享数据也可能在服务重启或重新部署后丢失。
