@@ -1536,34 +1536,56 @@ input {
   overflow: hidden;
 }
 
-.checkin-form {
-  margin-top: 14px;
-}
-
 .checkin-sport-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
+  margin-top: 14px;
 }
 
 .checkin-sport-button {
   border: 1px solid #eee3d4;
-  border-radius: 18px;
-  background: linear-gradient(180deg, #fffdf9, #fff8ef);
-  padding: 14px 12px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #ffffff, #fcfaf7);
+  padding: 14px 16px;
   color: inherit;
   text-align: left;
   display: grid;
-  gap: 4px;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon title mark"
+    "icon hint mark";
+  column-gap: 12px;
+  row-gap: 2px;
+  align-items: center;
+  box-shadow: 0 10px 22px rgba(20, 20, 20, 0.04);
+}
+
+.checkin-sport-button::after {
+  content: "";
+  grid-area: mark;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid #ddd5c8;
+  background: #fff;
 }
 
 .checkin-sport-button.is-active {
   border-color: rgba(242, 140, 40, 0.4);
-  background: linear-gradient(180deg, rgba(242, 140, 40, 0.14), #fff7ec);
+  background: linear-gradient(180deg, rgba(242, 140, 40, 0.12), #fff8ee);
   box-shadow: 0 12px 24px rgba(242, 140, 40, 0.12);
 }
 
+.checkin-sport-button.is-active::after {
+  border-color: rgba(242, 140, 40, 0.65);
+  background:
+    radial-gradient(circle at center, rgba(242, 140, 40, 0.95) 0 48%, transparent 54%),
+    #fff;
+}
+
 .checkin-sport-icon {
+  grid-area: icon;
   width: 34px;
   height: 34px;
   border-radius: 12px;
@@ -1581,48 +1603,117 @@ input {
 }
 
 .checkin-sport-button strong {
-  font-size: 14px;
+  grid-area: title;
+  font-size: 15px;
 }
 
 .checkin-sport-button small {
+  grid-area: hint;
   color: var(--muted);
   line-height: 1.45;
 }
 
-.checkin-form-grid {
+.workout-launcher-list,
+.device-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
   margin-top: 14px;
 }
 
-.checkin-field {
-  display: grid;
-  gap: 8px;
+.workout-launcher-row,
+.device-row {
+  border: 1px solid #eee4d8;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #ffffff, #fcfaf7);
+  padding: 14px 16px;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  text-align: left;
+  box-shadow: 0 10px 22px rgba(20, 20, 20, 0.04);
 }
 
-.checkin-field span {
+.workout-launcher-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workout-launcher-main .checkin-sport-icon {
+  flex-shrink: 0;
+}
+
+.workout-launcher-main strong,
+.workout-launcher-main p,
+.device-row strong,
+.device-row p {
+  margin: 0;
+}
+
+.workout-launcher-main p,
+.device-row p {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.workout-launcher-action {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(242, 140, 40, 0.12);
+  color: #9d580f;
   font-size: 13px;
-  color: #5f5f5f;
+  font-weight: 700;
 }
 
-.checkin-field input,
-.checkin-field textarea {
-  width: 100%;
-  border: 1px solid #e9e2d9;
-  border-radius: 16px;
-  padding: 12px 14px;
-  font: inherit;
-  background: #fff;
+.workout-session-card {
+  background:
+    radial-gradient(circle at top right, rgba(242, 140, 40, 0.18), transparent 36%),
+    linear-gradient(180deg, #fffaf4, #ffffff);
 }
 
-.checkin-field textarea {
-  min-height: 108px;
-  resize: vertical;
+.workout-timer {
+  margin-top: 16px;
+  font-size: clamp(34px, 11vw, 52px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
 }
 
-.checkin-field--wide {
-  grid-column: 1 / -1;
+.workout-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.workout-stat-grid div {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(242, 140, 40, 0.08);
+}
+
+.workout-stat-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workout-stat-grid strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 18px;
+}
+
+.summary-card--health {
+  background:
+    radial-gradient(circle at top right, rgba(242, 140, 40, 0.14), transparent 34%),
+    linear-gradient(180deg, #fffaf4, #ffffff);
 }
 
 .action-row--checkin {
@@ -1746,6 +1837,11 @@ input {
 
 .checkin-history-meta {
   text-align: right;
+}
+
+.device-row .status-pill,
+.device-row .mini-button {
+  flex-shrink: 0;
 }
 
 .swipe-tip {
@@ -2792,6 +2888,15 @@ input {
   .checkin-sport-grid,
   .checkin-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .workout-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workout-launcher-row,
+  .device-row {
+    align-items: flex-start;
   }
 }
 

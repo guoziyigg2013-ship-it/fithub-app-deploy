@@ -80,6 +80,11 @@ def iso_at(minutes_ago=0):
     return (now_utc() - timedelta(minutes=minutes_ago)).isoformat()
 
 
+def local_time_label(value=None):
+    current = value or now_utc()
+    return current.astimezone(timezone(timedelta(hours=8))).strftime("%m-%d %H:%M")
+
+
 def data_uri_svg(svg):
     return f"data:image/svg+xml;charset=UTF-8,{quote(svg)}"
 
@@ -213,6 +218,45 @@ def sanitize_state(state):
     return state
 
 
+def parse_optional_float(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_optional_int(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def calculate_bmi(height_cm, weight_kg):
+    if not height_cm or not weight_kg:
+        return None
+    height_meter = height_cm / 100
+    if height_meter <= 0:
+        return None
+    return round(weight_kg / (height_meter * height_meter), 1)
+
+
+def estimate_body_fat(gender, bmi):
+    if not bmi:
+        return None
+    if gender == "女":
+        estimate = bmi * 1.18 - 6.2
+    elif gender == "男":
+        estimate = bmi * 1.06 - 10.8
+    else:
+        estimate = bmi * 1.12 - 8.8
+    return round(max(8.0, min(42.0, estimate)), 1)
+
+
 def make_profile(**kwargs):
     profile = {
         "id": kwargs["id"],
@@ -236,6 +280,13 @@ def make_profile(**kwargs):
         "hours": kwargs.get("hours", ""),
         "contactName": kwargs.get("contactName", ""),
         "phone": kwargs.get("phone", ""),
+        "gender": kwargs.get("gender", ""),
+        "heightCm": kwargs.get("heightCm", None),
+        "weightKg": kwargs.get("weightKg", None),
+        "favoriteSports": kwargs.get("favoriteSports", []),
+        "healthSource": kwargs.get("healthSource", ""),
+        "deviceSyncedAt": kwargs.get("deviceSyncedAt", ""),
+        "bodyFat": kwargs.get("bodyFat", None),
         "pricingPlans": kwargs.get("pricingPlans", []),
         "years": kwargs.get("years", ""),
         "certifications": kwargs.get("certifications", []),
@@ -1166,6 +1217,18 @@ def build_profile_payload(role, payload, existing_profile, session):
     name = payload.get("name") or (existing_profile or {}).get("name") or "新用户"
     level = payload.get("level") or (existing_profile or {}).get("level") or "新手入门"
     goal = payload.get("goal") or (existing_profile or {}).get("goal") or "保持规律训练"
+    gender = payload.get("gender") or (existing_profile or {}).get("gender") or ""
+    height_cm = parse_optional_int(payload.get("heightCm"))
+    if height_cm is None:
+        height_cm = parse_optional_int((existing_profile or {}).get("heightCm"))
+    weight_kg = parse_optional_float(payload.get("weightKg"))
+    if weight_kg is None:
+        weight_kg = parse_optional_float((existing_profile or {}).get("weightKg"))
+    if not gender or not height_cm or not weight_kg:
+        raise ValueError("健身爱好者注册需要填写性别、身高和体重。")
+    bmi = calculate_bmi(height_cm, weight_kg)
+    existing_body_fat = parse_optional_float((existing_profile or {}).get("bodyFat"))
+    body_fat = existing_body_fat if existing_body_fat is not None else estimate_body_fat(gender, bmi)
     return {
         **(existing_profile or {}),
         "id": (existing_profile or {}).get("id", f"enthusiast-{uuid.uuid4().hex[:8]}"),
@@ -1185,7 +1248,14 @@ def build_profile_payload(role, payload, existing_profile, session):
         "tags": [level, city, "训练日记"],
         "level": level,
         "goal": goal,
-        "reviews": [],
+        "gender": gender,
+        "heightCm": height_cm,
+        "weightKg": weight_kg,
+        "favoriteSports": (existing_profile or {}).get("favoriteSports", []),
+        "healthSource": (existing_profile or {}).get("healthSource", ""),
+        "deviceSyncedAt": (existing_profile or {}).get("deviceSyncedAt", ""),
+        "bodyFat": body_fat,
+        "reviews": (existing_profile or {}).get("reviews", []),
         "checkins": (existing_profile or {}).get("checkins", []),
         "listed": True,
         "createdAt": (existing_profile or {}).get("createdAt", iso_at()),
@@ -1332,7 +1402,82 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 session["selectedRole"] = role
                 session["currentActorProfileId"] = profile_data["id"]
                 return bootstrap_response(state, session)
-            self._write_json(self._with_state(action))
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/profile/preferences":
+            def action(state):
+                session = ensure_session(state, session_id)
+                profile_id = payload.get("profileId") or session.get("currentActorProfileId")
+                if not profile_id or profile_id not in session.get("managedProfileIds", []):
+                    raise ValueError("请先注册自己的训练者身份。")
+
+                profile = state["profiles"].get(profile_id)
+                if not profile or profile.get("role") != "enthusiast":
+                    raise ValueError("只有健身爱好者身份支持设置常规运动项目。")
+
+                valid_ids = {item["id"] for item in (
+                    {"id": "run"},
+                    {"id": "strength"},
+                    {"id": "cycling"},
+                    {"id": "hiit"},
+                    {"id": "pilates"},
+                    {"id": "swim"},
+                    {"id": "yoga"},
+                    {"id": "basketball"},
+                )}
+                favorite_sports = []
+                for sport_id in payload.get("favoriteSports", []):
+                    if sport_id in valid_ids and sport_id not in favorite_sports:
+                        favorite_sports.append(sport_id)
+                if not favorite_sports:
+                    raise ValueError("请至少选择一个常规运动项目。")
+
+                profile["favoriteSports"] = favorite_sports[:6]
+                session["currentActorProfileId"] = profile_id
+                return bootstrap_response(state, session)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/health/device-sync":
+            def action(state):
+                session = ensure_session(state, session_id)
+                profile_id = payload.get("profileId") or session.get("currentActorProfileId")
+                if not profile_id or profile_id not in session.get("managedProfileIds", []):
+                    raise ValueError("请先注册自己的训练者身份。")
+
+                profile = state["profiles"].get(profile_id)
+                if not profile or profile.get("role") != "enthusiast":
+                    raise ValueError("只有健身爱好者身份支持健康设备同步。")
+
+                gender = profile.get("gender") or ""
+                height_cm = parse_optional_int(profile.get("heightCm"))
+                weight_kg = parse_optional_float(profile.get("weightKg"))
+                if not gender or not height_cm or not weight_kg:
+                    raise ValueError("请先完善性别、身高和体重，再同步健康设备。")
+
+                source = payload.get("source") or "device"
+                source_label = "小米智能秤" if source == "xiaomi-scale" else "智能设备"
+                bmi = calculate_bmi(height_cm, weight_kg)
+                body_fat = estimate_body_fat(gender, bmi)
+
+                profile["healthSource"] = source_label
+                profile["deviceSyncedAt"] = local_time_label()
+                profile["bodyFat"] = body_fat
+                session["currentActorProfileId"] = profile_id
+                return bootstrap_response(state, session)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
         if parsed.path == f"{API_PREFIX}/follow/toggle":

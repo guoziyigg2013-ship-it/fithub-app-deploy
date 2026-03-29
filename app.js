@@ -42,6 +42,9 @@ const roleConfig = {
       { name: "avatar_file", label: "头像", type: "file", required: false, accept: "image/*" },
       { name: "name", label: "昵称 / 姓名", type: "text", required: true, placeholder: "例如：小鹿训练日记" },
       { name: "phone", label: "手机号", type: "tel", required: true, placeholder: "请输入手机号" },
+      { name: "gender", label: "性别", type: "select", required: true, options: ["男", "女"] },
+      { name: "height_cm", label: "身高（cm）", type: "number", required: true, placeholder: "例如：172" },
+      { name: "weight_kg", label: "体重（kg）", type: "number", required: true, placeholder: "例如：64.5" },
       { name: "city", label: "所在城市", type: "text", required: false, placeholder: "例如：厦门" },
       { name: "location", label: "常驻定位", type: "text", required: false, placeholder: "例如：思明区软件园" },
       {
@@ -103,6 +106,17 @@ const CHECKIN_SPORTS = [
   { id: "yoga", label: "瑜伽拉伸", hint: "恢复舒展", icon: "伸" },
   { id: "basketball", label: "球类运动", hint: "篮球 / 羽毛球", icon: "球" }
 ];
+
+const CHECKIN_SPORT_METRICS = {
+  run: { met: 8.3, paceKmh: 8.5 },
+  strength: { met: 6.0, paceKmh: 0 },
+  cycling: { met: 7.2, paceKmh: 18 },
+  hiit: { met: 8.8, paceKmh: 0 },
+  pilates: { met: 3.0, paceKmh: 0 },
+  swim: { met: 6.0, paceKmh: 2.1 },
+  yoga: { met: 2.8, paceKmh: 0 },
+  basketball: { met: 7.5, paceKmh: 4.2 }
+};
 
 function createDemoImage(title, accentA, accentB) {
   const svg = `
@@ -821,13 +835,9 @@ const state = {
   composeMedia: [],
   bookings: bookingCards,
   threads: [],
-  checkinDraft: {
-    sport: "strength",
-    duration: "",
-    distance: "",
-    calories: "",
-    note: ""
-  },
+  checkinEditing: false,
+  checkinSelectionDraft: [],
+  workoutSession: null,
   chatTargetProfileId: "",
   chatDraft: "",
   sessionId: "",
@@ -1099,6 +1109,9 @@ async function buildRegistrationPayload(role, formData) {
     ...base,
     name: (formData.get("name") || "").toString(),
     phone: (formData.get("phone") || "").toString(),
+    gender: (formData.get("gender") || "").toString(),
+    heightCm: (formData.get("height_cm") || "").toString(),
+    weightKg: (formData.get("weight_kg") || "").toString(),
     level: (formData.get("level") || "").toString(),
     goal: (formData.get("goal") || "").toString(),
     intro: (formData.get("intro") || "").toString()
@@ -1605,6 +1618,9 @@ function getFieldDefault(field, seed) {
   if (field.name === "certifications") return (seed.certifications || []).join("、");
   if (field.name === "goal") return seed.goal || "";
   if (field.name === "level") return seed.level || "";
+  if (field.name === "gender") return seed.gender || "";
+  if (field.name === "height_cm") return seed.heightCm || "";
+  if (field.name === "weight_kg") return seed.weightKg || "";
   return seed[field.name] || "";
 }
 
@@ -1886,48 +1902,108 @@ async function submitComposePost() {
   renderPage();
 }
 
-async function submitCheckin() {
+function toggleCommonSportSelection(sportId) {
   const profile = getMyPageProfile();
   if (!profile || profile.role !== "enthusiast") {
-    throw new Error("请先用健身爱好者身份注册后再打卡。");
+    return;
   }
 
-  const sport = getCheckinSport(state.checkinDraft.sport);
-  const duration = Number(state.checkinDraft.duration || 0);
-  const calories = Number(state.checkinDraft.calories || 0);
-  const distance = Number(state.checkinDraft.distance || 0);
-  const note = (state.checkinDraft.note || "").trim();
+  const current = state.checkinSelectionDraft.length ? [...state.checkinSelectionDraft] : [...(profile.favoriteSports || [])];
+  if (current.includes(sportId)) {
+    state.checkinSelectionDraft = current.filter((item) => item !== sportId);
+  } else {
+    state.checkinSelectionDraft = [...current, sportId].slice(0, 6);
+  }
+  renderPage();
+}
 
-  if (!duration) {
-    throw new Error("请先填写训练时长。");
+function openCheckinEditor() {
+  const profile = getMyPageProfile();
+  if (!profile) return;
+  state.checkinEditing = true;
+  state.checkinSelectionDraft = [...(profile.favoriteSports || [])];
+  renderPage();
+}
+
+function cancelCheckinEditor() {
+  state.checkinEditing = false;
+  state.checkinSelectionDraft = [];
+  renderPage();
+}
+
+async function saveFavoriteSports() {
+  const profile = getMyPageProfile();
+  const favoriteSports = [...state.checkinSelectionDraft];
+  if (!profile || profile.role !== "enthusiast") {
+    throw new Error("请先用健身爱好者身份注册后再设置运动项目。");
+  }
+  if (!favoriteSports.length) {
+    throw new Error("请至少选择一个常规运动项目。");
   }
 
-  const detailParts = [`${sport.label} ${duration} 分钟`];
-  if (distance) detailParts.push(`${distance} km`);
-  if (calories) detailParts.push(`${calories} kcal`);
+  await postAndSync(`${API_BASE}/profile/preferences`, {
+    profileId: profile.id,
+    favoriteSports
+  });
+
+  state.checkinEditing = false;
+  state.checkinSelectionDraft = [];
+  renderPage();
+}
+
+function startWorkoutSession(sportId) {
+  const profile = getMyPageProfile();
+  if (!profile || profile.role !== "enthusiast") {
+    throw new Error("请先用健身爱好者身份注册后再开始运动。");
+  }
+  if (!profile.gender || !getProfileHeight(profile) || !getProfileWeight(profile)) {
+    state.profileSubpage = "health";
+    renderPage();
+    throw new Error("请先完善性别、身高和体重，再开始运动。");
+  }
+
+  state.workoutSession = {
+    sportId,
+    startedAt: Date.now()
+  };
+  renderPage();
+}
+
+function cancelWorkoutSession() {
+  state.workoutSession = null;
+  renderPage();
+}
+
+async function finishWorkoutSession() {
+  const profile = getMyPageProfile();
+  const session = getWorkoutSessionStats(profile);
+  if (!profile || !session) return;
 
   await postAndSync(`${API_BASE}/checkin/create`, {
     profileId: profile.id,
-    sportId: sport.id,
-    sportLabel: sport.label,
-    duration,
-    calories,
-    distance,
-    note,
-    content: note || `完成了一次 ${detailParts.join(" · ")} 的训练打卡。`
+    sportId: session.sport.id,
+    sportLabel: session.sport.label,
+    duration: session.elapsedMinutes,
+    calories: session.calories,
+    distance: session.distance,
+    note: "",
+    content: `完成了一次 ${session.sport.label} 训练，持续 ${session.elapsedMinutes} 分钟，估算消耗 ${session.calories} kcal。`
   });
 
-  state.activePage = "profile";
-  state.activeProfileId = profile.id;
-  state.profileSubpage = "";
-  state.checkinDraft = {
-    sport: sport.id,
-    duration: "",
-    distance: "",
-    calories: "",
-    note: ""
-  };
-  syncNavActive();
+  state.workoutSession = null;
+  renderPage();
+}
+
+async function importHealthDevice(source) {
+  const profile = getMyPageProfile();
+  if (!profile || profile.role !== "enthusiast") {
+    throw new Error("请先注册后再同步健康设备。");
+  }
+
+  await postAndSync(`${API_BASE}/health/device-sync`, {
+    profileId: profile.id,
+    source
+  });
   renderPage();
 }
 
@@ -2427,6 +2503,10 @@ function getCheckinSport(optionId) {
   return CHECKIN_SPORTS.find((item) => item.id === optionId) || CHECKIN_SPORTS[0];
 }
 
+function getCheckinMetrics(optionId) {
+  return CHECKIN_SPORT_METRICS[optionId] || CHECKIN_SPORT_METRICS.strength;
+}
+
 function getSafeDate(value) {
   const date = value ? new Date(value) : null;
   return Number.isNaN(date?.getTime()) ? null : date;
@@ -2449,6 +2529,55 @@ function getWeekAnchor(date) {
   anchor.setHours(0, 0, 0, 0);
   anchor.setDate(anchor.getDate() - diff);
   return anchor;
+}
+
+function formatWorkoutTimer(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds || 0));
+  const hours = String(Math.floor(safeSeconds / 3600)).padStart(2, "0");
+  const minutes = String(Math.floor((safeSeconds % 3600) / 60)).padStart(2, "0");
+  const seconds = String(safeSeconds % 60).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+function getProfileWeight(profile) {
+  return Number(profile?.weightKg || 0);
+}
+
+function getProfileHeight(profile) {
+  return Number(profile?.heightCm || 0);
+}
+
+function getProfileBMI(profile) {
+  const heightCm = getProfileHeight(profile);
+  const weightKg = getProfileWeight(profile);
+  if (!heightCm || !weightKg) return "--";
+  const heightMeter = heightCm / 100;
+  return (weightKg / (heightMeter * heightMeter)).toFixed(1);
+}
+
+function getWorkoutSessionStats(profile) {
+  const session = state.workoutSession;
+  if (!session) return null;
+
+  const sport = getCheckinSport(session.sportId);
+  const metrics = getCheckinMetrics(session.sportId);
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - session.startedAt) / 1000));
+  const elapsedMinutes = Math.max(1, Math.floor(elapsedSeconds / 60));
+  const hours = elapsedSeconds / 3600;
+  const weightKg = getProfileWeight(profile) || 60;
+  const genderFactor = profile?.gender === "女" ? 0.92 : profile?.gender === "男" ? 1.02 : 1;
+  const calories = Math.max(1, Math.round((metrics.met * 3.5 * weightKg * hours) / 200 * genderFactor));
+  const distance = metrics.paceKmh ? Number((metrics.paceKmh * hours).toFixed(hours >= 1 ? 1 : 2)) : 0;
+
+  return {
+    ...session,
+    sport,
+    elapsedSeconds,
+    elapsedMinutes,
+    timerLabel: formatWorkoutTimer(elapsedSeconds),
+    calories,
+    distance
+  };
 }
 
 function getProfileCheckins(profile) {
@@ -2512,24 +2641,37 @@ function renderPersonalShortcutTile(label, sublabel, icon, attrs = "") {
   `;
 }
 
+function getFavoriteSports(profile) {
+  const favoriteIds = profile?.favoriteSports || [];
+  return CHECKIN_SPORTS.filter((item) => favoriteIds.includes(item.id));
+}
+
 function renderCheckinEntry(profile) {
-  const activeSport = getCheckinSport(state.checkinDraft.sport);
+  const activeSession = getWorkoutSessionStats(profile);
   const weeklyCount = getWeeklyCheckins(profile).length;
-  const todayCount = getTodayCheckins(profile).length;
+  const favoriteSports = getFavoriteSports(profile);
 
   return `
     <article class="dashboard-checkin">
       <div class="dashboard-checkin-copy">
         <span class="dashboard-checkin-kicker">本周已打卡 ${weeklyCount} 次</span>
-        <h3>今日训练，马上记录</h3>
-        <p>像 Keep 一样，把跑步、传统力量训练、普拉提这些项目直接记进你的个人训练档案。</p>
+        <h3>${activeSession ? `${activeSession.sport.label} 进行中` : "像 Apple Watch 一样开始一次运动"}</h3>
+        <p>${activeSession ? `系统正在自动计时，并根据你的身体数据估算卡路里。` : "先选择常规运动项目，之后“打卡”页只显示这些项目，点一下就能开始运动。"}</p>
         <div class="dashboard-checkin-pills">
-          <span>${escapeHtml(activeSport.label)}</span>
-          <span>今日 ${todayCount} 次</span>
-          <span>自动进入我的动态</span>
+          ${
+            activeSession
+              ? `
+                <span>${escapeHtml(activeSession.timerLabel)}</span>
+                <span>${escapeHtml(`${activeSession.calories} kcal`)}</span>
+                ${activeSession.distance ? `<span>${escapeHtml(`${activeSession.distance} km`)}</span>` : ""}
+              `
+              : favoriteSports.length
+                ? favoriteSports.slice(0, 3).map((item) => `<span>${escapeHtml(item.label)}</span>`).join("")
+                : "<span>先设置常规项目</span>"
+          }
         </div>
       </div>
-      <button class="mini-button mini-button--accent" data-open-my-feature="checkin" type="button">去打卡</button>
+      <button class="mini-button mini-button--accent" data-open-my-feature="checkin" type="button">${activeSession ? "继续" : "去打卡"}</button>
     </article>
   `;
 }
@@ -2596,71 +2738,246 @@ function renderCheckinHistory(profile) {
   `;
 }
 
-function renderCheckinFeature(profile) {
-  const draft = state.checkinDraft;
-  const weeklyCheckins = getWeeklyCheckins(profile).length;
+function renderFavoriteSportEditor(profile) {
+  const selectedIds = state.checkinSelectionDraft.length
+    ? state.checkinSelectionDraft
+    : [...(profile.favoriteSports || [])];
+  const canSave = selectedIds.length > 0;
 
   return `
     <article class="detail-card checkin-feature-card">
       <div class="section-title-row">
         <div>
-          <h3>运动打卡</h3>
-          <p class="result-tip">选择项目、填上时长，提交后会自动进入“我的动态”。</p>
+          <h3>选择常规项目</h3>
+          <p class="result-tip">先像 Apple Watch 一样，把你最常用的运动项目固定下来，之后打卡页只显示这些项目。</p>
         </div>
-        <span class="status-pill">本周 ${weeklyCheckins} 次</span>
+        <span class="status-pill">${selectedIds.length} 项</span>
       </div>
 
-      <form class="checkin-form" id="checkinForm">
-        <section class="checkin-sport-grid">
-          ${CHECKIN_SPORTS.map(
+      <section class="checkin-sport-grid">
+        ${CHECKIN_SPORTS.map(
+          (item) => `
+            <button
+              class="checkin-sport-button ${selectedIds.includes(item.id) ? "is-active" : ""}"
+              data-toggle-common-sport="${item.id}"
+              type="button"
+            >
+              <span class="checkin-sport-icon">${escapeHtml(item.icon)}</span>
+              <strong>${escapeHtml(item.label)}</strong>
+              <small>${escapeHtml(item.hint)}</small>
+            </button>
+          `
+        ).join("")}
+      </section>
+
+      <div class="action-row action-row--checkin">
+        <button class="mini-button" data-cancel-common-sports="1" type="button">稍后再设</button>
+        <button class="primary-submit" ${canSave ? "" : "disabled"} data-save-common-sports="1" type="button">保存常规项目</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderWorkoutLauncher(profile) {
+  const favoriteSports = getFavoriteSports(profile);
+
+  if (!favoriteSports.length || state.checkinEditing) {
+    return renderFavoriteSportEditor(profile);
+  }
+
+  return `
+    <article class="detail-card checkin-feature-card">
+      <div class="section-title-row">
+        <div>
+          <h3>开始运动</h3>
+          <p class="result-tip">轻点项目就会自动开始计时，并按你的性别、身高、体重估算卡路里。</p>
+        </div>
+        <button class="text-link" data-edit-common-sports="1" type="button">编辑常规项目</button>
+      </div>
+
+      <section class="workout-launcher-list">
+        ${favoriteSports
+          .map(
             (item) => `
-              <button
-                class="checkin-sport-button ${draft.sport === item.id ? "is-active" : ""}"
-                data-checkin-sport="${item.id}"
-                type="button"
-              >
-                <span class="checkin-sport-icon">${escapeHtml(item.icon)}</span>
-                <strong>${escapeHtml(item.label)}</strong>
-                <small>${escapeHtml(item.hint)}</small>
+              <button class="workout-launcher-row" data-start-workout="${item.id}" type="button">
+                <div class="workout-launcher-main">
+                  <span class="checkin-sport-icon">${escapeHtml(item.icon)}</span>
+                  <div>
+                    <strong>${escapeHtml(item.label)}</strong>
+                    <p>${escapeHtml(item.hint)}</p>
+                  </div>
+                </div>
+                <span class="workout-launcher-action">开始</span>
               </button>
             `
-          ).join("")}
-        </section>
+          )
+          .join("")}
+      </section>
+    </article>
+  `;
+}
 
-        <div class="checkin-form-grid">
-          <label class="checkin-field">
-            <span>训练时长（分钟）</span>
-            <input data-checkin-field="duration" type="number" min="1" value="${escapeHtml(draft.duration)}" placeholder="例如 45">
-          </label>
-          <label class="checkin-field">
-            <span>消耗热量（kcal）</span>
-            <input data-checkin-field="calories" type="number" min="0" value="${escapeHtml(draft.calories)}" placeholder="例如 320">
-          </label>
-          <label class="checkin-field">
-            <span>距离（km，可选）</span>
-            <input data-checkin-field="distance" type="number" min="0" step="0.1" value="${escapeHtml(draft.distance)}" placeholder="例如 5.2">
-          </label>
-          <label class="checkin-field checkin-field--wide">
-            <span>训练备注（可选）</span>
-            <textarea data-checkin-field="note" placeholder="例如：今天做了深蹲、卧推和 15 分钟爬坡有氧">${escapeHtml(draft.note)}</textarea>
-          </label>
-        </div>
+function renderWorkoutSession(profile) {
+  const session = getWorkoutSessionStats(profile);
+  if (!session) return "";
 
-        <div class="action-row action-row--checkin">
-          <button class="mini-button" data-open-my-home="1" type="button">稍后再记</button>
-          <button class="primary-submit" type="submit">完成打卡</button>
+  return `
+    <article class="detail-card workout-session-card">
+      <div class="section-title-row">
+        <div>
+          <span class="dashboard-checkin-kicker">运动中</span>
+          <h3>${escapeHtml(session.sport.label)}</h3>
         </div>
-      </form>
+        <button class="text-link" data-cancel-workout="1" type="button">放弃</button>
+      </div>
+
+      <div class="workout-timer">${escapeHtml(session.timerLabel)}</div>
+
+      <div class="workout-stat-grid">
+        <div>
+          <span>已运动</span>
+          <strong>${escapeHtml(`${session.elapsedMinutes} 分钟`)}</strong>
+        </div>
+        <div>
+          <span>估算卡路里</span>
+          <strong>${escapeHtml(`${session.calories} kcal`)}</strong>
+        </div>
+        <div>
+          <span>BMI</span>
+          <strong>${escapeHtml(String(getProfileBMI(profile)))}</strong>
+        </div>
+        <div>
+          <span>估算距离</span>
+          <strong>${session.distance ? escapeHtml(`${session.distance} km`) : "--"}</strong>
+        </div>
+      </div>
+
+      <p class="result-tip">系统会根据你的性别、身高、体重和运动类型自动估算消耗，结束后会直接记入打卡。</p>
+
+      <div class="action-row action-row--checkin">
+        <button class="mini-button" data-cancel-workout="1" type="button">结束放弃</button>
+        <button class="primary-submit" data-finish-workout="1" type="button">结束并打卡</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderCheckinFeature(profile) {
+  const needsHealthData = !profile.gender || !getProfileHeight(profile) || !getProfileWeight(profile);
+
+  return `
+    ${
+      needsHealthData
+        ? `
+          <article class="detail-card">
+            <div class="section-title-row">
+              <div>
+                <h3>先补全健康数据</h3>
+                <p class="result-tip">打卡的卡路里估算会用到性别、身高和体重，建议先到“健康”里完善。</p>
+              </div>
+              <button class="mini-button mini-button--accent" data-open-my-feature="health" type="button">去健康</button>
+            </div>
+          </article>
+        `
+        : ""
+    }
+    ${state.workoutSession ? renderWorkoutSession(profile) : renderWorkoutLauncher(profile)}
+    <article class="detail-card">
+      <div class="section-title-row">
+        <div>
+          <h3>最近打卡</h3>
+          <p class="result-tip">结束训练后会自动沉淀到这里，并同步进入你的“我的动态”。</p>
+        </div>
+      </div>
+      ${renderCheckinHistory(profile)}
+    </article>
+  `;
+}
+
+function renderHealthFeature(profile) {
+  const bmi = getProfileBMI(profile);
+  const heightCm = getProfileHeight(profile);
+  const weightKg = getProfileWeight(profile);
+  const bodyFat = profile.bodyFat || "--";
+  const latestSource = profile.healthSource || "未连接设备";
+  const latestSync = profile.deviceSyncedAt || "还没有同步";
+
+  return `
+    <article class="detail-card">
+      <div class="section-title-row">
+        <div>
+          <h3>健康概览</h3>
+          <p class="result-tip">这里会作为你自己的身体数据中心，后续可衔接智能秤和健康设备。</p>
+        </div>
+      </div>
+      <article class="summary-card summary-card--health">
+        <div>
+          <span>BMI</span>
+          <strong>${escapeHtml(String(bmi))}</strong>
+        </div>
+        <div>
+          <span>身高</span>
+          <strong>${heightCm ? escapeHtml(`${heightCm} cm`) : "--"}</strong>
+        </div>
+        <div>
+          <span>体重</span>
+          <strong>${weightKg ? escapeHtml(`${weightKg} kg`) : "--"}</strong>
+        </div>
+      </article>
+      <div class="detail-grid">
+        <div class="detail-item">
+          <span>性别</span>
+          <strong>${escapeHtml(profile.gender || "未填写")}</strong>
+        </div>
+        <div class="detail-item">
+          <span>BMI 参考</span>
+          <strong>18.5 - 23.9</strong>
+        </div>
+        <div class="detail-item">
+          <span>体脂率</span>
+          <strong>${bodyFat === "--" ? "--" : escapeHtml(`${bodyFat}%`)}</strong>
+        </div>
+        <div class="detail-item">
+          <span>数据来源</span>
+          <strong>${escapeHtml(latestSource)}</strong>
+        </div>
+        <div class="detail-item">
+          <span>最近同步</span>
+          <strong>${escapeHtml(latestSync)}</strong>
+        </div>
+      </div>
     </article>
 
     <article class="detail-card">
       <div class="section-title-row">
         <div>
-          <h3>最近打卡</h3>
-          <p class="result-tip">最近的训练记录会沉淀成你的个人主页内容。</p>
+          <h3>外接设备</h3>
+          <p class="result-tip">先给你做了智能秤接入口，后续也能继续接 Apple Health、华为运动健康等。</p>
         </div>
       </div>
-      ${renderCheckinHistory(profile)}
+      <section class="device-list">
+        <article class="device-row">
+          <div>
+            <strong>小米智能秤</strong>
+            <p>同步体重、BMI、体脂率与最近一次测量时间</p>
+          </div>
+          <button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-scale" type="button">模拟导入</button>
+        </article>
+        <article class="device-row">
+          <div>
+            <strong>Apple Health</strong>
+            <p>后续可同步步数、心率、能量消耗和运动记录</p>
+          </div>
+          <span class="status-pill">规划中</span>
+        </article>
+        <article class="device-row">
+          <div>
+            <strong>华为运动健康</strong>
+            <p>预留接口，适合后续接入更多国内设备生态</p>
+          </div>
+          <span class="status-pill">规划中</span>
+        </article>
+      </section>
     </article>
   `;
 }
@@ -2724,7 +3041,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
         ${renderPersonalShortcutTile("关注", "收藏与关注", "关", 'data-open-my-feature="favorites"')}
         ${renderPersonalShortcutTile("积分", `${getProfilePoints(profile, state.bookings || [])} 分`, "分", 'data-open-my-feature="points"')}
         ${renderPersonalShortcutTile("预约", "查看排期", "约", 'data-open-my-feature="schedule"')}
-        ${renderPersonalShortcutTile("定位", "实时位置", "位", 'data-open-my-feature="location"')}
+        ${renderPersonalShortcutTile("健康", "BMI 与设备", "健", 'data-open-my-feature="health"')}
         ${renderPersonalShortcutTile("动态", `${profile.posts?.length || 0} 条记录`, "圈", 'data-open-my-feature="moments"')}
       </div>
     </section>
@@ -2806,6 +3123,14 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
             <div class="detail-item">
               <span>训练目标</span>
               <strong>${escapeHtml(profile.goal || "保持规律训练")}</strong>
+            </div>
+            <div class="detail-item">
+              <span>性别</span>
+              <strong>${escapeHtml(profile.gender || "未填写")}</strong>
+            </div>
+            <div class="detail-item">
+              <span>身高 / 体重</span>
+              <strong>${escapeHtml(`${profile.heightCm || "--"} cm / ${profile.weightKg || "--"} kg`)}</strong>
             </div>
           </div>
         </article>
@@ -2900,20 +3225,10 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
         </section>
       `
     },
-    location: {
-      title: "定位",
-      subtitle: "管理当前实时定位与城市切换",
-      content: `
-        <article class="location-card">
-          <span>当前城市</span>
-          <h2>${escapeHtml(state.userPosition.city)} · ${escapeHtml(state.userPosition.district)}</h2>
-          <p>${escapeHtml(state.locationStatus || "已准备好定位服务。")}</p>
-          <div class="action-row">
-            <button class="mini-button mini-button--accent" data-action="locate" type="button">实时定位</button>
-            <button class="mini-button" data-open-city="1" type="button">切换城市</button>
-          </div>
-        </article>
-      `
+    health: {
+      title: "健康",
+      subtitle: "查看 BMI、身体数据与外接设备同步状态",
+      content: renderHealthFeature(profile)
     },
     moments: {
       title: "我的动态",
@@ -3607,8 +3922,43 @@ appView.addEventListener("click", (event) => {
     return;
   }
 
-  if (target.dataset.checkinSport) {
-    state.checkinDraft.sport = target.dataset.checkinSport;
+  if (target.dataset.toggleCommonSport) {
+    toggleCommonSportSelection(target.dataset.toggleCommonSport);
+    return;
+  }
+
+  if (target.dataset.editCommonSports) {
+    openCheckinEditor();
+    return;
+  }
+
+  if (target.dataset.cancelCommonSports) {
+    cancelCheckinEditor();
+    return;
+  }
+
+  if (target.dataset.saveCommonSports) {
+    runTask(() => saveFavoriteSports());
+    return;
+  }
+
+  if (target.dataset.startWorkout) {
+    runTask(() => startWorkoutSession(target.dataset.startWorkout));
+    return;
+  }
+
+  if (target.dataset.finishWorkout) {
+    runTask(() => finishWorkoutSession());
+    return;
+  }
+
+  if (target.dataset.cancelWorkout) {
+    cancelWorkoutSession();
+    return;
+  }
+
+  if (target.dataset.syncHealthDevice) {
+    runTask(() => importHealthDevice(target.dataset.syncHealthDevice));
     renderPage();
     return;
   }
@@ -3633,10 +3983,6 @@ appView.addEventListener("input", (event) => {
 
   if (event.target.dataset.commentInput) {
     state.commentDrafts[event.target.dataset.commentInput] = event.target.value;
-  }
-
-  if (event.target.dataset.checkinField) {
-    state.checkinDraft[event.target.dataset.checkinField] = event.target.value;
   }
 });
 
@@ -3765,11 +4111,6 @@ overlay.addEventListener("submit", (event) => {
     event.preventDefault();
     runTask(() => sendDirectMessage(state.chatTargetProfileId));
     return;
-  }
-
-  if (event.target.id === "checkinForm") {
-    event.preventDefault();
-    runTask(() => submitCheckin());
   }
 });
 
@@ -3980,3 +4321,10 @@ window.setInterval(() => {
   if (state.overlayMode === "register" || state.overlayMode === "compose" || state.overlayMode === "chat") return;
   refreshSharedState({ keepOverlay: true }).catch(() => {});
 }, 45000);
+window.setInterval(() => {
+  if (document.hidden) return;
+  if (!state.workoutSession) return;
+  if (state.activePage !== "profile") return;
+  if (state.overlayMode) return;
+  renderPage();
+}, 1000);
