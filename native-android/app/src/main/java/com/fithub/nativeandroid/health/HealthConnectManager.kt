@@ -41,14 +41,26 @@ class HealthConnectManager(private val context: Context) {
         HealthPermission.getReadPermission(ExerciseSessionRecord::class),
     )
 
+    fun sdkStatus(): Int = HealthConnectClient.getSdkStatus(context, PROVIDER_PACKAGE)
+
     fun availabilitySummary(): String {
-        return when (HealthConnectClient.getSdkStatus(context, PROVIDER_PACKAGE)) {
-            SDK_AVAILABLE -> "Health Connect 已可用，可以读取真实训练和身体数据。"
-            SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> "需要先安装或更新 Health Connect，再继续同步。"
-            SDK_UNAVAILABLE -> "当前设备暂不支持 Health Connect。"
+        return when (sdkStatus()) {
+            SDK_AVAILABLE -> "Health Connect 已可用，可直接打开设置并读取真实训练和身体数据。"
+            SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> "需要先安装或更新 Health Connect，完成后再授权同步。"
+            SDK_UNAVAILABLE -> "当前设备暂不支持 Health Connect，或缺少 Google Play 服务。"
             else -> "Health Connect 状态未知，请在真机上检查。"
         }
     }
+
+    fun providerActionLabel(): String {
+        return when (sdkStatus()) {
+            SDK_AVAILABLE -> "打开 Health Connect"
+            SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> "安装或更新 Health Connect"
+            else -> ""
+        }
+    }
+
+    fun providerPackageName(): String = PROVIDER_PACKAGE
 
     suspend fun loadPreview(days: Long = 30): HealthPreview {
         val end = Instant.now()

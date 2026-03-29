@@ -19,6 +19,7 @@ data class MainUiState(
     val sessionId: String = UUID.randomUUID().toString(),
     val profileId: String = "",
     val resolvedProfileName: String = "",
+    val healthConnectActionLabel: String = "",
     val status: String = "连接 Health Connect 后即可把真实训练同步到 FitHub。",
     val preview: HealthPreview? = null,
     val isBusy: Boolean = false,
@@ -29,7 +30,10 @@ class MainViewModel(
     private val xiaomiSyncProvider: XiaomiSyncProvider = XiaomiSyncProvider(),
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(
-        MainUiState(status = healthManager.availabilitySummary())
+        MainUiState(
+            status = healthManager.availabilitySummary(),
+            healthConnectActionLabel = healthManager.providerActionLabel(),
+        )
     )
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
@@ -114,6 +118,15 @@ class MainViewModel(
 
     fun showXiaomiMessage() {
         update { copy(status = xiaomiSyncProvider.statusMessage()) }
+    }
+
+    fun refreshAvailability() {
+        update {
+            copy(
+                status = healthManager.availabilitySummary(),
+                healthConnectActionLabel = healthManager.providerActionLabel(),
+            )
+        }
     }
 
     private fun update(transform: MainUiState.() -> MainUiState) {

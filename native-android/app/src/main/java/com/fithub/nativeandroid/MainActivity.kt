@@ -1,5 +1,8 @@
 package com.fithub.nativeandroid
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -27,6 +30,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.HealthConnectClient.Companion.SDK_AVAILABLE
+import androidx.health.connect.client.HealthConnectClient.Companion.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED
 import androidx.health.connect.client.PermissionController
 import com.fithub.nativeandroid.health.HealthConnectManager
 import com.fithub.nativeandroid.ui.MainUiState
@@ -55,6 +61,10 @@ class MainActivity : ComponentActivity() {
                     onRoleChanged = viewModel::updateRole,
                     onProfileChanged = viewModel::updateProfileId,
                     onLogin = viewModel::loginToFitHub,
+                    onOpenHealthConnect = {
+                        openHealthConnectProvider(healthManager)
+                        viewModel.refreshAvailability()
+                    },
                     onGrantPermissions = {
                         permissionLauncher.launch(healthManager.permissions)
                     },
@@ -75,6 +85,7 @@ private fun MainScreen(
     onRoleChanged: (String) -> Unit,
     onProfileChanged: (String) -> Unit,
     onLogin: () -> Unit,
+    onOpenHealthConnect: () -> Unit,
     onGrantPermissions: () -> Unit,
     onLoadPreview: () -> Unit,
     onSync: () -> Unit,
@@ -117,8 +128,22 @@ private fun MainScreen(
                 }
             }
 
-            Button(onClick = onLogin, modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = onLogin,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !uiState.isBusy,
+            ) {
                 Text(if (uiState.isBusy) "登录中..." else "登录 FitHub")
+            }
+
+            if (uiState.healthConnectActionLabel.isNotBlank()) {
+                OutlinedButton(
+                    onClick = onOpenHealthConnect,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !uiState.isBusy,
+                ) {
+                    Text(uiState.healthConnectActionLabel)
+                }
             }
 
             if (uiState.resolvedProfileName.isNotBlank()) {
@@ -133,19 +158,31 @@ private fun MainScreen(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = onGrantPermissions, modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = onGrantPermissions,
+                    modifier = Modifier.weight(1f),
+                    enabled = !uiState.isBusy,
+                ) {
                     Text("授权 Health Connect")
                 }
-                OutlinedButton(onClick = onLoadPreview, modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = onLoadPreview,
+                    modifier = Modifier.weight(1f),
+                    enabled = !uiState.isBusy,
+                ) {
                     Text("读取预览")
                 }
             }
 
-            Button(onClick = onSync, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onSync, modifier = Modifier.fillMaxWidth(), enabled = !uiState.isBusy) {
                 Text(if (uiState.isBusy) "同步中..." else "同步到 FitHub")
             }
 
-            OutlinedButton(onClick = onXiaomiInfo, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = onXiaomiInfo,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !uiState.isBusy,
+            ) {
                 Text("查看小米接入说明")
             }
 
@@ -160,6 +197,46 @@ private fun MainScreen(
                 Text("今日活跃卡路里：${preview.activeEnergyBurned ?: "--"} kcal")
                 Text("最近训练：${preview.workouts.size} 条")
             }
+        }
+    }
+}
+
+private fun MainActivity.openHealthConnectProvider(manager: HealthConnectManager) {
+    when (manager.sdkStatus()) {
+        SDK_AVAILABLE -> {
+            val settingsIntent = Intent(HealthConnectClient.ACTION_HEALTH_CONNECT_SETTINGS)
+            val packageIntent = packageManager.getLaunchIntentForPackage(manager.providerPackageName())
+            val fallbackIntent = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("https://play.google.com/store/apps/details?id=${manager.providerPackageName()}"),
+            )
+            startActivitySafely(settingsIntent, packageIntent, fallbackIntent)
+        }
+
+        SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
+            val marketIntent = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("market://details?id=${manager.providerPackageName()}&url=healthconnect%3A%2F%2Fonboarding"),
+            ).apply {
+                setPackage("com.android.vending")
+            }
+            val webIntent = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("https://play.google.com/store/apps/details?id=${manager.providerPackageName()}"),
+            )
+            startActivitySafely(marketIntent, webIntent)
+        }
+
+        else -> Unit
+    }
+}
+
+private fun MainActivity.startActivitySafely(vararg intents: Intent?) {
+    intents.filterNotNull().forEach { intent ->
+        try {
+            startActivity(intent)
+            return
+        } catch (_: ActivityNotFoundException) {
         }
     }
 }

@@ -43,6 +43,22 @@ final class AppStore: ObservableObject {
         return bootstrap.profiles.first(where: { $0.role == selectedRole }) ?? bootstrap.profiles.first
     }
 
+    var canLogin: Bool {
+        !phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
+    }
+
+    var canSyncHealth: Bool {
+        guard let profile = currentProfile else { return false }
+        return profile.role == "enthusiast" && !isBusy
+    }
+
+    var connectionSummary: String {
+        guard let profile = currentProfile else {
+            return "还没有连接到 FitHub 账户。"
+        }
+        return "当前已连接 \(profile.name)，身份为 \(roleLabel(profile.role))。"
+    }
+
     func bootstrapIfPossible() async {
         persistForm()
         do {
@@ -56,7 +72,17 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func refreshAccount() async {
+        await bootstrapIfPossible()
+        if currentProfile != nil {
+            statusMessage = connectionSummary
+        }
+    }
+
     func login() async throws {
+        guard !phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw FitHubAPIError.server("请先填写手机号。")
+        }
         persistForm()
         isBusy = true
         defer { isBusy = false }
@@ -105,5 +131,16 @@ final class AppStore: ObservableObject {
         defaults.set(serverURL, forKey: serverURLKey)
         defaults.set(phone, forKey: phoneKey)
         defaults.set(selectedRole, forKey: roleKey)
+    }
+
+    private func roleLabel(_ role: String) -> String {
+        switch role {
+        case "gym":
+            return "健身房"
+        case "coach":
+            return "健身教练"
+        default:
+            return "健身爱好者"
+        }
     }
 }

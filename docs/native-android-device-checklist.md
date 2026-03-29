@@ -25,10 +25,14 @@
    - 手机号
    - 身份
 3. 点击 `登录 FitHub`
-4. 点击 `授权 Health Connect`
-5. 允许读取训练、步数、体重、体脂、心率等数据
-6. 点击 `读取预览`
-7. 点击 `同步到 FitHub`
+4. 如果页面出现：
+   - `打开 Health Connect`
+   - 或 `安装或更新 Health Connect`
+   先点它进入系统设置或 Play 商店
+5. 回到 App 后点击 `授权 Health Connect`
+6. 允许读取训练、步数、体重、体脂、心率等数据
+7. 点击 `读取预览`
+8. 点击 `同步到 FitHub`
 
 ## 成功判定
 
@@ -44,5 +48,6 @@
 
 - Android 版本是否支持 Health Connect
 - Health Connect 是否已安装 / 已更新
+- 是否已经通过 App 内按钮成功打开 Health Connect 设置或商店
 - 登录的是否是已有训练者身份
 - 正式网址是否可访问

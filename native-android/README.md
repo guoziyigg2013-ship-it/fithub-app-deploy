@@ -38,6 +38,16 @@
 3. 同步 Gradle
 4. 在 Android 设备安装并启用 Health Connect
 
+### 当前真机体验
+
+- 先用 `手机号 + 身份` 登录现有 FitHub 账户
+- App 会根据设备状态显示：
+  - `打开 Health Connect`
+  - 或 `安装或更新 Health Connect`
+- 已安装时优先拉起 Health Connect 设置
+- 未安装或需要升级时优先跳转 Google Play
+- 完成后再授权并读取真实健康数据
+
 ### Xiaomi 路线说明
 
 当前项目里已经放了：

@@ -60,6 +60,22 @@ struct RootView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .disabled(!store.canLogin)
+
+            HStack(spacing: 12) {
+                Text(store.connectionSummary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("刷新账户") {
+                    Task {
+                        await store.refreshAccount()
+                    }
+                }
+                .buttonStyle(.borderless)
+                .font(.footnote)
+                .disabled(store.isBusy)
+            }
 
             Text(store.statusMessage)
                 .font(.footnote)
@@ -123,6 +139,7 @@ struct RootView: View {
                     }
                 }
                 .buttonStyle(.bordered)
+                .disabled(store.isBusy)
 
                 Button {
                     Task {
@@ -133,6 +150,7 @@ struct RootView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!store.canSyncHealth)
             }
         }
         .padding(18)
