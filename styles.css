@@ -1432,6 +1432,61 @@ input {
   border: 1px solid rgba(242, 140, 40, 0.14);
 }
 
+.dashboard-checkin--go {
+  padding: 18px;
+}
+
+.dashboard-checkin-head,
+.dashboard-go-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dashboard-go-row {
+  margin-top: 14px;
+  align-items: flex-end;
+}
+
+.dashboard-go-copy strong,
+.dashboard-go-copy p {
+  display: block;
+  margin: 0;
+}
+
+.dashboard-go-copy strong {
+  font-size: 18px;
+}
+
+.dashboard-go-copy p {
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.dashboard-go-button,
+.workout-go-button {
+  border: 0;
+  color: white;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  background: linear-gradient(180deg, #ffab42, var(--primary-deep));
+  box-shadow: 0 16px 28px rgba(242, 140, 40, 0.24);
+}
+
+.dashboard-go-button {
+  min-width: 92px;
+  height: 42px;
+  border-radius: 999px;
+  padding: 0 18px;
+  flex-shrink: 0;
+}
+
+.dashboard-go-button--live {
+  background: linear-gradient(180deg, #f6a84a, #f0861f);
+}
+
 .dashboard-checkin-copy h3,
 .dashboard-checkin-copy p {
   margin: 0;
@@ -1465,6 +1520,17 @@ input {
   margin-top: 12px;
 }
 
+.dashboard-checkin-pills--toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.dashboard-checkin-pills--toolbar::-webkit-scrollbar {
+  display: none;
+}
+
 .dashboard-checkin-pills span,
 .checkin-inline-row span {
   display: inline-flex;
@@ -1475,6 +1541,27 @@ input {
   background: rgba(242, 140, 40, 0.1);
   color: #8d561a;
   font-size: 12px;
+}
+
+.workout-type-chip {
+  border: 1px solid #eee3d7;
+  border-radius: 999px;
+  padding: 10px 14px;
+  white-space: nowrap;
+  background: #fff;
+  color: #6a5a45;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.workout-type-chip.is-active {
+  border-color: rgba(242, 140, 40, 0.35);
+  background: rgba(242, 140, 40, 0.12);
+  color: #9d580f;
+}
+
+.workout-type-chip.is-empty {
+  color: var(--muted);
 }
 
 .account-section {
@@ -1534,6 +1621,39 @@ input {
 
 .checkin-feature-card {
   overflow: hidden;
+}
+
+.sport-picker-sheet {
+  padding-top: 10px;
+}
+
+.sport-picker-handle {
+  width: 52px;
+  height: 6px;
+  border-radius: 999px;
+  margin: 0 auto 12px;
+  background: #ebe7e0;
+}
+
+.section-title-row--sport-picker {
+  align-items: flex-start;
+}
+
+.sport-picker-section-stack {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.sport-picker-section {
+  display: grid;
+  gap: 10px;
+}
+
+.sport-picker-label {
+  color: #8a8a8a;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .checkin-sport-grid {
@@ -1618,6 +1738,81 @@ input {
   display: grid;
   gap: 10px;
   margin-top: 14px;
+}
+
+.workout-go-card {
+  background:
+    radial-gradient(circle at top right, rgba(242, 140, 40, 0.16), transparent 35%),
+    linear-gradient(180deg, #fff8f1, #ffffff);
+}
+
+.workout-go-copy h3,
+.workout-go-copy p,
+.workout-go-meta strong,
+.workout-go-meta span {
+  margin: 0;
+}
+
+.workout-go-copy h3 {
+  margin-top: 10px;
+  font-size: 28px;
+  line-height: 1.05;
+}
+
+.workout-go-copy p {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.workout-device-strip,
+.workout-quick-connect {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.device-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #f5f5f5;
+  color: #666;
+  font-size: 12px;
+}
+
+.device-chip.is-connected {
+  background: rgba(242, 140, 40, 0.12);
+  color: #9d580f;
+}
+
+.workout-go-panel {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.workout-go-button {
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 34px;
+}
+
+.workout-go-meta strong {
+  display: block;
+  font-size: 16px;
+}
+
+.workout-go-meta span {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .workout-launcher-row,
@@ -2897,6 +3092,22 @@ input {
   .workout-launcher-row,
   .device-row {
     align-items: flex-start;
+  }
+
+  .dashboard-go-row,
+  .workout-go-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dashboard-go-button {
+    width: 100%;
+  }
+
+  .workout-go-button {
+    width: 100px;
+    height: 100px;
+    align-self: center;
   }
 }
 

@@ -97,25 +97,95 @@ const roleConfig = {
 };
 
 const CHECKIN_SPORTS = [
-  { id: "run", label: "跑步", hint: "户外 / 跑步机", icon: "跑" },
-  { id: "strength", label: "传统力量训练", hint: "器械 / 自由重量", icon: "力" },
-  { id: "cycling", label: "骑行", hint: "动感单车 / 户外", icon: "骑" },
-  { id: "hiit", label: "HIIT", hint: "燃脂间歇", icon: "燃" },
-  { id: "pilates", label: "普拉提", hint: "核心稳定", icon: "普" },
-  { id: "swim", label: "游泳", hint: "有氧耐力", icon: "泳" },
-  { id: "yoga", label: "瑜伽拉伸", hint: "恢复舒展", icon: "伸" },
-  { id: "basketball", label: "球类运动", hint: "篮球 / 羽毛球", icon: "球" }
+  { id: "run", label: "户外跑步", hint: "户外自由跑", icon: "跑", category: "我的运动", metricKey: "run" },
+  { id: "outdoor-walk", label: "户外行走", hint: "轻松走 / 快走", icon: "走", category: "我的运动", metricKey: "walk" },
+  { id: "rope", label: "跳绳", hint: "燃脂爆发", icon: "跳", category: "我的运动", metricKey: "rope" },
+  { id: "cycling", label: "室内骑行", hint: "动感单车", icon: "骑", category: "我的运动", metricKey: "cycling" },
+  { id: "outdoor-cycling", label: "户外骑行", hint: "公路 / 城市骑行", icon: "骑", category: "我的运动", metricKey: "cycling" },
+  { id: "treadmill", label: "室内跑步", hint: "跑步机训练", icon: "跑", category: "我的运动", metricKey: "run" },
+  { id: "stairs", label: "爬楼梯", hint: "提升心肺", icon: "梯", category: "跑走骑运动", metricKey: "stairs" },
+  { id: "indoor-walk", label: "室内行走", hint: "恢复活动", icon: "走", category: "跑走骑运动", metricKey: "walk" },
+  { id: "hiking", label: "徒步", hint: "耐力拉练", icon: "徒", category: "跑走骑运动", metricKey: "hike" },
+  { id: "trail-run", label: "越野跑", hint: "坡度与变速", icon: "越", category: "跑走骑运动", metricKey: "hike" },
+  { id: "badminton", label: "羽毛球", hint: "灵敏步伐", icon: "羽", category: "球类运动", metricKey: "ball" },
+  { id: "football", label: "足球", hint: "跑动对抗", icon: "足", category: "球类运动", metricKey: "ball" },
+  { id: "basketball", label: "篮球", hint: "力量与爆发", icon: "篮", category: "球类运动", metricKey: "ball" },
+  { id: "pingpong", label: "乒乓球", hint: "反应速度", icon: "乒", category: "球类运动", metricKey: "ball" },
+  { id: "tennis", label: "网球", hint: "有氧耐力", icon: "网", category: "球类运动", metricKey: "ball" },
+  { id: "volleyball", label: "排球", hint: "弹跳协调", icon: "排", category: "球类运动", metricKey: "ball" },
+  { id: "bowling", label: "保龄球", hint: "轻竞技休闲", icon: "保", category: "球类运动", metricKey: "leisure" },
+  { id: "golf", label: "高尔夫球", hint: "挥杆练习", icon: "高", category: "球类运动", metricKey: "leisure" },
+  { id: "yoga", label: "瑜伽", hint: "舒展与恢复", icon: "瑜", category: "室内运动", metricKey: "yoga" },
+  { id: "hiit", label: "HIIT", hint: "高强度燃脂", icon: "燃", category: "室内运动", metricKey: "hiit" },
+  { id: "strength", label: "传统力量训练", hint: "器械 / 自由重量", icon: "力", category: "室内运动", metricKey: "strength" },
+  { id: "accessory", label: "小器械", hint: "壶铃 / 弹力带", icon: "械", category: "室内运动", metricKey: "accessory" },
+  { id: "cardio-mix", label: "混合有氧", hint: "持续心肺训练", icon: "氧", category: "室内运动", metricKey: "cardio" },
+  { id: "aerobics", label: "健身操", hint: "节奏训练", icon: "操", category: "室内运动", metricKey: "dance" },
+  { id: "dance", label: "舞蹈", hint: "律动训练", icon: "舞", category: "室内运动", metricKey: "dance" },
+  { id: "zumba", label: "尊巴", hint: "燃脂律动", icon: "尊", category: "室内运动", metricKey: "dance" },
+  { id: "pilates", label: "普拉提", hint: "核心稳定", icon: "普", category: "室内运动", metricKey: "pilates" },
+  { id: "boxing", label: "拳击", hint: "上肢爆发", icon: "拳", category: "室内运动", metricKey: "boxing" },
+  { id: "fighting", label: "格斗", hint: "对抗训练", icon: "格", category: "室内运动", metricKey: "boxing" },
+  { id: "ballet", label: "芭蕾", hint: "控制与平衡", icon: "芭", category: "室内运动", metricKey: "dance" },
+  { id: "elliptical", label: "椭圆机", hint: "低冲击心肺", icon: "椭", category: "室内运动", metricKey: "machine" },
+  { id: "rowing", label: "划船机", hint: "全身协调", icon: "划", category: "室内运动", metricKey: "machine" },
+  { id: "stepper", label: "踏步机", hint: "下肢耐力", icon: "踏", category: "室内运动", metricKey: "machine" },
+  { id: "stair-machine", label: "台阶机", hint: "爬升模拟", icon: "台", category: "室内运动", metricKey: "machine" },
+  { id: "frisbee", label: "飞盘", hint: "户外休闲", icon: "盘", category: "休闲运动", metricKey: "leisure" },
+  { id: "roller", label: "轮滑", hint: "平衡滑行", icon: "轮", category: "休闲运动", metricKey: "leisure" },
+  { id: "skateboard", label: "滑板", hint: "核心平衡", icon: "板", category: "休闲运动", metricKey: "leisure" },
+  { id: "hula", label: "呼啦圈", hint: "轻松活动", icon: "圈", category: "休闲运动", metricKey: "leisure" },
+  { id: "swim", label: "泳池游泳", hint: "标准泳池", icon: "泳", category: "水中运动", metricKey: "swim" },
+  { id: "outdoor-swim", label: "户外游泳", hint: "开放水域", icon: "泳", category: "水中运动", metricKey: "swim" },
+  { id: "surf", label: "冲浪", hint: "核心控制", icon: "冲", category: "水中运动", metricKey: "surf" },
+  { id: "trampoline", label: "蹦床", hint: "跳跃协调", icon: "蹦", category: "专业运动", metricKey: "extreme" },
+  { id: "skating", label: "滑冰", hint: "平衡稳定", icon: "冰", category: "专业运动", metricKey: "extreme" },
+  { id: "skiing", label: "滑雪", hint: "下肢控制", icon: "雪", category: "专业运动", metricKey: "extreme" },
+  { id: "fencing", label: "击剑", hint: "敏捷对抗", icon: "剑", category: "专业运动", metricKey: "ball" },
+  { id: "archery", label: "射箭", hint: "稳定专注", icon: "弓", category: "专业运动", metricKey: "martial" },
+  { id: "equestrian", label: "马术", hint: "核心稳定", icon: "马", category: "专业运动", metricKey: "leisure" },
+  { id: "climbing", label: "攀岩", hint: "抓握力量", icon: "岩", category: "专业运动", metricKey: "extreme" },
+  { id: "tai-chi", label: "太极", hint: "呼吸与平衡", icon: "太", category: "武术运动", metricKey: "martial" },
+  { id: "wing-chun", label: "咏春", hint: "节奏与出拳", icon: "咏", category: "武术运动", metricKey: "martial" },
+  { id: "wuqinxi", label: "五禽戏", hint: "传统养生", icon: "五", category: "武术运动", metricKey: "martial" },
+  { id: "meditation", label: "冥想", hint: "呼吸放松", icon: "静", category: "其他运动", metricKey: "meditation" }
+];
+
+const CHECKIN_SPORT_SECTIONS = [
+  { label: "我的运动", ids: ["run", "outdoor-walk", "rope", "cycling", "outdoor-cycling", "treadmill"] },
+  { label: "跑走骑运动", ids: ["stairs", "indoor-walk", "hiking", "trail-run"] },
+  { label: "球类运动", ids: ["badminton", "football", "basketball", "pingpong", "tennis", "volleyball", "bowling", "golf"] },
+  { label: "室内运动", ids: ["yoga", "hiit", "strength", "accessory", "cardio-mix", "aerobics", "dance", "zumba", "pilates", "boxing", "fighting", "ballet", "elliptical", "rowing", "stepper", "stair-machine"] },
+  { label: "休闲运动", ids: ["frisbee", "roller", "skateboard", "hula"] },
+  { label: "水中运动", ids: ["swim", "outdoor-swim", "surf"] },
+  { label: "专业运动", ids: ["trampoline", "skating", "skiing", "fencing", "archery", "equestrian", "climbing"] },
+  { label: "武术运动", ids: ["tai-chi", "wing-chun", "wuqinxi"] },
+  { label: "其他运动", ids: ["meditation"] }
 ];
 
 const CHECKIN_SPORT_METRICS = {
   run: { met: 8.3, paceKmh: 8.5 },
-  strength: { met: 6.0, paceKmh: 0 },
+  walk: { met: 3.6, paceKmh: 5.4 },
+  rope: { met: 10.0, paceKmh: 0 },
   cycling: { met: 7.2, paceKmh: 18 },
-  hiit: { met: 8.8, paceKmh: 0 },
-  pilates: { met: 3.0, paceKmh: 0 },
-  swim: { met: 6.0, paceKmh: 2.1 },
+  stairs: { met: 8.8, paceKmh: 0 },
+  hike: { met: 6.4, paceKmh: 4.8 },
+  ball: { met: 7.0, paceKmh: 4.2 },
   yoga: { met: 2.8, paceKmh: 0 },
-  basketball: { met: 7.5, paceKmh: 4.2 }
+  hiit: { met: 8.8, paceKmh: 0 },
+  strength: { met: 6.0, paceKmh: 0 },
+  accessory: { met: 4.6, paceKmh: 0 },
+  dance: { met: 5.2, paceKmh: 0 },
+  pilates: { met: 3.0, paceKmh: 0 },
+  boxing: { met: 7.8, paceKmh: 0 },
+  cardio: { met: 6.2, paceKmh: 0 },
+  machine: { met: 5.8, paceKmh: 0 },
+  leisure: { met: 4.0, paceKmh: 0 },
+  swim: { met: 6.0, paceKmh: 2.1 },
+  surf: { met: 5.0, paceKmh: 0 },
+  extreme: { met: 7.2, paceKmh: 0 },
+  martial: { met: 4.6, paceKmh: 0 },
+  meditation: { met: 1.4, paceKmh: 0 }
 };
 
 function createDemoImage(title, accentA, accentB) {
@@ -837,6 +907,7 @@ const state = {
   threads: [],
   checkinEditing: false,
   checkinSelectionDraft: [],
+  checkinCurrentSportId: "",
   workoutSession: null,
   chatTargetProfileId: "",
   chatDraft: "",
@@ -953,6 +1024,12 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   state.bookings = payload.bookings || [];
   state.threads = payload.threads || [];
   state.composeProfileId = state.composeProfileId || state.currentActorProfileId || state.managedProfileIds[0] || "";
+
+  const myProfile = getMyPageProfile();
+  const availableSportIds = new Set((myProfile?.favoriteSports || []).map((item) => item));
+  if (!availableSportIds.has(state.checkinCurrentSportId)) {
+    state.checkinCurrentSportId = myProfile?.favoriteSports?.[0] || "";
+  }
 
   if (!state.activeProfileId || !getProfile(state.activeProfileId)) {
     state.activeProfileId = state.currentActorProfileId || state.managedProfileIds[0] || "";
@@ -1917,6 +1994,11 @@ function toggleCommonSportSelection(sportId) {
   renderPage();
 }
 
+function selectWorkoutSport(sportId) {
+  state.checkinCurrentSportId = sportId;
+  renderPage();
+}
+
 function openCheckinEditor() {
   const profile = getMyPageProfile();
   if (!profile) return;
@@ -1948,10 +2030,11 @@ async function saveFavoriteSports() {
 
   state.checkinEditing = false;
   state.checkinSelectionDraft = [];
+  state.checkinCurrentSportId = favoriteSports[0] || "";
   renderPage();
 }
 
-function startWorkoutSession(sportId) {
+function startWorkoutSession(sportId = "") {
   const profile = getMyPageProfile();
   if (!profile || profile.role !== "enthusiast") {
     throw new Error("请先用健身爱好者身份注册后再开始运动。");
@@ -1962,8 +2045,10 @@ function startWorkoutSession(sportId) {
     throw new Error("请先完善性别、身高和体重，再开始运动。");
   }
 
+  const targetSport = sportId || getCurrentWorkoutSport(profile).id;
+  state.checkinCurrentSportId = targetSport;
   state.workoutSession = {
-    sportId,
+    sportId: targetSport,
     startedAt: Date.now()
   };
   renderPage();
@@ -2499,12 +2584,17 @@ function renderProfileFeatureSection(profile) {
   `;
 }
 
+function findCheckinSport(optionId) {
+  return CHECKIN_SPORTS.find((item) => item.id === optionId) || null;
+}
+
 function getCheckinSport(optionId) {
-  return CHECKIN_SPORTS.find((item) => item.id === optionId) || CHECKIN_SPORTS[0];
+  return findCheckinSport(optionId) || CHECKIN_SPORTS[0];
 }
 
 function getCheckinMetrics(optionId) {
-  return CHECKIN_SPORT_METRICS[optionId] || CHECKIN_SPORT_METRICS.strength;
+  const sport = getCheckinSport(optionId);
+  return CHECKIN_SPORT_METRICS[sport.metricKey] || CHECKIN_SPORT_METRICS.strength;
 }
 
 function getSafeDate(value) {
@@ -2643,35 +2733,94 @@ function renderPersonalShortcutTile(label, sublabel, icon, attrs = "") {
 
 function getFavoriteSports(profile) {
   const favoriteIds = profile?.favoriteSports || [];
-  return CHECKIN_SPORTS.filter((item) => favoriteIds.includes(item.id));
+  return favoriteIds.map((itemId) => findCheckinSport(itemId)).filter(Boolean);
+}
+
+function getCurrentWorkoutSport(profile) {
+  const favoriteSports = getFavoriteSports(profile);
+  if (!favoriteSports.length) return CHECKIN_SPORTS[0];
+  const activeSport = favoriteSports.find((item) => item.id === state.checkinCurrentSportId);
+  return activeSport || favoriteSports[0];
+}
+
+function getConnectedDevices(profile) {
+  return profile?.connectedDevices || [];
+}
+
+function getWorkoutDeviceSummary(profile) {
+  const devices = getConnectedDevices(profile);
+  if (!devices.length) return "未连接设备";
+  return devices.join(" · ");
+}
+
+function getSportPickerSections(selectedIds = []) {
+  const selectedSet = new Set(selectedIds);
+  const favorites = selectedIds.map((sportId) => findCheckinSport(sportId)).filter(Boolean);
+  const sections = [];
+
+  if (favorites.length) {
+    sections.push({ label: "常用运动", sports: favorites });
+  }
+
+  CHECKIN_SPORT_SECTIONS.forEach((section) => {
+    const sports = section.ids
+      .map((sportId) => findCheckinSport(sportId))
+      .filter((sport) => sport && !selectedSet.has(sport.id));
+    if (sports.length) {
+      sections.push({ label: section.label, sports });
+    }
+  });
+
+  return sections;
 }
 
 function renderCheckinEntry(profile) {
   const activeSession = getWorkoutSessionStats(profile);
   const weeklyCount = getWeeklyCheckins(profile).length;
   const favoriteSports = getFavoriteSports(profile);
+  const currentSport = getCurrentWorkoutSport(profile);
 
   return `
-    <article class="dashboard-checkin">
-      <div class="dashboard-checkin-copy">
-        <span class="dashboard-checkin-kicker">本周已打卡 ${weeklyCount} 次</span>
-        <h3>${activeSession ? `${activeSession.sport.label} 进行中` : "像 Apple Watch 一样开始一次运动"}</h3>
-        <p>${activeSession ? `系统正在自动计时，并根据你的身体数据估算卡路里。` : "先选择常规运动项目，之后“打卡”页只显示这些项目，点一下就能开始运动。"}</p>
-        <div class="dashboard-checkin-pills">
-          ${
-            activeSession
-              ? `
-                <span>${escapeHtml(activeSession.timerLabel)}</span>
-                <span>${escapeHtml(`${activeSession.calories} kcal`)}</span>
-                ${activeSession.distance ? `<span>${escapeHtml(`${activeSession.distance} km`)}</span>` : ""}
-              `
-              : favoriteSports.length
-                ? favoriteSports.slice(0, 3).map((item) => `<span>${escapeHtml(item.label)}</span>`).join("")
-                : "<span>先设置常规项目</span>"
-          }
-        </div>
+    <article class="dashboard-checkin dashboard-checkin--go">
+      <div class="dashboard-checkin-head">
+        <span class="dashboard-checkin-kicker">本周打卡 ${weeklyCount} 次</span>
+        <button class="text-link" data-open-my-feature="checkin" type="button">管理</button>
       </div>
-      <button class="mini-button mini-button--accent" data-open-my-feature="checkin" type="button">${activeSession ? "继续" : "去打卡"}</button>
+      <div class="dashboard-checkin-pills dashboard-checkin-pills--toolbar">
+        ${
+          favoriteSports.length
+            ? favoriteSports
+                .slice(0, 4)
+                .map(
+                  (item) => `
+                    <button
+                      class="workout-type-chip ${item.id === currentSport.id ? "is-active" : ""}"
+                      data-select-workout-sport="${item.id}"
+                      type="button"
+                    >
+                      ${escapeHtml(item.label)}
+                    </button>
+                  `
+                )
+                .join("")
+            : '<button class="workout-type-chip is-empty" data-open-my-feature="checkin" type="button">选择运动</button>'
+        }
+      </div>
+      <div class="dashboard-go-row">
+        <div class="dashboard-go-copy">
+          <strong>${escapeHtml(activeSession ? activeSession.sport.label : currentSport.label)}</strong>
+          <p>${
+            activeSession
+              ? escapeHtml(`${activeSession.timerLabel} · ${activeSession.calories} kcal${activeSession.distance ? ` · ${activeSession.distance} km` : ""}`)
+              : escapeHtml(getWorkoutDeviceSummary(profile))
+          }</p>
+        </div>
+        ${
+          activeSession
+            ? '<button class="dashboard-go-button dashboard-go-button--live" data-open-my-feature="checkin" type="button">继续</button>'
+            : '<button class="dashboard-go-button" data-go-workout="1" type="button">运动 GO</button>'
+        }
+      </div>
     </article>
   `;
 }
@@ -2743,36 +2892,51 @@ function renderFavoriteSportEditor(profile) {
     ? state.checkinSelectionDraft
     : [...(profile.favoriteSports || [])];
   const canSave = selectedIds.length > 0;
+  const sections = getSportPickerSections(selectedIds);
 
   return `
-    <article class="detail-card checkin-feature-card">
-      <div class="section-title-row">
+    <article class="detail-card checkin-feature-card sport-picker-sheet">
+      <div class="sport-picker-handle"></div>
+      <div class="section-title-row section-title-row--sport-picker">
         <div>
-          <h3>选择常规项目</h3>
-          <p class="result-tip">先像 Apple Watch 一样，把你最常用的运动项目固定下来，之后打卡页只显示这些项目。</p>
+          <h3>选择运动类别</h3>
+          <p class="result-tip">选好后会显示在顶部运动类型栏，之后按 GO 就能直接开始。</p>
         </div>
         <span class="status-pill">${selectedIds.length} 项</span>
       </div>
 
-      <section class="checkin-sport-grid">
-        ${CHECKIN_SPORTS.map(
-          (item) => `
-            <button
-              class="checkin-sport-button ${selectedIds.includes(item.id) ? "is-active" : ""}"
-              data-toggle-common-sport="${item.id}"
-              type="button"
-            >
-              <span class="checkin-sport-icon">${escapeHtml(item.icon)}</span>
-              <strong>${escapeHtml(item.label)}</strong>
-              <small>${escapeHtml(item.hint)}</small>
-            </button>
-          `
-        ).join("")}
+      <section class="sport-picker-section-stack">
+        ${sections
+          .map(
+            (section) => `
+              <article class="sport-picker-section">
+                <span class="sport-picker-label">${escapeHtml(section.label)}</span>
+                <div class="checkin-sport-grid">
+                  ${section.sports
+                    .map(
+                      (item) => `
+                        <button
+                          class="checkin-sport-button ${selectedIds.includes(item.id) ? "is-active" : ""}"
+                          data-toggle-common-sport="${item.id}"
+                          type="button"
+                        >
+                          <span class="checkin-sport-icon">${escapeHtml(item.icon)}</span>
+                          <strong>${escapeHtml(item.label)}</strong>
+                          <small>${escapeHtml(item.hint)}</small>
+                        </button>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+            `
+          )
+          .join("")}
       </section>
 
       <div class="action-row action-row--checkin">
-        <button class="mini-button" data-cancel-common-sports="1" type="button">稍后再设</button>
-        <button class="primary-submit" ${canSave ? "" : "disabled"} data-save-common-sports="1" type="button">保存常规项目</button>
+        <button class="mini-button" data-cancel-common-sports="1" type="button">取消</button>
+        <button class="primary-submit" ${canSave ? "" : "disabled"} data-save-common-sports="1" type="button">完成选择</button>
       </div>
     </article>
   `;
@@ -2780,40 +2944,72 @@ function renderFavoriteSportEditor(profile) {
 
 function renderWorkoutLauncher(profile) {
   const favoriteSports = getFavoriteSports(profile);
+  const currentSport = getCurrentWorkoutSport(profile);
+  const connectedDevices = getConnectedDevices(profile);
 
   if (!favoriteSports.length || state.checkinEditing) {
     return renderFavoriteSportEditor(profile);
   }
 
   return `
-    <article class="detail-card checkin-feature-card">
+    <article class="detail-card checkin-feature-card workout-toolbar-card">
       <div class="section-title-row">
         <div>
-          <h3>开始运动</h3>
-          <p class="result-tip">轻点项目就会自动开始计时，并按你的性别、身高、体重估算卡路里。</p>
+          <h3>运动类型</h3>
+          <p class="result-tip">切换顶部运动类型，然后按 GO 直接开始。</p>
         </div>
-        <button class="text-link" data-edit-common-sports="1" type="button">编辑常规项目</button>
+        <button class="mini-button" data-edit-common-sports="1" type="button">选择运动</button>
       </div>
 
-      <section class="workout-launcher-list">
+      <div class="dashboard-checkin-pills dashboard-checkin-pills--toolbar">
         ${favoriteSports
           .map(
             (item) => `
-              <button class="workout-launcher-row" data-start-workout="${item.id}" type="button">
-                <div class="workout-launcher-main">
-                  <span class="checkin-sport-icon">${escapeHtml(item.icon)}</span>
-                  <div>
-                    <strong>${escapeHtml(item.label)}</strong>
-                    <p>${escapeHtml(item.hint)}</p>
-                  </div>
-                </div>
-                <span class="workout-launcher-action">开始</span>
+              <button
+                class="workout-type-chip ${item.id === currentSport.id ? "is-active" : ""}"
+                data-select-workout-sport="${item.id}"
+                type="button"
+              >
+                ${escapeHtml(item.label)}
               </button>
             `
           )
           .join("")}
-      </section>
+      </div>
     </article>
+
+    ${
+      state.workoutSession
+        ? renderWorkoutSession(profile)
+        : `
+          <article class="detail-card workout-go-card">
+            <div class="workout-go-copy">
+              <span class="dashboard-checkin-kicker">准备开始</span>
+              <h3>${escapeHtml(currentSport.label)}</h3>
+              <p>${escapeHtml(currentSport.hint)}</p>
+            </div>
+            <div class="workout-device-strip">
+              ${
+                connectedDevices.length
+                  ? connectedDevices.map((item) => `<span class="device-chip is-connected">${escapeHtml(item)}</span>`).join("")
+                  : '<span class="device-chip">未连接设备</span>'
+              }
+            </div>
+            <div class="workout-go-panel">
+              <button class="workout-go-button" data-go-workout="1" type="button">GO</button>
+              <div class="workout-go-meta">
+                <strong>${escapeHtml(`${profile.gender || "未填"} · ${getProfileWeight(profile) || "--"} kg`)}</strong>
+                <span>开始后自动计时，并根据身体数据计算卡路里</span>
+              </div>
+            </div>
+            <div class="workout-quick-connect">
+              <button class="mini-button" data-sync-health-device="apple-watch" type="button">Apple Watch</button>
+              <button class="mini-button" data-sync-health-device="xiaomi-watch" type="button">小米手表</button>
+              <button class="mini-button" data-sync-health-device="xiaomi-scale" type="button">小米智能秤</button>
+            </div>
+          </article>
+        `
+    }
   `;
 }
 
@@ -2881,7 +3077,7 @@ function renderCheckinFeature(profile) {
         `
         : ""
     }
-    ${state.workoutSession ? renderWorkoutSession(profile) : renderWorkoutLauncher(profile)}
+    ${renderWorkoutLauncher(profile)}
     <article class="detail-card">
       <div class="section-title-row">
         <div>
@@ -2901,6 +3097,7 @@ function renderHealthFeature(profile) {
   const bodyFat = profile.bodyFat || "--";
   const latestSource = profile.healthSource || "未连接设备";
   const latestSync = profile.deviceSyncedAt || "还没有同步";
+  const connectedSet = new Set(getConnectedDevices(profile));
 
   return `
     <article class="detail-card">
@@ -2952,30 +3149,42 @@ function renderHealthFeature(profile) {
       <div class="section-title-row">
         <div>
           <h3>外接设备</h3>
-          <p class="result-tip">先给你做了智能秤接入口，后续也能继续接 Apple Health、华为运动健康等。</p>
+          <p class="result-tip">这里支持模拟连接 Apple Watch、小米手表和智能秤，便于你正式测试设备联动。</p>
         </div>
       </div>
       <section class="device-list">
         <article class="device-row">
           <div>
+            <strong>Apple Watch</strong>
+            <p>同步运动时长、卡路里、心率与训练状态</p>
+          </div>
+          ${
+            connectedSet.has("Apple Watch")
+              ? '<span class="status-pill">已连接</span>'
+              : '<button class="mini-button mini-button--accent" data-sync-health-device="apple-watch" type="button">模拟连接</button>'
+          }
+        </article>
+        <article class="device-row">
+          <div>
+            <strong>小米手表</strong>
+            <p>同步日常活动、训练记录和基础身体数据</p>
+          </div>
+          ${
+            connectedSet.has("小米手表")
+              ? '<span class="status-pill">已连接</span>'
+              : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-watch" type="button">模拟连接</button>'
+          }
+        </article>
+        <article class="device-row">
+          <div>
             <strong>小米智能秤</strong>
             <p>同步体重、BMI、体脂率与最近一次测量时间</p>
           </div>
-          <button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-scale" type="button">模拟导入</button>
-        </article>
-        <article class="device-row">
-          <div>
-            <strong>Apple Health</strong>
-            <p>后续可同步步数、心率、能量消耗和运动记录</p>
-          </div>
-          <span class="status-pill">规划中</span>
-        </article>
-        <article class="device-row">
-          <div>
-            <strong>华为运动健康</strong>
-            <p>预留接口，适合后续接入更多国内设备生态</p>
-          </div>
-          <span class="status-pill">规划中</span>
+          ${
+            connectedSet.has("小米智能秤")
+              ? '<span class="status-pill">已连接</span>'
+              : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-scale" type="button">模拟连接</button>'
+          }
         </article>
       </section>
     </article>
@@ -3939,6 +4148,16 @@ appView.addEventListener("click", (event) => {
 
   if (target.dataset.saveCommonSports) {
     runTask(() => saveFavoriteSports());
+    return;
+  }
+
+  if (target.dataset.selectWorkoutSport) {
+    selectWorkoutSport(target.dataset.selectWorkoutSport);
+    return;
+  }
+
+  if (target.dataset.goWorkout) {
+    runTask(() => startWorkoutSession());
     return;
   }
 

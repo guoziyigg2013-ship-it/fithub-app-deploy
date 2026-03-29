@@ -284,6 +284,7 @@ def make_profile(**kwargs):
         "heightCm": kwargs.get("heightCm", None),
         "weightKg": kwargs.get("weightKg", None),
         "favoriteSports": kwargs.get("favoriteSports", []),
+        "connectedDevices": kwargs.get("connectedDevices", []),
         "healthSource": kwargs.get("healthSource", ""),
         "deviceSyncedAt": kwargs.get("deviceSyncedAt", ""),
         "bodyFat": kwargs.get("bodyFat", None),
@@ -1252,6 +1253,7 @@ def build_profile_payload(role, payload, existing_profile, session):
         "heightCm": height_cm,
         "weightKg": weight_kg,
         "favoriteSports": (existing_profile or {}).get("favoriteSports", []),
+        "connectedDevices": (existing_profile or {}).get("connectedDevices", []),
         "healthSource": (existing_profile or {}).get("healthSource", ""),
         "deviceSyncedAt": (existing_profile or {}).get("deviceSyncedAt", ""),
         "bodyFat": body_fat,
@@ -1419,19 +1421,9 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 if not profile or profile.get("role") != "enthusiast":
                     raise ValueError("只有健身爱好者身份支持设置常规运动项目。")
 
-                valid_ids = {item["id"] for item in (
-                    {"id": "run"},
-                    {"id": "strength"},
-                    {"id": "cycling"},
-                    {"id": "hiit"},
-                    {"id": "pilates"},
-                    {"id": "swim"},
-                    {"id": "yoga"},
-                    {"id": "basketball"},
-                )}
                 favorite_sports = []
                 for sport_id in payload.get("favoriteSports", []):
-                    if sport_id in valid_ids and sport_id not in favorite_sports:
+                    if isinstance(sport_id, str) and sport_id.strip() and sport_id not in favorite_sports:
                         favorite_sports.append(sport_id)
                 if not favorite_sports:
                     raise ValueError("请至少选择一个常规运动项目。")
@@ -1464,13 +1456,23 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     raise ValueError("请先完善性别、身高和体重，再同步健康设备。")
 
                 source = payload.get("source") or "device"
-                source_label = "小米智能秤" if source == "xiaomi-scale" else "智能设备"
+                source_label = {
+                    "apple-watch": "Apple Watch",
+                    "xiaomi-watch": "小米手表",
+                    "xiaomi-scale": "小米智能秤",
+                }.get(source, "智能设备")
                 bmi = calculate_bmi(height_cm, weight_kg)
                 body_fat = estimate_body_fat(gender, bmi)
 
+                connected_devices = list(profile.get("connectedDevices", []))
+                if source_label not in connected_devices:
+                    connected_devices.append(source_label)
+
+                profile["connectedDevices"] = connected_devices
                 profile["healthSource"] = source_label
                 profile["deviceSyncedAt"] = local_time_label()
-                profile["bodyFat"] = body_fat
+                if source == "xiaomi-scale":
+                    profile["bodyFat"] = body_fat
                 session["currentActorProfileId"] = profile_id
                 return bootstrap_response(state, session)
 
