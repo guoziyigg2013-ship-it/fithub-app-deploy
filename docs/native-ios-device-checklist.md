@@ -14,6 +14,8 @@
 - 工程目录：`/Users/guoziyi/Documents/gpt/fitness-app-prototype/native-ios`
 - 工程文件：`/Users/guoziyi/Documents/gpt/fitness-app-prototype/native-ios/FitHubNative.xcodeproj`
 - 正式网址：`https://fithub-app-1btg.onrender.com/`
+- 更细的 Xcode 真机步骤：
+  [native-ios-xcode-runbook.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-ios-xcode-runbook.md)
 
 ## 准备
 

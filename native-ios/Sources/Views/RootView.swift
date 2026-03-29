@@ -1,7 +1,9 @@
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     @EnvironmentObject private var store: AppStore
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -79,6 +81,14 @@ struct RootView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(store.isBusy)
             }
+
+            Button("打开系统设置") {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                openURL(url)
+            }
+            .buttonStyle(.borderless)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
         .padding(18)
         .background(.background)

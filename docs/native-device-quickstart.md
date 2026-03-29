@@ -62,6 +62,8 @@
 
 - iPhone 真机接入清单：
   [native-ios-device-checklist.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-ios-device-checklist.md)
+- iPhone Xcode 真机运行手册：
+  [native-ios-xcode-runbook.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-ios-xcode-runbook.md)
 - Android 真机接入清单：
   [native-android-device-checklist.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-android-device-checklist.md)
 - 原生健康同步接口说明：
