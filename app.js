@@ -885,6 +885,27 @@ const fabButton = document.getElementById("fabButton");
 const SESSION_STORAGE_KEY = "fithub_trial_session_id";
 const SNAPSHOT_STORAGE_KEY = "fithub_trial_snapshot_v2";
 const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
+const REGISTER_WHEEL_ITEM_HEIGHT = 52;
+const REGISTER_WHEEL_FIELDS = {
+  height_cm: {
+    label: "身高",
+    unit: "cm",
+    min: 140,
+    max: 220,
+    step: 1,
+    defaultValue: 170,
+    helper: "上下滑动选择你的身高"
+  },
+  weight_kg: {
+    label: "体重",
+    unit: "kg",
+    min: 35,
+    max: 160,
+    step: 0.5,
+    defaultValue: 60,
+    helper: "用于更准确估算训练消耗"
+  }
+};
 
 function detectUrlPrefix() {
   const path = window.location.pathname || "/";
@@ -918,6 +939,8 @@ const state = {
   registerRole: "enthusiast",
   registerSuccess: "",
   registerUploadDrafts: {},
+  registerFormDrafts: {},
+  registerWheelField: "",
   managedAccounts: [],
   authRole: "enthusiast",
   authPhone: "",
@@ -1600,6 +1623,8 @@ function openOverlay(mode) {
 function closeOverlay() {
   if (state.overlayMode === "register") {
     state.registerUploadDrafts = {};
+    state.registerFormDrafts = {};
+    state.registerWheelField = "";
   }
   state.overlayMode = null;
   state.registerSuccess = "";
@@ -1612,6 +1637,9 @@ function openRegister(role = state.selectedRole) {
   state.selectedRole = role;
   state.overlayReturnMode = null;
   state.registerUploadDrafts = {};
+  state.registerFormDrafts = {};
+  state.registerWheelField = "";
+  seedRegisterDraft(role);
   openOverlay("register");
 }
 
@@ -1857,6 +1885,29 @@ function getRegistrationSeed(role) {
   return getManagedProfiles().find((profile) => profile.role === role) || {};
 }
 
+function getRegisterWheelConfig(fieldName) {
+  return REGISTER_WHEEL_FIELDS[fieldName] || null;
+}
+
+function formatRegisterWheelNumber(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "";
+  if (Math.abs(numeric - Math.round(numeric)) < 0.001) return String(Math.round(numeric));
+  return numeric.toFixed(1).replace(/\.0$/, "");
+}
+
+function getRegisterDraft(role = state.registerRole) {
+  if (!state.registerFormDrafts[role]) {
+    state.registerFormDrafts[role] = {};
+  }
+  return state.registerFormDrafts[role];
+}
+
+function setRegisterDraftValue(role, fieldName, value) {
+  const draft = getRegisterDraft(role);
+  draft[fieldName] = value == null ? "" : String(value);
+}
+
 function getFieldDefault(field, seed) {
   if (field.name === "city") return seed.city || state.userPosition.city;
   if (field.name === "location") return seed.locationLabel || state.userPosition.label;
@@ -1876,8 +1927,180 @@ function getFieldDefault(field, seed) {
   return seed[field.name] || "";
 }
 
+function seedRegisterDraft(role = state.registerRole) {
+  const seed = getRegistrationSeed(role);
+  const draft = getRegisterDraft(role);
+
+  roleConfig[role].fields.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(draft, field.name) && draft[field.name] !== "") return;
+    let value = getFieldDefault(field, seed);
+    const wheelConfig = getRegisterWheelConfig(field.name);
+    if ((value === "" || value == null) && wheelConfig) {
+      value = wheelConfig.defaultValue;
+    }
+    draft[field.name] = value == null ? "" : String(value);
+  });
+
+  return draft;
+}
+
+function getRegisterFieldValue(field, seed, role = state.registerRole) {
+  const draft = getRegisterDraft(role);
+  if (Object.prototype.hasOwnProperty.call(draft, field.name)) {
+    return draft[field.name];
+  }
+  let value = getFieldDefault(field, seed);
+  const wheelConfig = getRegisterWheelConfig(field.name);
+  if ((value === "" || value == null) && wheelConfig) {
+    value = wheelConfig.defaultValue;
+  }
+  return value == null ? "" : String(value);
+}
+
+function getRegisterWheelOptions(fieldName) {
+  const config = getRegisterWheelConfig(fieldName);
+  if (!config) return [];
+
+  const options = [];
+  const precision = config.step < 1 ? 10 : 1;
+  for (let current = config.min * precision; current <= config.max * precision; current += config.step * precision) {
+    options.push(formatRegisterWheelNumber(current / precision));
+  }
+  return options;
+}
+
+function getRegisterWheelValue(fieldName) {
+  const config = getRegisterWheelConfig(fieldName);
+  const value = getRegisterFieldValue({ name: fieldName }, getRegistrationSeed(state.registerRole));
+  if (value !== "") return String(value);
+  return config ? formatRegisterWheelNumber(config.defaultValue) : "";
+}
+
+function formatRegisterWheelDisplay(fieldName, value) {
+  const config = getRegisterWheelConfig(fieldName);
+  if (!config || value === "" || value == null) return "未设置";
+  return `${formatRegisterWheelNumber(value)} ${config.unit}`;
+}
+
+function syncRegisterWheelDom(fieldName) {
+  const selectedValue = getRegisterWheelValue(fieldName);
+  overlay
+    .querySelectorAll(`[data-register-wheel-option="${fieldName}"]`)
+    .forEach((option) => {
+      const active = option.dataset.wheelValue === selectedValue;
+      option.classList.toggle("is-active", active);
+      option.setAttribute("aria-selected", active ? "true" : "false");
+    });
+
+  const summary = overlay.querySelector("[data-register-wheel-value]");
+  if (summary) {
+    summary.textContent = formatRegisterWheelDisplay(fieldName, selectedValue);
+  }
+
+  const hiddenInput = overlay.querySelector(`input[name="${fieldName}"]`);
+  if (hiddenInput) {
+    hiddenInput.value = selectedValue;
+  }
+}
+
+function scrollRegisterWheelToValue(fieldName, behavior = "smooth") {
+  const list = overlay.querySelector(`[data-register-wheel-list="${fieldName}"]`);
+  if (!list) return;
+  const optionNodes = Array.from(list.querySelectorAll(`[data-register-wheel-option="${fieldName}"]`));
+  const selectedValue = getRegisterWheelValue(fieldName);
+  const index = optionNodes.findIndex((option) => option.dataset.wheelValue === selectedValue);
+  if (index === -1) return;
+  list.scrollTo({ top: index * REGISTER_WHEEL_ITEM_HEIGHT, behavior });
+}
+
+function initializeRegisterWheelPicker() {
+  const fieldName = state.registerWheelField;
+  if (!fieldName) return;
+
+  const list = overlay.querySelector(`[data-register-wheel-list="${fieldName}"]`);
+  if (!list || list.dataset.ready === "1") {
+    syncRegisterWheelDom(fieldName);
+    return;
+  }
+
+  list.dataset.ready = "1";
+  syncRegisterWheelDom(fieldName);
+
+  requestAnimationFrame(() => {
+    scrollRegisterWheelToValue(fieldName, "auto");
+  });
+
+  let frame = 0;
+  list.addEventListener(
+    "scroll",
+    () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const optionNodes = Array.from(list.querySelectorAll(`[data-register-wheel-option="${fieldName}"]`));
+        if (!optionNodes.length) return;
+        const index = Math.max(0, Math.min(optionNodes.length - 1, Math.round(list.scrollTop / REGISTER_WHEEL_ITEM_HEIGHT)));
+        const value = optionNodes[index].dataset.wheelValue;
+        setRegisterDraftValue(state.registerRole, fieldName, value);
+        syncRegisterWheelDom(fieldName);
+      });
+    },
+    { passive: true }
+  );
+}
+
+function renderRegisterWheelSheet() {
+  const fieldName = state.registerWheelField;
+  const config = getRegisterWheelConfig(fieldName);
+  if (!config) return "";
+
+  const options = getRegisterWheelOptions(fieldName);
+  const selectedValue = getRegisterWheelValue(fieldName);
+
+  return `
+    <div class="register-wheel-sheet">
+      <button class="register-wheel-backdrop" data-close-register-wheel="1" type="button" aria-label="关闭选择器"></button>
+      <div class="register-wheel-card">
+        <div class="sport-picker-handle"></div>
+        <div class="register-wheel-head">
+          <div>
+            <p class="page-label">滚轮选择</p>
+            <h3>${config.label}</h3>
+          </div>
+          <button class="mini-button mini-button--accent" data-confirm-register-wheel="1" type="button">完成</button>
+        </div>
+        <div class="register-wheel-summary">
+          <strong data-register-wheel-value="1">${escapeHtml(formatRegisterWheelDisplay(fieldName, selectedValue))}</strong>
+          <span>${escapeHtml(config.helper)}</span>
+        </div>
+        <div class="register-wheel-frame">
+          <div class="register-wheel-highlight" aria-hidden="true"></div>
+          <div class="register-wheel-list" data-register-wheel-list="${fieldName}" role="listbox" aria-label="${escapeHtml(config.label)}选择">
+            ${options
+              .map(
+                (option) => `
+                  <button
+                    class="register-wheel-option ${option === selectedValue ? "is-active" : ""}"
+                    data-register-wheel-option="${fieldName}"
+                    data-wheel-value="${escapeHtml(option)}"
+                    type="button"
+                    role="option"
+                    aria-selected="${option === selectedValue ? "true" : "false"}"
+                  >
+                    <span>${escapeHtml(option)}</span>
+                    <small>${escapeHtml(config.unit)}</small>
+                  </button>
+                `
+              )
+              .join("")}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderField(field, seed) {
-  const value = getFieldDefault(field, seed);
+  const value = getRegisterFieldValue(field, seed);
 
   if (field.type === "textarea") {
     return `
@@ -1941,6 +2164,23 @@ function renderField(field, seed) {
           }
         </label>
       </div>
+    `;
+  }
+
+  if (getRegisterWheelConfig(field.name)) {
+    const wheelConfig = getRegisterWheelConfig(field.name);
+    return `
+      <label class="form-field form-field--wheel">
+        <span>${field.label}${field.required ? " *" : ""}</span>
+        <button class="wheel-trigger" data-open-register-wheel="${field.name}" type="button">
+          <div class="wheel-trigger-copy">
+            <strong>${escapeHtml(formatRegisterWheelDisplay(field.name, value))}</strong>
+            <small>${escapeHtml(wheelConfig.helper)}</small>
+          </div>
+          <span class="wheel-trigger-mark">${escapeHtml(wheelConfig.unit)}</span>
+        </button>
+        <input name="${field.name}" type="hidden" value="${escapeHtml(value)}">
+      </label>
     `;
   }
 
@@ -4084,6 +4324,7 @@ function renderCityOverlay() {
 function renderRegisterOverlay() {
   const role = roleConfig[state.registerRole];
   const seed = getRegistrationSeed(state.registerRole);
+  seedRegisterDraft(state.registerRole);
 
   return `
     <div class="overlay-backdrop" data-close-overlay="1"></div>
@@ -4126,6 +4367,7 @@ function renderRegisterOverlay() {
         <button class="text-link" data-open-auth="${escapeHtml(state.registerRole)}" type="button">已有账号？去登录</button>
       </form>
     </div>
+    ${renderRegisterWheelSheet()}
   `;
 }
 
@@ -4344,6 +4586,9 @@ function renderOverlay() {
   if (state.overlayMode === "chat") overlay.innerHTML = renderChatOverlay();
   if (state.overlayMode === "following") overlay.innerHTML = renderFollowingOverlay();
   hydrateAsyncImages(overlay);
+  if (state.overlayMode === "register" && state.registerWheelField) {
+    initializeRegisterWheelPicker();
+  }
 }
 
 function renderPage() {
@@ -4619,7 +4864,29 @@ overlay.addEventListener("click", (event) => {
 
   if (target.dataset.registerRole) {
     state.registerRole = target.dataset.registerRole;
+    seedRegisterDraft(state.registerRole);
+    state.registerWheelField = "";
     renderOverlay();
+    return;
+  }
+
+  if (target.dataset.openRegisterWheel) {
+    seedRegisterDraft(state.registerRole);
+    state.registerWheelField = target.dataset.openRegisterWheel;
+    renderOverlay();
+    return;
+  }
+
+  if (target.dataset.closeRegisterWheel || target.dataset.confirmRegisterWheel) {
+    state.registerWheelField = "";
+    renderOverlay();
+    return;
+  }
+
+  if (target.dataset.registerWheelOption) {
+    setRegisterDraftValue(state.registerRole, target.dataset.registerWheelOption, target.dataset.wheelValue || "");
+    syncRegisterWheelDom(target.dataset.registerWheelOption);
+    scrollRegisterWheelToValue(target.dataset.registerWheelOption, "smooth");
     return;
   }
 
@@ -4678,6 +4945,10 @@ overlay.addEventListener("input", (event) => {
     state.cityInput = event.target.value;
   }
 
+  if (event.target.form?.id === "registerForm" && event.target.name && event.target.type !== "file") {
+    setRegisterDraftValue(state.registerRole, event.target.name, event.target.value);
+  }
+
   if (event.target.dataset.authPhone) {
     const nextPhone = event.target.value;
     if (normalizePhone(nextPhone) !== normalizePhone(state.authPhone)) {
@@ -4704,6 +4975,10 @@ overlay.addEventListener("change", (event) => {
       renderOverlay();
     });
     return;
+  }
+
+  if (event.target.form?.id === "registerForm" && event.target.name && event.target.type !== "file") {
+    setRegisterDraftValue(state.registerRole, event.target.name, event.target.value);
   }
 
   if (event.target.type === "file" && event.target.name) {
