@@ -236,6 +236,11 @@ def parse_optional_int(value):
         return None
 
 
+def normalize_phone(value):
+    raw = "".join(ch for ch in str(value or "") if ch.isdigit())
+    return raw
+
+
 def calculate_bmi(height_cm, weight_kg):
     if not height_cm or not weight_kg:
         return None
@@ -255,6 +260,18 @@ def estimate_body_fat(gender, bmi):
     else:
         estimate = bmi * 1.12 - 8.8
     return round(max(8.0, min(42.0, estimate)), 1)
+
+
+def find_profile_by_role_phone(state, role, phone):
+    phone_key = normalize_phone(phone)
+    if not phone_key:
+        return None
+    for profile in state.get("profiles", {}).values():
+        if profile.get("role") != role:
+            continue
+        if normalize_phone(profile.get("phone")) == phone_key:
+            return profile
+    return None
 
 
 def make_profile(**kwargs):
@@ -954,6 +971,14 @@ def create_session_record():
     }
 
 
+def attach_profile_to_session(session, profile):
+    profile_id = profile["id"]
+    if profile_id not in session["managedProfileIds"]:
+        session["managedProfileIds"].append(profile_id)
+    session["selectedRole"] = profile["role"]
+    session["currentActorProfileId"] = profile_id
+
+
 def ensure_session(state, session_id=None):
     sessions = state.setdefault("sessions", {})
     if session_id and session_id in sessions:
@@ -1156,7 +1181,7 @@ def build_profile_payload(role, payload, existing_profile, session):
         return {
             **(existing_profile or {}),
             "id": (existing_profile or {}).get("id", f"gym-{uuid.uuid4().hex[:8]}"),
-            "owner_session_id": session["id"],
+            "owner_session_id": (existing_profile or {}).get("owner_session_id") or session["id"],
             "role": role,
             "name": name,
             "handle": (existing_profile or {}).get("handle", f"@gym.{uuid.uuid4().hex[:4]}"),
@@ -1190,7 +1215,7 @@ def build_profile_payload(role, payload, existing_profile, session):
         return {
             **(existing_profile or {}),
             "id": (existing_profile or {}).get("id", f"coach-{uuid.uuid4().hex[:8]}"),
-            "owner_session_id": session["id"],
+            "owner_session_id": (existing_profile or {}).get("owner_session_id") or session["id"],
             "role": role,
             "name": name,
             "handle": (existing_profile or {}).get("handle", f"@coach.{uuid.uuid4().hex[:4]}"),
@@ -1205,6 +1230,7 @@ def build_profile_payload(role, payload, existing_profile, session):
             "price": payload.get("price") or (existing_profile or {}).get("price") or "¥220/小时",
             "tags": tags,
             "years": str(payload.get("years", "")),
+            "phone": payload.get("phone") or (existing_profile or {}).get("phone", ""),
             "certifications": certifications,
             "pricingPlans": payload.get("pricingPlans") or (existing_profile or {}).get("pricingPlans") or [
                 {"title": "私教课程", "detail": "一对一训练服务", "price": payload.get("price") or "¥220/小时"}
@@ -1233,7 +1259,7 @@ def build_profile_payload(role, payload, existing_profile, session):
     return {
         **(existing_profile or {}),
         "id": (existing_profile or {}).get("id", f"enthusiast-{uuid.uuid4().hex[:8]}"),
-        "owner_session_id": session["id"],
+        "owner_session_id": (existing_profile or {}).get("owner_session_id") or session["id"],
         "role": role,
         "name": name,
         "handle": (existing_profile or {}).get("handle", f"@user.{uuid.uuid4().hex[:4]}"),
@@ -1249,6 +1275,7 @@ def build_profile_payload(role, payload, existing_profile, session):
         "tags": [level, city, "训练日记"],
         "level": level,
         "goal": goal,
+        "phone": payload.get("phone") or (existing_profile or {}).get("phone", ""),
         "gender": gender,
         "heightCm": height_cm,
         "weightKg": weight_kg,
@@ -1361,6 +1388,70 @@ class FitHubHandler(BaseHTTPRequestHandler):
         payload = self._read_json()
         session_id = payload.get("sessionId")
 
+        if parsed.path == f"{API_PREFIX}/auth/login":
+            def action(state):
+                session = ensure_session(state, session_id)
+                role = str(payload.get("role") or "").strip()
+                phone = payload.get("phone")
+                if role not in {"enthusiast", "gym", "coach"}:
+                    raise ValueError("请选择要登录的身份。")
+
+                profile = find_profile_by_role_phone(state, role, phone)
+                if not profile:
+                    raise ValueError("没有找到这个身份，请先注册后再登录。")
+
+                attach_profile_to_session(session, profile)
+                return bootstrap_response(state, session)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/auth/restore":
+            def action(state):
+                session = ensure_session(state, session_id)
+                restored_profiles = []
+
+                for account in payload.get("accounts", []):
+                    role = str((account or {}).get("role") or "").strip()
+                    phone = (account or {}).get("phone")
+                    if role not in {"enthusiast", "gym", "coach"}:
+                        continue
+                    profile = find_profile_by_role_phone(state, role, phone)
+                    if not profile:
+                        continue
+                    if profile["id"] not in {item["id"] for item in restored_profiles}:
+                        restored_profiles.append(profile)
+                    if profile["id"] not in session["managedProfileIds"]:
+                        session["managedProfileIds"].append(profile["id"])
+
+                selected_role = str(payload.get("selectedRole") or session["selectedRole"]).strip()
+                if selected_role in {"enthusiast", "gym", "coach"}:
+                    session["selectedRole"] = selected_role
+
+                requested_profile_id = payload.get("currentActorProfileId")
+                if requested_profile_id in session["managedProfileIds"]:
+                    session["currentActorProfileId"] = requested_profile_id
+                else:
+                    session["currentActorProfileId"] = None
+                    for profile_id in session["managedProfileIds"]:
+                        profile = state["profiles"].get(profile_id)
+                        if profile and profile["role"] == session["selectedRole"]:
+                            session["currentActorProfileId"] = profile_id
+                            break
+                    if not session["currentActorProfileId"] and session["managedProfileIds"]:
+                        session["currentActorProfileId"] = session["managedProfileIds"][0]
+                        first_profile = state["profiles"].get(session["currentActorProfileId"])
+                        if first_profile:
+                            session["selectedRole"] = first_profile["role"]
+
+                return bootstrap_response(state, session)
+
+            self._write_json(self._with_state(action))
+            return
+
         if parsed.path == f"{API_PREFIX}/session/select":
             def action(state):
                 session = ensure_session(state, session_id)
@@ -1397,12 +1488,11 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     if profile and profile["role"] == role:
                         existing_profile = profile
                         break
+                if not existing_profile:
+                    existing_profile = find_profile_by_role_phone(state, role, payload.get("profile", {}).get("phone"))
                 profile_data = build_profile_payload(role, payload["profile"], existing_profile, session)
                 state["profiles"][profile_data["id"]] = profile_data
-                if not existing_profile:
-                    session["managedProfileIds"].append(profile_data["id"])
-                session["selectedRole"] = role
-                session["currentActorProfileId"] = profile_data["id"]
+                attach_profile_to_session(session, profile_data)
                 return bootstrap_response(state, session)
             try:
                 self._write_json(self._with_state(action))

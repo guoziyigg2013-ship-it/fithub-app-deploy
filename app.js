@@ -854,6 +854,7 @@ const navLinks = document.querySelectorAll(".nav-link[data-page]");
 const fabButton = document.getElementById("fabButton");
 const SESSION_STORAGE_KEY = "fithub_trial_session_id";
 const SNAPSHOT_STORAGE_KEY = "fithub_trial_snapshot_v2";
+const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
 
 function detectUrlPrefix() {
   const path = window.location.pathname || "/";
@@ -887,6 +888,9 @@ const state = {
   registerRole: "enthusiast",
   registerSuccess: "",
   registerUploadDrafts: {},
+  authRole: "enthusiast",
+  authPhone: "",
+  authMessage: "",
   cityInput: "",
   profiles: createInitialProfiles(),
   managedProfileIds: [],
@@ -925,6 +929,7 @@ const profileSwipe = {
 };
 
 let refreshPromise = null;
+let restorePromise = null;
 let lastSuccessfulSyncAt = 0;
 
 function escapeHtml(value = "") {
@@ -993,6 +998,75 @@ function storeSnapshot(payload) {
   }
 }
 
+function normalizePhone(value = "") {
+  return String(value).replace(/\D+/g, "");
+}
+
+function getStoredAccounts() {
+  try {
+    const raw = window.localStorage.getItem(ACCOUNT_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => ({
+        role: item?.role,
+        phone: normalizePhone(item?.phone)
+      }))
+      .filter((item) => roleConfig[item.role] && item.phone);
+  } catch (_error) {
+    return [];
+  }
+}
+
+function storeAccounts(accounts) {
+  try {
+    window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify(accounts));
+  } catch (_error) {
+    // Ignore storage quota failures.
+  }
+}
+
+function rememberAccount(role, phone) {
+  const normalizedPhone = normalizePhone(phone);
+  if (!roleConfig[role] || !normalizedPhone) return;
+  const nextAccounts = getStoredAccounts().filter(
+    (item) => !(item.role === role && item.phone === normalizedPhone)
+  );
+  nextAccounts.unshift({ role, phone: normalizedPhone });
+  storeAccounts(nextAccounts.slice(0, 8));
+}
+
+async function maybeRestoreRememberedAccounts() {
+  if (state.managedProfileIds.length) return false;
+  const accounts = getStoredAccounts();
+  if (!accounts.length) return false;
+  if (restorePromise) return restorePromise;
+
+  restorePromise = apiRequest(`${API_BASE}/auth/restore`, {
+    method: "POST",
+    body: {
+      sessionId: state.sessionId || getStoredSessionId(),
+      accounts,
+      selectedRole: state.selectedRole,
+      currentActorProfileId: state.currentActorProfileId
+    }
+  })
+    .then((payload) => {
+      if (payload?.session?.managedProfileIds?.length) {
+        syncStateFromServer(payload, { keepOverlay: true });
+        state.locationStatus = "已恢复这个设备保存的账户记录。";
+        return true;
+      }
+      return false;
+    })
+    .catch(() => false)
+    .finally(() => {
+      restorePromise = null;
+    });
+
+  return restorePromise;
+}
+
 async function apiRequest(path, { method = "GET", body } = {}) {
   const response = await fetch(path, {
     method,
@@ -1049,8 +1123,9 @@ async function refreshSharedState({ keepOverlay = false } = {}) {
   const query = state.sessionId || getStoredSessionId();
   const suffix = query ? `?session_id=${encodeURIComponent(query)}` : "";
   refreshPromise = apiRequest(`${API_BASE}/bootstrap${suffix}`)
-    .then((payload) => {
+    .then(async (payload) => {
       syncStateFromServer(payload, { keepOverlay });
+      await maybeRestoreRememberedAccounts();
       state.isBootstrapping = false;
       lastSuccessfulSyncAt = Date.now();
       renderPage();
@@ -1439,6 +1514,7 @@ function closeOverlay() {
   }
   state.overlayMode = null;
   state.registerSuccess = "";
+  state.authMessage = "";
   renderOverlay();
 }
 
@@ -1448,6 +1524,14 @@ function openRegister(role = state.selectedRole) {
   state.overlayReturnMode = null;
   state.registerUploadDrafts = {};
   openOverlay("register");
+}
+
+function openAuth(role = state.selectedRole) {
+  const remembered = getStoredAccounts().find((item) => item.role === role);
+  state.authRole = role;
+  state.authPhone = remembered?.phone || "";
+  state.authMessage = "";
+  openOverlay("auth");
 }
 
 function openMyPage() {
@@ -1926,6 +2010,7 @@ async function upsertManagedProfile(role, formData) {
     role,
     profile: profilePayload
   });
+  rememberAccount(role, profilePayload.phone);
   state.activeProfileId = state.currentActorProfileId;
   state.composeProfileId = state.currentActorProfileId;
   state.selectedRole = role;
@@ -1933,6 +2018,32 @@ async function upsertManagedProfile(role, formData) {
   state.locationStatus = `${getRoleLabel(role)}注册成功，现在这个设备会记住你的身份，并和其他测试用户共享互动数据。`;
   syncNavActive();
   closeOverlay();
+  renderPage();
+}
+
+async function submitAuthLogin() {
+  const role = state.authRole;
+  const phone = normalizePhone(state.authPhone);
+  if (!roleConfig[role]) {
+    throw new Error("请先选择要登录的身份。");
+  }
+  if (!phone) {
+    throw new Error("请输入注册时填写的手机号。");
+  }
+
+  await postAndSync(`${API_BASE}/auth/login`, {
+    role,
+    phone
+  }, { keepOverlay: true });
+
+  rememberAccount(role, phone);
+  state.selectedRole = role;
+  state.activePage = "home";
+  state.activeProfileId = state.currentActorProfileId;
+  state.composeProfileId = state.currentActorProfileId;
+  state.locationStatus = `${getRoleLabel(role)}登录成功，这个设备会继续记住你的账号。`;
+  closeOverlay();
+  syncNavActive();
   renderPage();
 }
 
@@ -3646,6 +3757,12 @@ function renderProfile() {
   appView.innerHTML = renderProfilePage(profile);
 }
 
+function maskPhone(phone = "") {
+  const normalized = normalizePhone(phone);
+  if (normalized.length < 7) return normalized || "未保存手机号";
+  return `${normalized.slice(0, 3)}****${normalized.slice(-4)}`;
+}
+
 function renderWelcomeOverlay() {
   return `
     <div class="overlay-backdrop" data-close-overlay="1"></div>
@@ -3672,7 +3789,79 @@ function renderWelcomeOverlay() {
       </div>
       <div class="action-row">
         <button class="mini-button" data-close-overlay="1" type="button">先看看</button>
+        <button class="mini-button mini-button--accent" data-open-auth="${escapeHtml(state.selectedRole)}" type="button">登录已有账户</button>
       </div>
+    </div>
+  `;
+}
+
+function renderAuthOverlay() {
+  const storedAccounts = getStoredAccounts();
+
+  return `
+    <div class="overlay-backdrop" data-close-overlay="1"></div>
+    <div class="overlay-panel overlay-panel--register">
+      <div class="overlay-head">
+        <div>
+          <p class="page-label">账户登录</p>
+          <h2>找回这个设备上的账号</h2>
+          <p>输入注册时的身份和手机号，或者直接点下面已记住的账号，就能继续使用原来的主页、动态和预约记录。</p>
+        </div>
+        <button class="close-button" data-close-overlay="1" type="button">×</button>
+      </div>
+
+      <div class="role-selector">
+        ${Object.entries(roleConfig)
+          .map(
+            ([key, config]) => `
+              <button class="role-option ${key === state.authRole ? "is-active" : ""}" data-auth-role="${key}" type="button">
+                <strong>${config.label}</strong>
+                <span>${config.short}</span>
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+
+      ${
+        storedAccounts.length
+          ? `
+            <div class="helper-inline">
+              <span>这个设备已记住 ${storedAccounts.length} 个账号</span>
+            </div>
+            <div class="managed-strip">
+              ${storedAccounts
+                .map(
+                  (account) => `
+                    <button
+                      class="managed-chip ${account.role === state.authRole && account.phone === normalizePhone(state.authPhone) ? "is-active" : ""}"
+                      data-quick-login-role="${account.role}"
+                      data-quick-login-phone="${account.phone}"
+                      type="button"
+                    >
+                      ${escapeHtml(roleConfig[account.role].label)} · ${escapeHtml(maskPhone(account.phone))}
+                    </button>
+                  `
+                )
+                .join("")}
+            </div>
+          `
+          : ""
+      }
+
+      <form class="register-form" id="authForm">
+        <label class="form-field">
+          <span>手机号 *</span>
+          <input data-auth-phone="1" name="phone" type="tel" value="${escapeHtml(state.authPhone)}" placeholder="请输入注册时填写的手机号" required>
+        </label>
+        <button class="primary-submit" type="submit">登录这个身份</button>
+        ${
+          state.authMessage
+            ? `<p class="helper-note">${escapeHtml(state.authMessage)}</p>`
+            : '<p class="helper-note">如果你已经在这个设备注册过，关闭网页后再次打开也能从这里找回。</p>'
+        }
+        <button class="text-link" data-open-register-from-auth="${escapeHtml(state.authRole)}" type="button">还没有账号？去注册</button>
+      </form>
     </div>
   `;
 }
@@ -3755,6 +3944,7 @@ function renderRegisterOverlay() {
             ? `<p class="success-note">${escapeHtml(state.registerSuccess)}</p>`
             : '<p class="helper-note">演示版会直接生成主页；正式版可接入验证码、地图选点、图片上传和审核流。</p>'
         }
+        <button class="text-link" data-open-auth="${escapeHtml(state.registerRole)}" type="button">已有账号？去登录</button>
       </form>
     </div>
   `;
@@ -3968,6 +4158,7 @@ function renderOverlay() {
   overlay.hidden = false;
 
   if (state.overlayMode === "welcome") overlay.innerHTML = renderWelcomeOverlay();
+  if (state.overlayMode === "auth") overlay.innerHTML = renderAuthOverlay();
   if (state.overlayMode === "city") overlay.innerHTML = renderCityOverlay();
   if (state.overlayMode === "register") overlay.innerHTML = renderRegisterOverlay();
   if (state.overlayMode === "compose") overlay.innerHTML = renderComposeOverlay();
@@ -4237,8 +4428,31 @@ overlay.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.dataset.openAuth) {
+    openAuth(target.dataset.openAuth);
+    return;
+  }
+
+  if (target.dataset.openRegisterFromAuth) {
+    openRegister(target.dataset.openRegisterFromAuth);
+    return;
+  }
+
   if (target.dataset.registerRole) {
     state.registerRole = target.dataset.registerRole;
+    renderOverlay();
+    return;
+  }
+
+  if (target.dataset.authRole) {
+    state.authRole = target.dataset.authRole;
+    renderOverlay();
+    return;
+  }
+
+  if (target.dataset.quickLoginRole && target.dataset.quickLoginPhone) {
+    state.authRole = target.dataset.quickLoginRole;
+    state.authPhone = target.dataset.quickLoginPhone;
     renderOverlay();
     return;
   }
@@ -4272,6 +4486,10 @@ overlay.addEventListener("click", (event) => {
 overlay.addEventListener("input", (event) => {
   if (event.target.dataset.cityInput) {
     state.cityInput = event.target.value;
+  }
+
+  if (event.target.dataset.authPhone) {
+    state.authPhone = event.target.value;
   }
 
   if (event.target.dataset.composeContent) {
@@ -4313,6 +4531,12 @@ overlay.addEventListener("change", (event) => {
 });
 
 overlay.addEventListener("submit", (event) => {
+  if (event.target.id === "authForm") {
+    event.preventDefault();
+    runTask(() => submitAuthLogin());
+    return;
+  }
+
   if (event.target.id === "registerForm") {
     event.preventDefault();
     const formData = new FormData(event.target);
