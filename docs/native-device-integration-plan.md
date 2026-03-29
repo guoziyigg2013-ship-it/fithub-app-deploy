@@ -35,9 +35,12 @@ Apple Watch 的训练数据最终会回流到 iPhone 的 `Apple Health`，
 - 支持导入身体指标
 - 支持导入训练记录并去重
 - 新建 iOS SwiftUI + HealthKit 骨架
+- 新建 Android Compose + Health Connect 骨架
+- 预留 Xiaomi 接入 provider
 
 ## 下一步
 
 - 真正生成 Xcode 工程并在 iPhone 上跑通授权
 - 增加 Apple 登录 / 短信登录
-- 评估 Android 原生项目和 Xiaomi 路线
+- 在 Android Studio 跑通 Health Connect 权限与同步
+- 根据小米合作权限决定走 Health Connect 还是小米健康云
