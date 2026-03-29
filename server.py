@@ -277,6 +277,7 @@ def find_profile_by_role_phone(state, role, phone):
 def make_profile(**kwargs):
     profile = {
         "id": kwargs["id"],
+        "accountId": kwargs.get("accountId", ""),
         "owner_session_id": kwargs.get("owner_session_id"),
         "role": kwargs["role"],
         "name": kwargs["name"],
@@ -329,6 +330,91 @@ def merge_records_by_id(seed_items, existing_items):
         elif item_id:
             merged[item_id] = deepcopy(item)
     return list(merged.values())
+
+
+def ensure_account_registry(state):
+    return state.setdefault("accounts", {})
+
+
+def create_account_record(phone=""):
+    return {
+        "id": f"acct-{uuid.uuid4().hex[:10]}",
+        "restoreToken": f"restore-{uuid.uuid4().hex}",
+        "phone": normalize_phone(phone),
+        "profilesByRole": {},
+        "createdAt": iso_at(),
+    }
+
+
+def find_account_by_token(state, account_id, restore_token):
+    if not account_id or not restore_token:
+        return None
+    account = ensure_account_registry(state).get(account_id)
+    if account and account.get("restoreToken") == restore_token:
+        return account
+    return None
+
+
+def ensure_profile_account(state, profile, phone=""):
+    accounts = ensure_account_registry(state)
+    account_id = profile.get("accountId")
+    account = accounts.get(account_id) if account_id else None
+    if not account:
+        account = create_account_record(phone or profile.get("phone"))
+        accounts[account["id"]] = account
+        profile["accountId"] = account["id"]
+
+    normalized_phone = normalize_phone(phone or account.get("phone") or profile.get("phone"))
+    if normalized_phone:
+        account["phone"] = normalized_phone
+
+    account.setdefault("profilesByRole", {})[profile["role"]] = profile["id"]
+    profile["accountId"] = account["id"]
+    return account
+
+
+def attach_account_to_session(state, session, account, preferred_role=""):
+    role_profiles = account.get("profilesByRole", {})
+    for profile_id in role_profiles.values():
+        if profile_id in state.get("profiles", {}) and profile_id not in session["managedProfileIds"]:
+            session["managedProfileIds"].append(profile_id)
+
+    desired_role = preferred_role if preferred_role in role_profiles else next(iter(role_profiles.keys()), "")
+    desired_profile_id = role_profiles.get(desired_role)
+    if not desired_profile_id:
+        desired_profile_id = next(iter(role_profiles.values()), None)
+        if desired_profile_id:
+            desired_profile = state["profiles"].get(desired_profile_id)
+            desired_role = desired_profile["role"] if desired_profile else desired_role
+
+    if desired_role:
+        session["selectedRole"] = desired_role
+    if desired_profile_id:
+        session["currentActorProfileId"] = desired_profile_id
+
+
+def serialize_managed_accounts(state, session):
+    items = []
+    seen = set()
+
+    for profile_id in session.get("managedProfileIds", []):
+        profile = state.get("profiles", {}).get(profile_id)
+        if not profile:
+            continue
+        account = ensure_profile_account(state, profile)
+        if account["id"] in seen:
+            continue
+        seen.add(account["id"])
+        items.append(
+            {
+                "id": account["id"],
+                "restoreToken": account["restoreToken"],
+                "phone": account.get("phone", ""),
+                "roles": sorted(account.get("profilesByRole", {}).keys()),
+            }
+        )
+
+    return items
 
 
 def cleanup_formal_test_state(state):
@@ -934,6 +1020,7 @@ def initial_state():
         "follows": follows,
         "bookings": bookings,
         "threads": threads,
+        "accounts": {},
         "sessions": {},
     }
 
@@ -1155,6 +1242,7 @@ def bootstrap_response(state, session):
             "id": session["id"],
             "selectedRole": session["selectedRole"],
             "managedProfileIds": session["managedProfileIds"],
+            "managedAccounts": serialize_managed_accounts(state, session),
             "currentActorProfileId": current_actor_profile_id,
             "userPosition": session["userPosition"],
             "locationStatus": session["locationStatus"],
@@ -1392,15 +1480,23 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 session = ensure_session(state, session_id)
                 role = str(payload.get("role") or "").strip()
-                phone = payload.get("phone")
+                account = find_account_by_token(state, payload.get("accountId"), payload.get("restoreToken"))
+                profile = None
+
+                if account:
+                    preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
+                    attach_account_to_session(state, session, account, preferred_role)
+                    return bootstrap_response(state, session)
+
                 if role not in {"enthusiast", "gym", "coach"}:
                     raise ValueError("请选择要登录的身份。")
 
-                profile = find_profile_by_role_phone(state, role, phone)
+                profile = find_profile_by_role_phone(state, role, payload.get("phone"))
                 if not profile:
                     raise ValueError("没有找到这个身份，请先注册后再登录。")
 
-                attach_profile_to_session(session, profile)
+                account = ensure_profile_account(state, profile, payload.get("phone"))
+                attach_account_to_session(state, session, account, role)
                 return bootstrap_response(state, session)
 
             try:
@@ -1412,20 +1508,22 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/auth/restore":
             def action(state):
                 session = ensure_session(state, session_id)
-                restored_profiles = []
-
                 for account in payload.get("accounts", []):
-                    role = str((account or {}).get("role") or "").strip()
-                    phone = (account or {}).get("phone")
+                    item = account or {}
+                    matched_account = find_account_by_token(state, item.get("accountId") or item.get("id"), item.get("restoreToken"))
+                    if matched_account:
+                        attach_account_to_session(state, session, matched_account, str(item.get("role") or "").strip())
+                        continue
+
+                    role = str(item.get("role") or "").strip()
+                    phone = item.get("phone")
                     if role not in {"enthusiast", "gym", "coach"}:
                         continue
                     profile = find_profile_by_role_phone(state, role, phone)
                     if not profile:
                         continue
-                    if profile["id"] not in {item["id"] for item in restored_profiles}:
-                        restored_profiles.append(profile)
-                    if profile["id"] not in session["managedProfileIds"]:
-                        session["managedProfileIds"].append(profile["id"])
+                    matched_account = ensure_profile_account(state, profile, phone)
+                    attach_account_to_session(state, session, matched_account, role)
 
                 selected_role = str(payload.get("selectedRole") or session["selectedRole"]).strip()
                 if selected_role in {"enthusiast", "gym", "coach"}:
@@ -1490,9 +1588,26 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         break
                 if not existing_profile:
                     existing_profile = find_profile_by_role_phone(state, role, payload.get("profile", {}).get("phone"))
+                account = None
+                account_payload = payload.get("account") or {}
+                account = find_account_by_token(state, account_payload.get("accountId") or account_payload.get("id"), account_payload.get("restoreToken"))
+                if not account:
+                    for profile_id in session["managedProfileIds"]:
+                        managed_profile = state["profiles"].get(profile_id)
+                        if not managed_profile:
+                            continue
+                        account = ensure_profile_account(state, managed_profile)
+                        break
+                if not account and existing_profile:
+                    account = ensure_profile_account(state, existing_profile, payload.get("profile", {}).get("phone"))
+                if not account:
+                    account = create_account_record(payload.get("profile", {}).get("phone"))
+                    ensure_account_registry(state)[account["id"]] = account
                 profile_data = build_profile_payload(role, payload["profile"], existing_profile, session)
+                profile_data["accountId"] = account["id"]
                 state["profiles"][profile_data["id"]] = profile_data
-                attach_profile_to_session(session, profile_data)
+                ensure_profile_account(state, profile_data, payload.get("profile", {}).get("phone"))
+                attach_account_to_session(state, session, account, role)
                 return bootstrap_response(state, session)
             try:
                 self._write_json(self._with_state(action))

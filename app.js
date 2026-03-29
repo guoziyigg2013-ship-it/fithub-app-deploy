@@ -918,9 +918,12 @@ const state = {
   registerRole: "enthusiast",
   registerSuccess: "",
   registerUploadDrafts: {},
+  managedAccounts: [],
   authRole: "enthusiast",
   authPhone: "",
   authMessage: "",
+  authAccountId: "",
+  authRestoreToken: "",
   cityInput: "",
   profiles: createInitialProfiles(),
   managedProfileIds: [],
@@ -1032,17 +1035,29 @@ function normalizePhone(value = "") {
   return String(value).replace(/\D+/g, "");
 }
 
+function normalizeStoredAccount(item) {
+  const roles = Array.isArray(item?.roles)
+    ? item.roles.filter((role) => roleConfig[role])
+    : item?.role && roleConfig[item.role]
+      ? [item.role]
+      : [];
+
+  return {
+    id: item?.id || item?.accountId || "",
+    restoreToken: item?.restoreToken || "",
+    phone: normalizePhone(item?.phone),
+    roles
+  };
+}
+
 function getStoredAccounts() {
   try {
     const raw = window.localStorage.getItem(ACCOUNT_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .map((item) => ({
-        role: item?.role,
-        phone: normalizePhone(item?.phone)
-      }))
-      .filter((item) => roleConfig[item.role] && item.phone);
+      .map((item) => normalizeStoredAccount(item))
+      .filter((item) => (item.id && item.restoreToken) || item.phone);
   } catch (_error) {
     return [];
   }
@@ -1056,14 +1071,51 @@ function storeAccounts(accounts) {
   }
 }
 
-function rememberAccount(role, phone) {
-  const normalizedPhone = normalizePhone(phone);
-  if (!roleConfig[role] || !normalizedPhone) return;
-  const nextAccounts = getStoredAccounts().filter(
-    (item) => !(item.role === role && item.phone === normalizedPhone)
-  );
-  nextAccounts.unshift({ role, phone: normalizedPhone });
-  storeAccounts(nextAccounts.slice(0, 8));
+function getStoredAccountKey(account) {
+  if (account.id) return `id:${account.id}`;
+  if (account.phone && account.roles[0]) return `phone:${account.roles[0]}:${account.phone}`;
+  return "";
+}
+
+function rememberManagedAccounts(accounts = []) {
+  if (!accounts.length) return;
+  const merged = new Map();
+
+  getStoredAccounts().forEach((item) => {
+    const key = getStoredAccountKey(item);
+    if (key) merged.set(key, item);
+  });
+
+  accounts.forEach((item) => {
+    const normalized = normalizeStoredAccount(item);
+    const key = getStoredAccountKey(normalized);
+    if (!key) return;
+
+    const current = merged.get(key);
+    merged.set(key, {
+      id: normalized.id || current?.id || "",
+      restoreToken: normalized.restoreToken || current?.restoreToken || "",
+      phone: normalized.phone || current?.phone || "",
+      roles: Array.from(new Set([...(current?.roles || []), ...(normalized.roles || [])])).filter((role) => roleConfig[role])
+    });
+  });
+
+  storeAccounts(Array.from(merged.values()).slice(0, 8));
+}
+
+function rememberAccount(role, phone, accountId = "", restoreToken = "") {
+  rememberManagedAccounts([
+    {
+      id: accountId,
+      restoreToken,
+      phone,
+      roles: role ? [role] : []
+    }
+  ]);
+}
+
+function getStoredAccountForRole(role) {
+  return getStoredAccounts().find((item) => item.roles.includes(role)) || null;
 }
 
 async function maybeRestoreRememberedAccounts() {
@@ -1076,7 +1128,12 @@ async function maybeRestoreRememberedAccounts() {
     method: "POST",
     body: {
       sessionId: state.sessionId || getStoredSessionId(),
-      accounts,
+      accounts: accounts.map((item) => ({
+        accountId: item.id,
+        restoreToken: item.restoreToken,
+        phone: item.phone,
+        role: item.roles[0] || ""
+      })),
       selectedRole: state.selectedRole,
       currentActorProfileId: state.currentActorProfileId
     }
@@ -1123,6 +1180,8 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   state.locationStatus = payload.session.locationStatus || state.locationStatus;
   state.profiles = enhanceProfiles(payload.profiles || []);
   state.managedProfileIds = payload.session.managedProfileIds || [];
+  state.managedAccounts = (payload.session.managedAccounts || []).map((item) => normalizeStoredAccount(item));
+  rememberManagedAccounts(state.managedAccounts);
   state.currentActorProfileId = payload.session.currentActorProfileId || state.managedProfileIds[0] || "";
   state.followSet = new Set(payload.followSet || []);
   state.bookings = payload.bookings || [];
@@ -1557,9 +1616,11 @@ function openRegister(role = state.selectedRole) {
 }
 
 function openAuth(role = state.selectedRole) {
-  const remembered = getStoredAccounts().find((item) => item.role === role);
+  const remembered = getStoredAccountForRole(role) || getStoredAccounts()[0] || null;
   state.authRole = role;
   state.authPhone = remembered?.phone || "";
+  state.authAccountId = remembered?.id || "";
+  state.authRestoreToken = remembered?.restoreToken || "";
   state.authMessage = "";
   openOverlay("auth");
 }
@@ -2038,9 +2099,15 @@ async function upsertManagedProfile(role, formData) {
   const profilePayload = await buildRegistrationPayload(role, formData);
   await postAndSync(`${API_BASE}/register`, {
     role,
-    profile: profilePayload
+    profile: profilePayload,
+    account: state.managedAccounts[0]
+      ? {
+          accountId: state.managedAccounts[0].id,
+          restoreToken: state.managedAccounts[0].restoreToken
+        }
+      : undefined
   });
-  rememberAccount(role, profilePayload.phone);
+  rememberManagedAccounts(state.managedAccounts);
   state.activeProfileId = state.currentActorProfileId;
   state.composeProfileId = state.currentActorProfileId;
   state.selectedRole = role;
@@ -2054,19 +2121,22 @@ async function upsertManagedProfile(role, formData) {
 async function submitAuthLogin() {
   const role = state.authRole;
   const phone = normalizePhone(state.authPhone);
+  const canUseToken = Boolean(state.authAccountId && state.authRestoreToken);
   if (!roleConfig[role]) {
     throw new Error("请先选择要登录的身份。");
   }
-  if (!phone) {
+  if (!canUseToken && !phone) {
     throw new Error("请输入注册时填写的手机号。");
   }
 
   await postAndSync(`${API_BASE}/auth/login`, {
     role,
-    phone
+    phone,
+    accountId: state.authAccountId,
+    restoreToken: state.authRestoreToken
   }, { keepOverlay: true });
 
-  rememberAccount(role, phone);
+  rememberManagedAccounts(state.managedAccounts);
   state.selectedRole = role;
   state.activePage = "home";
   state.activeProfileId = state.currentActorProfileId;
@@ -2820,7 +2890,7 @@ function getWorkoutSessionStats(profile) {
   const weightKg = getProfileWeight(profile) || 60;
   const calories = Math.max(
     1,
-    Math.round(((metrics.met * 3.5 * weightKg * hours) / 200) * calibration.calorieFactor)
+    Math.round(((metrics.met * 3.5 * weightKg * elapsedMinutes) / 200) * calibration.calorieFactor)
   );
   const distance = metrics.paceKmh
     ? Number((metrics.paceKmh * hours * calibration.distanceFactor).toFixed(hours >= 1 ? 1 : 2))
@@ -3905,7 +3975,7 @@ function renderAuthOverlay() {
         <div>
           <p class="page-label">账户登录</p>
           <h2>找回这个设备上的账号</h2>
-          <p>输入注册时的身份和手机号，或者直接点下面已记住的账号，就能继续使用原来的主页、动态和预约记录。</p>
+          <p>优先使用这个设备保存的账户凭证恢复身份；只有本机没有凭证时，才回退到手机号方式。</p>
         </div>
         <button class="close-button" data-close-overlay="1" type="button">×</button>
       </div>
@@ -3932,16 +4002,25 @@ function renderAuthOverlay() {
             <div class="managed-strip">
               ${storedAccounts
                 .map(
-                  (account) => `
+                  (account) => {
+                    const displayRole = account.roles.includes(state.authRole) ? state.authRole : account.roles[0] || state.authRole;
+                    const isActive =
+                      account.id === state.authAccountId ||
+                      (account.phone === normalizePhone(state.authPhone) && account.roles.includes(state.authRole));
+
+                    return `
                     <button
-                      class="managed-chip ${account.role === state.authRole && account.phone === normalizePhone(state.authPhone) ? "is-active" : ""}"
-                      data-quick-login-role="${account.role}"
+                      class="managed-chip ${isActive ? "is-active" : ""}"
+                      data-quick-login-role="${displayRole}"
+                      data-quick-login-account-id="${account.id}"
+                      data-quick-login-restore-token="${account.restoreToken}"
                       data-quick-login-phone="${account.phone}"
                       type="button"
                     >
-                      ${escapeHtml(roleConfig[account.role].label)} · ${escapeHtml(maskPhone(account.phone))}
+                      ${escapeHtml(roleConfig[displayRole].label)} · ${escapeHtml(maskPhone(account.phone))}
                     </button>
-                  `
+                  `;
+                  }
                 )
                 .join("")}
             </div>
@@ -3951,14 +4030,14 @@ function renderAuthOverlay() {
 
       <form class="register-form" id="authForm">
         <label class="form-field">
-          <span>手机号 *</span>
-          <input data-auth-phone="1" name="phone" type="tel" value="${escapeHtml(state.authPhone)}" placeholder="请输入注册时填写的手机号" required>
+          <span>手机号 ${state.authAccountId ? "（可选，当前会优先用本机凭证恢复）" : "*"}</span>
+          <input data-auth-phone="1" name="phone" type="tel" value="${escapeHtml(state.authPhone)}" placeholder="${escapeHtml(state.authAccountId ? "本机已保存账户凭证，也可以补填手机号" : "请输入注册时填写的手机号")}" ${state.authAccountId ? "" : "required"}>
         </label>
         <button class="primary-submit" type="submit">登录这个身份</button>
         ${
           state.authMessage
             ? `<p class="helper-note">${escapeHtml(state.authMessage)}</p>`
-            : '<p class="helper-note">如果你已经在这个设备注册过，关闭网页后再次打开也能从这里找回。</p>'
+            : '<p class="helper-note">如果这个设备注册过账号，后面更新或重新打开时会优先自动恢复，不再只靠手机号检索。</p>'
         }
         <button class="text-link" data-open-register-from-auth="${escapeHtml(state.authRole)}" type="button">还没有账号？去注册</button>
       </form>
@@ -4546,6 +4625,15 @@ overlay.addEventListener("click", (event) => {
 
   if (target.dataset.authRole) {
     state.authRole = target.dataset.authRole;
+    const remembered = getStoredAccountForRole(state.authRole);
+    if (remembered) {
+      state.authAccountId = remembered.id;
+      state.authRestoreToken = remembered.restoreToken;
+      state.authPhone = remembered.phone;
+    } else {
+      state.authAccountId = "";
+      state.authRestoreToken = "";
+    }
     renderOverlay();
     return;
   }
@@ -4553,6 +4641,8 @@ overlay.addEventListener("click", (event) => {
   if (target.dataset.quickLoginRole && target.dataset.quickLoginPhone) {
     state.authRole = target.dataset.quickLoginRole;
     state.authPhone = target.dataset.quickLoginPhone;
+    state.authAccountId = target.dataset.quickLoginAccountId || "";
+    state.authRestoreToken = target.dataset.quickLoginRestoreToken || "";
     renderOverlay();
     return;
   }
@@ -4589,7 +4679,12 @@ overlay.addEventListener("input", (event) => {
   }
 
   if (event.target.dataset.authPhone) {
-    state.authPhone = event.target.value;
+    const nextPhone = event.target.value;
+    if (normalizePhone(nextPhone) !== normalizePhone(state.authPhone)) {
+      state.authAccountId = "";
+      state.authRestoreToken = "";
+    }
+    state.authPhone = nextPhone;
   }
 
   if (event.target.dataset.composeContent) {
