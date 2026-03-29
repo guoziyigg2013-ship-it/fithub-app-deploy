@@ -1511,8 +1511,8 @@ def build_profile_payload(role, payload, existing_profile, session):
             "pricingPlans": payload.get("pricingPlans") or (existing_profile or {}).get("pricingPlans") or [
                 {"title": "会员卡", "detail": "到店训练 / 团课预约", "price": payload.get("price") or "¥99/月起"}
             ],
-            "reviews": (existing_profile or {}).get("reviews", []),
-            "checkins": (existing_profile or {}).get("checkins", []),
+            "reviews": payload.get("reviews") or (existing_profile or {}).get("reviews", []),
+            "checkins": payload.get("checkins") or (existing_profile or {}).get("checkins", []),
             "listed": True,
             "createdAt": (existing_profile or {}).get("createdAt", iso_at()),
         }
@@ -1545,8 +1545,8 @@ def build_profile_payload(role, payload, existing_profile, session):
             "pricingPlans": payload.get("pricingPlans") or (existing_profile or {}).get("pricingPlans") or [
                 {"title": "私教课程", "detail": "一对一训练服务", "price": payload.get("price") or "¥220/小时"}
             ],
-            "reviews": (existing_profile or {}).get("reviews", []),
-            "checkins": (existing_profile or {}).get("checkins", []),
+            "reviews": payload.get("reviews") or (existing_profile or {}).get("reviews", []),
+            "checkins": payload.get("checkins") or (existing_profile or {}).get("checkins", []),
             "listed": True,
             "createdAt": (existing_profile or {}).get("createdAt", iso_at()),
         }
@@ -1589,19 +1589,103 @@ def build_profile_payload(role, payload, existing_profile, session):
         "gender": gender,
         "heightCm": height_cm,
         "weightKg": weight_kg,
-        "favoriteSports": (existing_profile or {}).get("favoriteSports", []),
-        "connectedDevices": (existing_profile or {}).get("connectedDevices", []),
-        "healthSource": (existing_profile or {}).get("healthSource", ""),
-        "deviceSyncedAt": (existing_profile or {}).get("deviceSyncedAt", ""),
-        "healthSnapshot": (existing_profile or {}).get("healthSnapshot", {}),
-        "restingHeartRate": (existing_profile or {}).get("restingHeartRate"),
-        "bodyFat": body_fat,
+        "favoriteSports": payload.get("favoriteSports") or (existing_profile or {}).get("favoriteSports", []),
+        "connectedDevices": payload.get("connectedDevices") or (existing_profile or {}).get("connectedDevices", []),
+        "healthSource": payload.get("healthSource") or (existing_profile or {}).get("healthSource", ""),
+        "deviceSyncedAt": payload.get("deviceSyncedAt") or (existing_profile or {}).get("deviceSyncedAt", ""),
+        "healthSnapshot": payload.get("healthSnapshot") or (existing_profile or {}).get("healthSnapshot", {}),
+        "restingHeartRate": payload.get("restingHeartRate") or (existing_profile or {}).get("restingHeartRate"),
+        "bodyFat": parse_optional_float(payload.get("bodyFat")) or body_fat,
         "externalWorkoutIds": (existing_profile or {}).get("externalWorkoutIds", []),
-        "reviews": (existing_profile or {}).get("reviews", []),
-        "checkins": (existing_profile or {}).get("checkins", []),
+        "reviews": payload.get("reviews") or (existing_profile or {}).get("reviews", []),
+        "checkins": payload.get("checkins") or (existing_profile or {}).get("checkins", []),
         "listed": True,
         "createdAt": (existing_profile or {}).get("createdAt", iso_at()),
     }
+
+
+def restore_cached_checkins(profile, items):
+    restored = 0
+    existing_keys = {
+        str(item.get("externalId") or item.get("id") or "").strip()
+        for item in profile.get("checkins", [])
+        if str(item.get("externalId") or item.get("id") or "").strip()
+    }
+
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        created_at = item.get("createdAt") or now_utc().isoformat()
+        started_at = item.get("startedAt") or created_at
+        ended_at = item.get("endedAt") or created_at
+        key = str(item.get("externalId") or item.get("id") or f"checkin-{uuid.uuid4().hex[:10]}").strip()
+        if key in existing_keys:
+            continue
+
+        profile.setdefault("checkins", []).append(
+            {
+                "id": str(item.get("id") or f"checkin-{uuid.uuid4().hex[:10]}"),
+                "externalId": key,
+                "source": str(item.get("source") or "FitHub 本机恢复"),
+                "sportId": str(item.get("sportId") or "strength"),
+                "sportLabel": str(item.get("sportLabel") or "训练打卡"),
+                "duration": max(0, parse_optional_int(item.get("duration")) or 0),
+                "distance": round(max(0, parse_optional_float(item.get("distance")) or 0), 2),
+                "calories": max(0, parse_optional_int(item.get("calories")) or 0),
+                "note": str(item.get("note") or ""),
+                "createdAt": created_at,
+                "startedAt": started_at,
+                "endedAt": ended_at,
+            }
+        )
+        existing_keys.add(key)
+        restored += 1
+
+    profile["checkins"] = sorted(profile.get("checkins", []), key=lambda value: value.get("createdAt", ""), reverse=True)[:60]
+    return restored
+
+
+def restore_cached_posts(state, profile_id, items):
+    restored = 0
+    existing_keys = {
+        (
+            post.get("createdAt", ""),
+            post.get("content", ""),
+            post.get("authorProfileId", ""),
+        )
+        for post in state.get("posts", {}).values()
+    }
+
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        created_at = item.get("createdAt") or now_utc().isoformat()
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        dedupe_key = (created_at, content, profile_id)
+        if dedupe_key in existing_keys:
+            continue
+
+        post_id = str(item.get("id") or f"post-{uuid.uuid4().hex[:10]}")
+        if post_id in state.get("posts", {}):
+            post_id = f"post-{uuid.uuid4().hex[:10]}"
+
+        state["posts"][post_id] = {
+            "id": post_id,
+            "authorProfileId": profile_id,
+            "createdAt": created_at,
+            "content": content,
+            "meta": str(item.get("meta") or "FitHub 本机恢复"),
+            "media": [compact_media_item(media) for media in item.get("media", []) if isinstance(media, dict)],
+            "likes": [],
+            "comments": [],
+            "checkin": deepcopy(item.get("checkin")) if isinstance(item.get("checkin"), dict) else None,
+        }
+        existing_keys.add(dedupe_key)
+        restored += 1
+
+    return restored
 
 
 def native_device_label(source):
@@ -1982,6 +2066,57 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 return bootstrap_response(state, session)
 
             self._write_json(self._with_state(action))
+            return
+
+        if parsed.path == f"{API_PREFIX}/auth/recover-local":
+            def action(state):
+                session = ensure_session(state, session_id)
+                reconcile_account_registry(state)
+                role = str(payload.get("role") or "").strip()
+                profile_payload = payload.get("profile") or {}
+                if role not in {"enthusiast", "gym", "coach"}:
+                    raise ValueError("请选择要恢复的身份。")
+
+                phone = profile_payload.get("phone") or payload.get("phone")
+                if not normalize_phone(phone):
+                    raise ValueError("本机缓存里没有可恢复的手机号。")
+
+                existing_profile = find_profile_by_role_phone(state, role, phone)
+                account = find_account_by_phone(state, phone, role)
+                if not account and existing_profile:
+                    account = ensure_profile_account(state, existing_profile, phone)
+                if not account:
+                    account = create_account_record(phone)
+                    ensure_account_registry(state)[account["id"]] = account
+
+                profile_data = build_profile_payload(role, profile_payload, existing_profile, session)
+                profile_data["accountId"] = account["id"]
+                state["profiles"][profile_data["id"]] = profile_data
+                ensure_profile_account(state, profile_data, phone)
+
+                restored_checkins = restore_cached_checkins(
+                    profile_data,
+                    payload.get("checkins") or profile_payload.get("checkins") or [],
+                )
+                restored_posts = restore_cached_posts(
+                    state,
+                    profile_data["id"],
+                    payload.get("posts") or profile_payload.get("posts") or [],
+                )
+
+                attach_account_to_session(state, session, account, role)
+                response = bootstrap_response(state, session)
+                response["recoverySummary"] = {
+                    "restoredProfileId": profile_data["id"],
+                    "restoredPosts": restored_posts,
+                    "restoredCheckins": restored_checkins,
+                }
+                return response
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
         if parsed.path == f"{API_PREFIX}/session/select":

@@ -1154,6 +1154,75 @@ function getStoredAccountForRole(role) {
   return getStoredAccounts().find((item) => item.roles.includes(role)) || null;
 }
 
+function findRecoverableSnapshotProfile(role, phone) {
+  const snapshot = getStoredSnapshot();
+  const profiles = Array.isArray(snapshot?.profiles) ? snapshot.profiles : [];
+  const managedIds = new Set(snapshot?.session?.managedProfileIds || []);
+  const phoneKey = normalizePhone(phone);
+  if (!roleConfig[role] || !phoneKey) return null;
+
+  return (
+    profiles.find((profile) => {
+      if (!profile || profile.role !== role) return false;
+      if (normalizePhone(profile.phone) !== phoneKey) return false;
+      return !managedIds.size || managedIds.has(profile.id);
+    }) || null
+  );
+}
+
+function buildSnapshotRecoveryProfile(profile) {
+  if (!profile) return null;
+  return {
+    name: profile.name || "",
+    phone: normalizePhone(profile.phone),
+    city: profile.city || state.userPosition.city,
+    locationLabel: profile.locationLabel || state.userPosition.label,
+    avatarImage: profile.avatarImage || "",
+    intro: profile.bio || profile.shortDesc || "",
+    level: profile.level || "",
+    goal: profile.goal || "",
+    gender: profile.gender || "",
+    heightCm: profile.heightCm || "",
+    weightKg: profile.weightKg || "",
+    bodyFat: profile.bodyFat || "",
+    favoriteSports: Array.isArray(profile.favoriteSports) ? profile.favoriteSports : [],
+    connectedDevices: Array.isArray(profile.connectedDevices) ? profile.connectedDevices : [],
+    healthSource: profile.healthSource || "",
+    deviceSyncedAt: profile.deviceSyncedAt || "",
+    healthSnapshot: profile.healthSnapshot || {},
+    restingHeartRate: profile.restingHeartRate || "",
+    price: profile.price || "",
+    hours: profile.hours || "",
+    contactName: profile.contactName || "",
+    years: profile.years || "",
+    certifications: Array.isArray(profile.certifications)
+      ? profile.certifications.join(" ")
+      : profile.certifications || "",
+    specialties: Array.isArray(profile.tags) ? profile.tags.join(" ") : "",
+    facilities: Array.isArray(profile.tags) ? profile.tags.join(" ") : "",
+    pricingPlans: Array.isArray(profile.pricingPlans) ? profile.pricingPlans : [],
+    checkins: Array.isArray(profile.checkins) ? profile.checkins : [],
+    reviews: Array.isArray(profile.reviews) ? profile.reviews : []
+  };
+}
+
+async function recoverAccountFromSnapshot(role, phone) {
+  const cachedProfile = findRecoverableSnapshotProfile(role, phone);
+  if (!cachedProfile) return false;
+
+  await postAndSync(`${API_BASE}/auth/recover-local`, {
+    sessionId: state.sessionId,
+    role,
+    phone: normalizePhone(phone),
+    profile: buildSnapshotRecoveryProfile(cachedProfile),
+    posts: Array.isArray(cachedProfile.posts) ? cachedProfile.posts : [],
+    checkins: Array.isArray(cachedProfile.checkins) ? cachedProfile.checkins : []
+  }, { keepOverlay: true });
+
+  state.authMessage = "线上没找到这个身份，已从这台设备的本地缓存恢复到线上。";
+  return true;
+}
+
 async function maybeRestoreRememberedAccounts() {
   if (state.managedProfileIds.length) return false;
   const accounts = getStoredAccounts();
@@ -2383,28 +2452,34 @@ async function submitAuthLogin() {
   }
 
   try {
-    await postAndSync(`${API_BASE}/auth/login`, {
-      role,
-      phone,
-      accountId: state.authAccountId,
-      restoreToken: state.authRestoreToken
-    }, { keepOverlay: true });
-    state.authMessage = "";
+    try {
+      await postAndSync(`${API_BASE}/auth/login`, {
+        role,
+        phone,
+        accountId: state.authAccountId,
+        restoreToken: state.authRestoreToken
+      }, { keepOverlay: true });
+      state.authMessage = "";
+    } catch (error) {
+      if (!(canUseToken && phone)) {
+        throw error;
+      }
+
+      state.authAccountId = "";
+      state.authRestoreToken = "";
+
+      await postAndSync(`${API_BASE}/auth/login`, {
+        role,
+        phone,
+        accountId: "",
+        restoreToken: ""
+      }, { keepOverlay: true });
+      state.authMessage = "检测到本机旧凭证已失效，已自动改用手机号找回并刷新这个账号。";
+    }
   } catch (error) {
-    if (!(canUseToken && phone)) {
+    if (!(phone && (await recoverAccountFromSnapshot(role, phone)))) {
       throw error;
     }
-
-    state.authAccountId = "";
-    state.authRestoreToken = "";
-
-    await postAndSync(`${API_BASE}/auth/login`, {
-      role,
-      phone,
-      accountId: "",
-      restoreToken: ""
-    }, { keepOverlay: true });
-    state.authMessage = "检测到本机旧凭证已失效，已自动改用手机号找回并刷新这个账号。";
   }
 
   rememberManagedAccounts(state.managedAccounts);
