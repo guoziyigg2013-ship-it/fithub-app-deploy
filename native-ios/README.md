@@ -42,6 +42,7 @@ open FitHubNative.xcodeproj
 - [native-device-quickstart.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-device-quickstart.md)
 - [native-ios-device-checklist.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-ios-device-checklist.md)
 - [native-ios-xcode-runbook.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-ios-xcode-runbook.md)
+- [ios-app-store-release-checklist.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/ios-app-store-release-checklist.md)
 
 如果后面你想继续用 XcodeGen 重生工程，再走下面这套：
 
