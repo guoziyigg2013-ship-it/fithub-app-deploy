@@ -164,28 +164,58 @@ const CHECKIN_SPORT_SECTIONS = [
 ];
 
 const CHECKIN_SPORT_METRICS = {
-  run: { met: 8.3, paceKmh: 8.5 },
-  walk: { met: 3.6, paceKmh: 5.4 },
-  rope: { met: 10.0, paceKmh: 0 },
-  cycling: { met: 7.2, paceKmh: 18 },
-  stairs: { met: 8.8, paceKmh: 0 },
-  hike: { met: 6.4, paceKmh: 4.8 },
-  ball: { met: 7.0, paceKmh: 4.2 },
-  yoga: { met: 2.8, paceKmh: 0 },
-  hiit: { met: 8.8, paceKmh: 0 },
-  strength: { met: 6.0, paceKmh: 0 },
-  accessory: { met: 4.6, paceKmh: 0 },
-  dance: { met: 5.2, paceKmh: 0 },
-  pilates: { met: 3.0, paceKmh: 0 },
-  boxing: { met: 7.8, paceKmh: 0 },
-  cardio: { met: 6.2, paceKmh: 0 },
-  machine: { met: 5.8, paceKmh: 0 },
-  leisure: { met: 4.0, paceKmh: 0 },
-  swim: { met: 6.0, paceKmh: 2.1 },
-  surf: { met: 5.0, paceKmh: 0 },
-  extreme: { met: 7.2, paceKmh: 0 },
-  martial: { met: 4.6, paceKmh: 0 },
-  meditation: { met: 1.4, paceKmh: 0 }
+  run: { met: 8.5, paceKmh: 8.4, impact: "high" },
+  "outdoor-walk": { met: 4.8, paceKmh: 5.8, impact: "high" },
+  rope: { met: 11.8, paceKmh: 0, impact: "high" },
+  cycling: { met: 7.0, paceKmh: 19, impact: "low" },
+  "outdoor-cycling": { met: 6.8, paceKmh: 18, impact: "low" },
+  treadmill: { met: 8.3, paceKmh: 8.1, impact: "high" },
+  stairs: { met: 8.8, paceKmh: 0, impact: "high" },
+  "indoor-walk": { met: 3.8, paceKmh: 4.8, impact: "high" },
+  hiking: { met: 6.0, paceKmh: 4.7, impact: "high" },
+  "trail-run": { met: 9.0, paceKmh: 7.4, impact: "high" },
+  badminton: { met: 5.5, paceKmh: 0, impact: "high" },
+  football: { met: 8.0, paceKmh: 0, impact: "high" },
+  basketball: { met: 7.5, paceKmh: 0, impact: "high" },
+  pingpong: { met: 4.0, paceKmh: 0, impact: "high" },
+  tennis: { met: 7.3, paceKmh: 0, impact: "high" },
+  volleyball: { met: 4.0, paceKmh: 0, impact: "high" },
+  bowling: { met: 3.8, paceKmh: 0, impact: "low" },
+  golf: { met: 4.5, paceKmh: 3.6, impact: "high" },
+  yoga: { met: 2.8, paceKmh: 0, impact: "low" },
+  hiit: { met: 8.0, paceKmh: 0, impact: "mixed" },
+  strength: { met: 5.5, paceKmh: 0, impact: "mixed" },
+  accessory: { met: 4.8, paceKmh: 0, impact: "mixed" },
+  "cardio-mix": { met: 6.8, paceKmh: 0, impact: "mixed" },
+  aerobics: { met: 6.5, paceKmh: 0, impact: "mixed" },
+  dance: { met: 5.5, paceKmh: 0, impact: "mixed" },
+  zumba: { met: 7.3, paceKmh: 0, impact: "mixed" },
+  pilates: { met: 3.0, paceKmh: 0, impact: "low" },
+  boxing: { met: 7.8, paceKmh: 0, impact: "high" },
+  fighting: { met: 8.5, paceKmh: 0, impact: "high" },
+  ballet: { met: 5.0, paceKmh: 0, impact: "mixed" },
+  elliptical: { met: 5.0, paceKmh: 0, impact: "low" },
+  rowing: { met: 7.0, paceKmh: 0, impact: "mixed" },
+  stepper: { met: 8.8, paceKmh: 0, impact: "high" },
+  "stair-machine": { met: 9.0, paceKmh: 0, impact: "high" },
+  frisbee: { met: 3.0, paceKmh: 0, impact: "low" },
+  roller: { met: 7.0, paceKmh: 0, impact: "mixed" },
+  skateboard: { met: 5.0, paceKmh: 0, impact: "mixed" },
+  hula: { met: 4.0, paceKmh: 0, impact: "mixed" },
+  swim: { met: 6.0, paceKmh: 2.0, impact: "water" },
+  "outdoor-swim": { met: 7.0, paceKmh: 2.3, impact: "water" },
+  surf: { met: 5.0, paceKmh: 0, impact: "water" },
+  trampoline: { met: 5.5, paceKmh: 0, impact: "high" },
+  skating: { met: 7.0, paceKmh: 0, impact: "mixed" },
+  skiing: { met: 7.0, paceKmh: 0, impact: "mixed" },
+  fencing: { met: 6.0, paceKmh: 0, impact: "mixed" },
+  archery: { met: 4.3, paceKmh: 0, impact: "low" },
+  equestrian: { met: 5.5, paceKmh: 0, impact: "mixed" },
+  climbing: { met: 8.0, paceKmh: 0, impact: "high" },
+  "tai-chi": { met: 4.0, paceKmh: 0, impact: "low" },
+  "wing-chun": { met: 5.5, paceKmh: 0, impact: "mixed" },
+  wuqinxi: { met: 4.2, paceKmh: 0, impact: "low" },
+  meditation: { met: 1.5, paceKmh: 0, impact: "low" }
 };
 
 function createDemoImage(title, accentA, accentB) {
@@ -2156,7 +2186,14 @@ function startWorkoutSession(sportId = "") {
     throw new Error("请先完善性别、身高和体重，再开始运动。");
   }
 
-  const targetSport = sportId || getCurrentWorkoutSport(profile).id;
+  const targetSport = sportId || state.checkinCurrentSportId || getCurrentWorkoutSport(profile)?.id || "";
+  if (!targetSport) {
+    state.profileSubpage = "checkin";
+    state.checkinEditing = true;
+    renderPage();
+    throw new Error("第一次打卡请先选择日常训练项目，再开始运动。");
+  }
+
   state.checkinCurrentSportId = targetSport;
   state.workoutSession = {
     sportId: targetSport,
@@ -2267,7 +2304,10 @@ function renderHomeCards() {
         profiles.length
           ? profiles
               .map(
-                (profile) => `
+                (profile) => {
+                  const followed = state.followSet.has(profile.id);
+
+                  return `
                   <article class="card card--interactive" data-open-profile="${profile.id}">
                     ${renderCardCover(profile)}
                     <div class="card-copy">
@@ -2285,11 +2325,14 @@ function renderHomeCards() {
                       <p class="desc">${escapeHtml(profile.shortDesc)}</p>
                       <div class="price-line">
                         <span class="price">${escapeHtml(profile.price || "查看主页")}</span>
-                        <button class="cta" type="button" data-open-profile="${profile.id}">主页</button>
+                        <button class="follow-button follow-button--card ${followed ? "is-active" : ""}" type="button" data-toggle-follow="${profile.id}">
+                          ${followed ? "已关注" : "关注"}
+                        </button>
                       </div>
                     </div>
                   </article>
-                `
+                `;
+                }
               )
               .join("")
           : '<article class="empty-card">没有匹配结果，换个关键词试试。</article>'
@@ -2704,8 +2747,7 @@ function getCheckinSport(optionId) {
 }
 
 function getCheckinMetrics(optionId) {
-  const sport = getCheckinSport(optionId);
-  return CHECKIN_SPORT_METRICS[sport.metricKey] || CHECKIN_SPORT_METRICS.strength;
+  return CHECKIN_SPORT_METRICS[optionId] || CHECKIN_SPORT_METRICS.run;
 }
 
 function getSafeDate(value) {
@@ -2748,12 +2790,21 @@ function getProfileHeight(profile) {
   return Number(profile?.heightCm || 0);
 }
 
-function getProfileBMI(profile) {
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getProfileBMIRaw(profile) {
   const heightCm = getProfileHeight(profile);
   const weightKg = getProfileWeight(profile);
-  if (!heightCm || !weightKg) return "--";
+  if (!heightCm || !weightKg) return 0;
   const heightMeter = heightCm / 100;
-  return (weightKg / (heightMeter * heightMeter)).toFixed(1);
+  return weightKg / (heightMeter * heightMeter);
+}
+
+function getProfileBMI(profile) {
+  const bmi = getProfileBMIRaw(profile);
+  return bmi ? bmi.toFixed(1) : "--";
 }
 
 function getWorkoutSessionStats(profile) {
@@ -2762,13 +2813,18 @@ function getWorkoutSessionStats(profile) {
 
   const sport = getCheckinSport(session.sportId);
   const metrics = getCheckinMetrics(session.sportId);
+  const calibration = getWorkoutCalibration(profile, metrics);
   const elapsedSeconds = Math.max(0, Math.floor((Date.now() - session.startedAt) / 1000));
   const elapsedMinutes = Math.max(1, Math.floor(elapsedSeconds / 60));
   const hours = elapsedSeconds / 3600;
   const weightKg = getProfileWeight(profile) || 60;
-  const genderFactor = profile?.gender === "女" ? 0.92 : profile?.gender === "男" ? 1.02 : 1;
-  const calories = Math.max(1, Math.round((metrics.met * 3.5 * weightKg * hours) / 200 * genderFactor));
-  const distance = metrics.paceKmh ? Number((metrics.paceKmh * hours).toFixed(hours >= 1 ? 1 : 2)) : 0;
+  const calories = Math.max(
+    1,
+    Math.round(((metrics.met * 3.5 * weightKg * hours) / 200) * calibration.calorieFactor)
+  );
+  const distance = metrics.paceKmh
+    ? Number((metrics.paceKmh * hours * calibration.distanceFactor).toFixed(hours >= 1 ? 1 : 2))
+    : 0;
 
   return {
     ...session,
@@ -2777,7 +2833,8 @@ function getWorkoutSessionStats(profile) {
     elapsedMinutes,
     timerLabel: formatWorkoutTimer(elapsedSeconds),
     calories,
-    distance
+    distance,
+    sourceLabel: calibration.sourceLabel
   };
 }
 
@@ -2849,7 +2906,7 @@ function getFavoriteSports(profile) {
 
 function getCurrentWorkoutSport(profile) {
   const favoriteSports = getFavoriteSports(profile);
-  if (!favoriteSports.length) return CHECKIN_SPORTS[0];
+  if (!favoriteSports.length) return null;
   const activeSport = favoriteSports.find((item) => item.id === state.checkinCurrentSportId);
   return activeSport || favoriteSports[0];
 }
@@ -2862,6 +2919,42 @@ function getWorkoutDeviceSummary(profile) {
   const devices = getConnectedDevices(profile);
   if (!devices.length) return "未连接设备";
   return devices.join(" · ");
+}
+
+function hasConnectedWatch(profile) {
+  return getConnectedDevices(profile).some((item) => /watch|手表/i.test(item));
+}
+
+function hasConnectedScale(profile) {
+  return getConnectedDevices(profile).some((item) => /秤/i.test(item));
+}
+
+function getWorkoutCalibration(profile, metrics) {
+  const bmi = getProfileBMIRaw(profile);
+  const bodyFat = Number(profile?.bodyFat || 0);
+  const heightFactor = getProfileHeight(profile)
+    ? clampNumber(getProfileHeight(profile) / 170, 0.92, 1.08)
+    : 1;
+  const impactRatio = {
+    high: 0.014,
+    mixed: 0.01,
+    low: 0.006,
+    water: 0.004
+  }[metrics.impact || "mixed"];
+  const bmiFactor = bmi ? 1 + clampNumber((bmi - 22) * impactRatio, -0.06, 0.14) : 1;
+  const bodyFatFactor = bodyFat ? 1 + clampNumber((bodyFat - 20) * 0.0025, -0.03, 0.06) : 1;
+  const watchFactor = hasConnectedWatch(profile) ? 1.02 : 1;
+  const scaleFactor = hasConnectedScale(profile) ? 1.01 : 1;
+
+  return {
+    calorieFactor: clampNumber(bmiFactor * bodyFatFactor * watchFactor * scaleFactor, 0.85, 1.24),
+    distanceFactor: clampNumber(heightFactor * (hasConnectedWatch(profile) ? 1.02 : 1), 0.9, 1.12),
+    sourceLabel: hasConnectedWatch(profile)
+      ? "已结合手表与身体数据估算"
+      : hasConnectedScale(profile)
+        ? "已结合智能秤与身体数据估算"
+        : "按运动类型与身体数据估算"
+  };
 }
 
 function getSportPickerSections(selectedIds = []) {
@@ -2890,6 +2983,7 @@ function renderCheckinEntry(profile) {
   const weeklyCount = getWeeklyCheckins(profile).length;
   const favoriteSports = getFavoriteSports(profile);
   const currentSport = getCurrentWorkoutSport(profile);
+  const hasSelection = Boolean(currentSport);
 
   return `
     <article class="dashboard-checkin dashboard-checkin--go">
@@ -2919,17 +3013,21 @@ function renderCheckinEntry(profile) {
       </div>
       <div class="dashboard-go-row">
         <div class="dashboard-go-copy">
-          <strong>${escapeHtml(activeSession ? activeSession.sport.label : currentSport.label)}</strong>
+          <strong>${escapeHtml(activeSession ? activeSession.sport.label : hasSelection ? currentSport.label : "先选择运动")}</strong>
           <p>${
             activeSession
               ? escapeHtml(`${activeSession.timerLabel} · ${activeSession.calories} kcal${activeSession.distance ? ` · ${activeSession.distance} km` : ""}`)
-              : escapeHtml(getWorkoutDeviceSummary(profile))
+              : escapeHtml(hasSelection ? getWorkoutDeviceSummary(profile) : "第一次打卡先选日常训练项目，再开始计时")
           }</p>
         </div>
         ${
           activeSession
             ? '<button class="dashboard-go-button dashboard-go-button--live" data-open-my-feature="checkin" type="button">继续</button>'
-            : '<button class="dashboard-go-button" data-go-workout="1" type="button">运动 GO</button>'
+            : `
+                <button class="dashboard-go-button" ${hasSelection ? 'data-go-workout="1"' : 'data-open-my-feature="checkin"'} type="button">
+                  ${hasSelection ? "运动 GO" : "先选择"}
+                </button>
+              `
         }
       </div>
     </article>
@@ -3096,8 +3194,8 @@ function renderWorkoutLauncher(profile) {
           <article class="detail-card workout-go-card">
             <div class="workout-go-copy">
               <span class="dashboard-checkin-kicker">准备开始</span>
-              <h3>${escapeHtml(currentSport.label)}</h3>
-              <p>${escapeHtml(currentSport.hint)}</p>
+              <h3>${escapeHtml(currentSport ? currentSport.label : "先选择日常训练")}</h3>
+              <p>${escapeHtml(currentSport ? currentSport.hint : "先在上方选一个你常用的运动项目，再开始计时打卡。")}</p>
             </div>
             <div class="workout-device-strip">
               ${
@@ -3107,10 +3205,12 @@ function renderWorkoutLauncher(profile) {
               }
             </div>
             <div class="workout-go-panel">
-              <button class="workout-go-button" data-go-workout="1" type="button">GO</button>
+              <button class="workout-go-button" ${currentSport ? 'data-go-workout="1"' : 'data-edit-common-sports="1"'} type="button">
+                ${currentSport ? "GO" : "选择"}
+              </button>
               <div class="workout-go-meta">
                 <strong>${escapeHtml(`${profile.gender || "未填"} · ${getProfileWeight(profile) || "--"} kg`)}</strong>
-                <span>开始后自动计时，并根据身体数据计算卡路里</span>
+                <span>${escapeHtml(currentSport ? "开始后自动计时，并按运动类型与身体数据计算卡路里" : "第一次打卡先完成运动选择，避免默认进入跑步模式")}</span>
               </div>
             </div>
             <div class="workout-quick-connect">
@@ -3159,7 +3259,7 @@ function renderWorkoutSession(profile) {
         </div>
       </div>
 
-      <p class="result-tip">系统会根据你的性别、身高、体重和运动类型自动估算消耗，结束后会直接记入打卡。</p>
+      <p class="result-tip">${escapeHtml(`${session.sourceLabel}，并结合体重、BMI${profile.bodyFat ? "、体脂" : ""}和运动强度持续修正热量消耗。`)}</p>
 
       <div class="action-row action-row--checkin">
         <button class="mini-button" data-cancel-workout="1" type="button">结束放弃</button>
