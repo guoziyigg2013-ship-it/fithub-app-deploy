@@ -77,6 +77,33 @@ STATE_CACHE = None
 MAX_INLINE_AVATAR_CHARS = 120_000
 MAX_INLINE_MEDIA_CHARS = 180_000
 LEGACY_DEMO_ENTHUSIAST_IDS = {"enthusiast-demo-a", "enthusiast-demo-b"}
+NATIVE_DEVICE_LABELS = {
+    "apple-health": "Apple Health",
+    "apple-healthkit": "Apple Health",
+    "apple-watch": "Apple Watch",
+    "healthkit": "Apple Health",
+    "health-connect": "Health Connect",
+    "xiaomi-watch": "小米手表",
+    "xiaomi-scale": "小米智能秤",
+}
+NATIVE_WORKOUT_SPORT_MAP = {
+    "running": ("run", "户外跑步"),
+    "walking": ("outdoor-walk", "户外行走"),
+    "hiking": ("hiking", "徒步"),
+    "cycling": ("outdoor-cycling", "户外骑行"),
+    "indoorcycling": ("cycling", "室内骑行"),
+    "swimming": ("swim", "泳池游泳"),
+    "yoga": ("yoga", "瑜伽"),
+    "pilates": ("pilates", "普拉提"),
+    "traditionalstrengthtraining": ("strength", "传统力量训练"),
+    "functionalstrengthtraining": ("strength", "传统力量训练"),
+    "strengthtraining": ("strength", "传统力量训练"),
+    "highintensityintervaltraining": ("hiit", "HIIT"),
+    "rowing": ("rowing", "划船机"),
+    "elliptical": ("elliptical", "椭圆机"),
+    "stairclimbing": ("stairs", "爬楼梯"),
+    "mixedcardio": ("cardio-mix", "混合有氧"),
+}
 
 
 def now_utc():
@@ -243,6 +270,20 @@ def parse_optional_int(value):
         return None
 
 
+def parse_optional_iso_datetime(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def normalize_phone(value):
     raw = "".join(ch for ch in str(value or "") if ch.isdigit())
     return raw
@@ -382,7 +423,10 @@ def make_profile(**kwargs):
         "connectedDevices": kwargs.get("connectedDevices", []),
         "healthSource": kwargs.get("healthSource", ""),
         "deviceSyncedAt": kwargs.get("deviceSyncedAt", ""),
+        "healthSnapshot": kwargs.get("healthSnapshot", {}),
+        "restingHeartRate": kwargs.get("restingHeartRate", None),
         "bodyFat": kwargs.get("bodyFat", None),
+        "externalWorkoutIds": kwargs.get("externalWorkoutIds", []),
         "pricingPlans": kwargs.get("pricingPlans", []),
         "years": kwargs.get("years", ""),
         "certifications": kwargs.get("certifications", []),
@@ -1227,6 +1271,7 @@ def serialize_comment(state, comment):
 def serialize_checkin(checkin):
     return {
         "id": checkin["id"],
+        "source": checkin.get("source", ""),
         "sportId": checkin.get("sportId", ""),
         "sportLabel": checkin.get("sportLabel", "训练打卡"),
         "duration": checkin.get("duration", 0),
@@ -1267,6 +1312,7 @@ def serialize_profile(state, profile_id, current_actor_profile_id):
     profile["avatarImage"] = compact_avatar_image(profile.get("avatarImage"), profile["role"])
     profile["posts"] = [serialize_post(state, post, current_actor_profile_id) for post in profile_posts(state, profile_id)[:4]]
     profile["checkins"] = [serialize_checkin(item) for item in sorted(profile.get("checkins", []), key=lambda value: value["createdAt"], reverse=True)[:12]]
+    profile.pop("externalWorkoutIds", None)
     return profile
 
 
@@ -1467,12 +1513,213 @@ def build_profile_payload(role, payload, existing_profile, session):
         "connectedDevices": (existing_profile or {}).get("connectedDevices", []),
         "healthSource": (existing_profile or {}).get("healthSource", ""),
         "deviceSyncedAt": (existing_profile or {}).get("deviceSyncedAt", ""),
+        "healthSnapshot": (existing_profile or {}).get("healthSnapshot", {}),
+        "restingHeartRate": (existing_profile or {}).get("restingHeartRate"),
         "bodyFat": body_fat,
+        "externalWorkoutIds": (existing_profile or {}).get("externalWorkoutIds", []),
         "reviews": (existing_profile or {}).get("reviews", []),
         "checkins": (existing_profile or {}).get("checkins", []),
         "listed": True,
         "createdAt": (existing_profile or {}).get("createdAt", iso_at()),
     }
+
+
+def native_device_label(source):
+    return NATIVE_DEVICE_LABELS.get(str(source or "").strip().lower(), "健康设备")
+
+
+def merge_device_labels(existing_labels, new_labels):
+    merged = []
+    for label in list(existing_labels or []) + list(new_labels or []):
+        clean = str(label or "").strip()
+        if clean and clean not in merged:
+            merged.append(clean)
+    return merged
+
+
+def normalize_native_workout_kind(raw_kind):
+    return str(raw_kind or "").strip().lower().replace("_", "").replace("-", "").replace(" ", "")
+
+
+def resolve_native_workout_sport(workout):
+    sport_id = str(workout.get("sportId") or "").strip()
+    sport_label = str(workout.get("sportLabel") or workout.get("label") or "").strip()
+    raw_kind = (
+        workout.get("workoutType")
+        or workout.get("activityType")
+        or workout.get("type")
+        or workout.get("activity")
+        or ""
+    )
+    mapped = NATIVE_WORKOUT_SPORT_MAP.get(normalize_native_workout_kind(raw_kind))
+    if mapped:
+        return sport_id or mapped[0], sport_label or mapped[1]
+    return sport_id or "strength", sport_label or "训练打卡"
+
+
+def normalize_native_distance_km(workout):
+    direct_distance = parse_optional_float(workout.get("distance"))
+    if direct_distance is not None:
+        return round(max(0, direct_distance), 2)
+    distance_km = parse_optional_float(workout.get("distanceKm"))
+    if distance_km is not None:
+        return round(max(0, distance_km), 2)
+    distance_m = parse_optional_float(workout.get("distanceMeters"))
+    if distance_m is not None:
+        return round(max(0, distance_m) / 1000, 2)
+    return 0
+
+
+def normalize_native_calories(workout):
+    calories = (
+        parse_optional_float(workout.get("calories"))
+        or parse_optional_float(workout.get("activeEnergyBurned"))
+        or parse_optional_float(workout.get("energy"))
+    )
+    if calories is None:
+        return 0
+    return int(round(max(0, calories)))
+
+
+def normalize_native_duration_minutes(workout):
+    direct_minutes = parse_optional_int(workout.get("duration") or workout.get("durationMinutes") or workout.get("minutes"))
+    if direct_minutes and direct_minutes > 0:
+        return direct_minutes
+
+    seconds = parse_optional_float(workout.get("durationSeconds") or workout.get("elapsedSeconds"))
+    if seconds and seconds > 0:
+        return max(1, int(round(seconds / 60)))
+    return 0
+
+
+def normalize_native_workout_id(source, workout, started_at, duration):
+    candidate = str(workout.get("externalId") or workout.get("id") or workout.get("uuid") or "").strip()
+    if candidate:
+        return candidate
+    sport_id, _ = resolve_native_workout_sport(workout)
+    start_key = started_at.isoformat() if started_at else "unknown"
+    return f"{source}:{sport_id}:{start_key}:{duration}"
+
+
+def build_native_checkin_payload(source, workout):
+    duration = normalize_native_duration_minutes(workout)
+    if duration <= 0:
+        return None
+
+    started_at = parse_optional_iso_datetime(workout.get("startedAt") or workout.get("startDate")) or now_utc()
+    ended_at = parse_optional_iso_datetime(workout.get("endedAt") or workout.get("endDate")) or (started_at + timedelta(minutes=duration))
+    sport_id, sport_label = resolve_native_workout_sport(workout)
+
+    return {
+        "id": f"checkin-{uuid.uuid4().hex[:10]}",
+        "externalId": normalize_native_workout_id(source, workout, started_at, duration),
+        "source": native_device_label(source),
+        "sportId": sport_id,
+        "sportLabel": sport_label,
+        "duration": duration,
+        "distance": normalize_native_distance_km(workout),
+        "calories": normalize_native_calories(workout),
+        "note": (workout.get("note") or "").strip(),
+        "createdAt": ended_at.isoformat(),
+        "startedAt": started_at.isoformat(),
+        "endedAt": ended_at.isoformat(),
+    }
+
+
+def apply_native_health_sync(state, session, payload):
+    profile_id = payload.get("profileId") or session.get("currentActorProfileId")
+    if not profile_id or profile_id not in session.get("managedProfileIds", []):
+        raise ValueError("请先登录自己的训练者身份，再同步真实设备数据。")
+
+    profile = state["profiles"].get(profile_id)
+    if not profile or profile.get("role") != "enthusiast":
+        raise ValueError("当前只有健身爱好者身份支持真实健康数据同步。")
+
+    source = str(payload.get("source") or "apple-healthkit").strip()
+    source_label = native_device_label(source)
+    device_name = str(payload.get("deviceName") or "").strip()
+    devices = [source_label]
+    if device_name:
+        devices.append(device_name)
+    for item in payload.get("devices", []):
+        clean = str(item or "").strip()
+        if clean:
+            devices.append(clean)
+
+    metrics = payload.get("metrics") or {}
+    height_cm = parse_optional_int(metrics.get("heightCm") or metrics.get("height"))
+    weight_kg = parse_optional_float(metrics.get("weightKg") or metrics.get("weight"))
+    body_fat = parse_optional_float(metrics.get("bodyFat"))
+    resting_heart_rate = parse_optional_int(metrics.get("restingHeartRate"))
+    step_count = parse_optional_int(metrics.get("stepCount") or metrics.get("steps"))
+    active_energy = parse_optional_float(metrics.get("activeEnergyBurned") or metrics.get("activeEnergy"))
+
+    if height_cm and height_cm > 0:
+        profile["heightCm"] = height_cm
+    if weight_kg and weight_kg > 0:
+        profile["weightKg"] = round(weight_kg, 1)
+    if body_fat is not None and 0 < body_fat < 100:
+        profile["bodyFat"] = round(body_fat, 1)
+    elif profile.get("gender") and profile.get("heightCm") and profile.get("weightKg"):
+        bmi = calculate_bmi(profile.get("heightCm"), profile.get("weightKg"))
+        if bmi:
+            profile["bodyFat"] = estimate_body_fat(profile.get("gender"), bmi)
+
+    if resting_heart_rate and resting_heart_rate > 0:
+        profile["restingHeartRate"] = resting_heart_rate
+
+    profile["connectedDevices"] = merge_device_labels(profile.get("connectedDevices", []), devices)
+    profile["healthSource"] = source_label
+    profile["deviceSyncedAt"] = local_time_label()
+    profile["healthSnapshot"] = {
+        **(profile.get("healthSnapshot") or {}),
+        "source": source_label,
+        "deviceName": device_name,
+        "bmi": calculate_bmi(profile.get("heightCm"), profile.get("weightKg")),
+        "heightCm": profile.get("heightCm"),
+        "weightKg": profile.get("weightKg"),
+        "bodyFat": profile.get("bodyFat"),
+        "restingHeartRate": profile.get("restingHeartRate"),
+        "stepCount": step_count,
+        "activeEnergyBurned": round(active_energy, 1) if active_energy is not None else None,
+        "syncedAt": now_utc().isoformat(),
+    }
+
+    imported_workout_ids = set(profile.get("externalWorkoutIds", []))
+    imported_count = 0
+
+    for workout in payload.get("workouts", []):
+        checkin = build_native_checkin_payload(source, workout or {})
+        if not checkin or checkin["externalId"] in imported_workout_ids:
+            continue
+
+        imported_workout_ids.add(checkin["externalId"])
+        profile.setdefault("checkins", []).insert(0, checkin)
+        post_id = f"post-{uuid.uuid4().hex[:10]}"
+        state["posts"][post_id] = {
+            "id": post_id,
+            "authorProfileId": profile_id,
+            "createdAt": checkin["createdAt"],
+            "content": f"通过 {source_label} 同步了一次 {checkin['sportLabel']} 训练，持续 {checkin['duration']} 分钟，消耗 {checkin['calories']} kcal。",
+            "meta": f"{source_label} · {profile.get('locationLabel', DEFAULT_POSITION['label'])}",
+            "media": [],
+            "likes": [],
+            "comments": [],
+            "checkin": deepcopy(checkin),
+        }
+        imported_count += 1
+
+    profile["externalWorkoutIds"] = list(sorted(imported_workout_ids))[-400:]
+    session["currentActorProfileId"] = profile_id
+
+    response = bootstrap_response(state, session)
+    response["nativeSyncSummary"] = {
+        "source": source_label,
+        "importedWorkoutCount": imported_count,
+        "connectedDevices": profile.get("connectedDevices", []),
+        "syncedAt": profile.get("deviceSyncedAt", ""),
+    }
+    return response
 
 
 class FitHubHandler(BaseHTTPRequestHandler):
@@ -1776,6 +2023,17 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     profile["bodyFat"] = body_fat
                 session["currentActorProfileId"] = profile_id
                 return bootstrap_response(state, session)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/health/native-sync":
+            def action(state):
+                session = ensure_session(state, session_id)
+                return apply_native_health_sync(state, session, payload)
 
             try:
                 self._write_json(self._with_state(action))

@@ -1,0 +1,25 @@
+name: FitHubNative
+options:
+  minimumXcodeGenVersion: 2.38.0
+configs:
+  Debug: debug
+  Release: release
+targets:
+  FitHubNative:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fithub.native
+        INFOPLIST_FILE: Config/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Config/FitHubNative.entitlements
+        SWIFT_VERSION: 5.10
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_NAME: FitHubNative
+        GENERATE_INFOPLIST_FILE: NO
+        DEVELOPMENT_TEAM: ""
+    scheme:
+      testTargets: []

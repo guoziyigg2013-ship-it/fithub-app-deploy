@@ -3625,7 +3625,7 @@ function renderHealthFeature(profile) {
       <div class="section-title-row">
         <div>
           <h3>健康概览</h3>
-          <p class="result-tip">这里会作为你自己的身体数据中心，后续可衔接智能秤和健康设备。</p>
+          <p class="result-tip">这里会作为你自己的身体数据中心。网页端展示已同步结果，真实设备接入将通过原生版完成。</p>
         </div>
       </div>
       <article class="summary-card summary-card--health">
@@ -3670,7 +3670,7 @@ function renderHealthFeature(profile) {
       <div class="section-title-row">
         <div>
           <h3>外接设备</h3>
-          <p class="result-tip">这里支持模拟连接 Apple Watch、小米手表和智能秤，便于你正式测试设备联动。</p>
+          <p class="result-tip">Apple Health / Apple Watch 将通过原生 iOS 版同步。当前网页按钮仅保留演示入口，方便继续走通界面联调。</p>
         </div>
       </div>
       <section class="device-list">
@@ -3682,7 +3682,7 @@ function renderHealthFeature(profile) {
           ${
             connectedSet.has("Apple Watch")
               ? '<span class="status-pill">已连接</span>'
-              : '<button class="mini-button mini-button--accent" data-sync-health-device="apple-watch" type="button">模拟连接</button>'
+              : '<button class="mini-button mini-button--accent" data-sync-health-device="apple-watch" type="button">演示接入</button>'
           }
         </article>
         <article class="device-row">
@@ -3693,7 +3693,7 @@ function renderHealthFeature(profile) {
           ${
             connectedSet.has("小米手表")
               ? '<span class="status-pill">已连接</span>'
-              : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-watch" type="button">模拟连接</button>'
+              : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-watch" type="button">演示接入</button>'
           }
         </article>
         <article class="device-row">
@@ -3704,7 +3704,7 @@ function renderHealthFeature(profile) {
           ${
             connectedSet.has("小米智能秤")
               ? '<span class="status-pill">已连接</span>'
-              : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-scale" type="button">模拟连接</button>'
+              : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-scale" type="button">演示接入</button>'
           }
         </article>
       </section>
