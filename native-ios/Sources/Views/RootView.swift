@@ -7,6 +7,7 @@ struct RootView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    setupCard
                     loginCard
                     if let profile = store.currentProfile {
                         profileCard(profile)
@@ -25,9 +26,63 @@ struct RootView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("FitHub 原生同步")
             .task {
-                await store.bootstrapIfPossible()
+                await store.prepareForLaunch()
             }
         }
+    }
+
+    private var setupCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("iPhone 真机首跑检查")
+                .font(.headline)
+            Text("先确认账户、Apple Health 权限和最近同步状态，再开始读取预览和同步真实数据。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 10) {
+                setupRow(
+                    icon: "network",
+                    title: "服务地址",
+                    value: store.serverHostLabel
+                )
+                setupRow(
+                    icon: "person.crop.circle.badge.checkmark",
+                    title: "当前身份",
+                    value: store.currentProfile.map { "\($0.name) · \(roleLabel($0.role))" } ?? store.selectedRoleLabel
+                )
+                setupRow(
+                    icon: "heart.text.square",
+                    title: "Apple Health",
+                    value: store.healthPermissionStatus
+                )
+                setupRow(
+                    icon: "clock.badge.checkmark",
+                    title: "最近同步",
+                    value: store.lastSyncSummary
+                )
+            }
+
+            HStack(spacing: 12) {
+                Button("检查权限") {
+                    Task {
+                        await store.refreshHealthPermissionStatus()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(store.isBusy)
+
+                Button("刷新状态") {
+                    Task {
+                        await store.refreshAccount()
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.isBusy)
+            }
+        }
+        .padding(18)
+        .background(.background)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private var loginCard: some View {
@@ -132,6 +187,10 @@ struct RootView: View {
             Text("先读取 Apple Health，再把 Apple Watch 和健康数据同步回你的 FitHub 正式账户。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                statusChip("当前身份：\(store.selectedRoleLabel)")
+                statusChip(store.healthPermissionBadge)
+            }
             HStack(spacing: 12) {
                 Button("读取预览") {
                     Task {
@@ -187,6 +246,38 @@ struct RootView: View {
                 .fontWeight(.medium)
         }
         .font(.subheadline)
+    }
+
+    private func setupRow(icon: String, title: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 28, height: 28)
+                .background(Color.orange.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.subheadline.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func statusChip(_ label: String) -> some View {
+        Text(label)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(Capsule())
     }
 
     private func roleLabel(_ role: String) -> String {
