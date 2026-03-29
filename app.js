@@ -885,6 +885,7 @@ const fabButton = document.getElementById("fabButton");
 const SESSION_STORAGE_KEY = "fithub_trial_session_id";
 const SNAPSHOT_STORAGE_KEY = "fithub_trial_snapshot_v2";
 const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
+const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
 const REGISTER_WHEEL_ITEM_HEIGHT = 52;
 const REGISTER_WHEEL_FIELDS = {
   height_cm: {
@@ -1054,6 +1055,49 @@ function storeSnapshot(payload) {
   }
 }
 
+function getStoredProfileBackups() {
+  try {
+    const raw = window.localStorage.getItem(PROFILE_BACKUP_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function storeProfileBackups(items) {
+  try {
+    window.localStorage.setItem(PROFILE_BACKUP_STORAGE_KEY, JSON.stringify(items));
+  } catch (_error) {
+    // Ignore storage quota failures.
+  }
+}
+
+function rememberManagedProfileBackups(payload) {
+  const managedIds = payload?.session?.managedProfileIds || [];
+  const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+  if (!managedIds.length || !profiles.length) return;
+
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+  const merged = new Map();
+  getStoredProfileBackups().forEach((item) => {
+    const role = item?.role || "";
+    const phone = normalizePhone(item?.phone);
+    if (!roleConfig[role] || !phone || !item?.profile) return;
+    merged.set(`${role}:${phone}`, item);
+  });
+
+  managedIds.forEach((profileId) => {
+    const profile = profileMap.get(profileId);
+    const role = profile?.role || "";
+    const phone = normalizePhone(profile?.phone);
+    if (!roleConfig[role] || !phone) return;
+    merged.set(`${role}:${phone}`, { role, phone, profile });
+  });
+
+  storeProfileBackups(Array.from(merged.values()).slice(0, 12));
+}
+
 function normalizePhone(value = "") {
   return String(value).replace(/\D+/g, "");
 }
@@ -1155,11 +1199,19 @@ function getStoredAccountForRole(role) {
 }
 
 function findRecoverableSnapshotProfile(role, phone) {
+  const phoneKey = normalizePhone(phone);
+  if (!roleConfig[role] || !phoneKey) return null;
+
+  const backup = getStoredProfileBackups().find((item) => {
+    return item?.role === role && normalizePhone(item?.phone) === phoneKey && item?.profile;
+  });
+  if (backup?.profile) {
+    return backup.profile;
+  }
+
   const snapshot = getStoredSnapshot();
   const profiles = Array.isArray(snapshot?.profiles) ? snapshot.profiles : [];
   const managedIds = new Set(snapshot?.session?.managedProfileIds || []);
-  const phoneKey = normalizePhone(phone);
-  if (!roleConfig[role] || !phoneKey) return null;
 
   return (
     profiles.find((profile) => {
@@ -1287,6 +1339,7 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   state.managedProfileIds = payload.session.managedProfileIds || [];
   state.managedAccounts = (payload.session.managedAccounts || []).map((item) => normalizeStoredAccount(item));
   rememberManagedAccounts(state.managedAccounts);
+  rememberManagedProfileBackups(payload);
   state.currentActorProfileId = payload.session.currentActorProfileId || state.managedProfileIds[0] || "";
   state.followSet = new Set(payload.followSet || []);
   state.bookings = payload.bookings || [];

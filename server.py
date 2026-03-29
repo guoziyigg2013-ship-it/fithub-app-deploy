@@ -39,6 +39,7 @@ SUPABASE_SERVICE_ROLE_KEY = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip
 SUPABASE_STATE_TABLE = (os.getenv("FITHUB_SUPABASE_TABLE") or "fithub_app_state").strip()
 SUPABASE_STATE_ROW_ID = (os.getenv("FITHUB_SUPABASE_ROW_ID") or "primary").strip()
 SUPABASE_TIMEOUT_SECONDS = float(os.getenv("FITHUB_SUPABASE_TIMEOUT") or "12")
+SUPABASE_BACKUP_PREFIX = f"{SUPABASE_STATE_ROW_ID}-backup"
 
 
 def url_with_prefix(path="/"):
@@ -356,16 +357,27 @@ def load_state_from_supabase():
         "GET",
         f"{SUPABASE_STATE_TABLE}?id=eq.{quote(SUPABASE_STATE_ROW_ID, safe='')}&select=payload",
     )
-    if not rows:
-        return None
-    payload = rows[0].get("payload")
-    if not isinstance(payload, dict):
-        return None
-    return sanitize_state(payload)
+    if rows:
+        payload = rows[0].get("payload")
+        if isinstance(payload, dict):
+            return sanitize_state(payload)
+
+    backup_rows = supabase_request(
+        "GET",
+        f"{SUPABASE_STATE_TABLE}?select=id,payload,updated_at&order=updated_at.desc&limit=20",
+    ) or []
+    for row in backup_rows:
+        row_id = str(row.get("id") or "")
+        payload = row.get("payload")
+        if row_id.startswith(SUPABASE_BACKUP_PREFIX) and isinstance(payload, dict):
+            storage_log(f"Supabase primary row missing, restored from backup row: {row_id}")
+            return sanitize_state(payload)
+    return None
 
 
 def save_state_to_supabase(state):
     payload = sanitize_state(deepcopy(state))
+    saved_at = now_utc()
     supabase_request(
         "POST",
         f"{SUPABASE_STATE_TABLE}?on_conflict=id",
@@ -373,8 +385,18 @@ def save_state_to_supabase(state):
             {
                 "id": SUPABASE_STATE_ROW_ID,
                 "payload": payload,
-                "updated_at": now_utc().isoformat(),
-            }
+                "updated_at": saved_at.isoformat(),
+            },
+            {
+                "id": f"{SUPABASE_BACKUP_PREFIX}-latest",
+                "payload": payload,
+                "updated_at": saved_at.isoformat(),
+            },
+            {
+                "id": f"{SUPABASE_BACKUP_PREFIX}-{saved_at.strftime('%Y%m%d%H')}",
+                "payload": payload,
+                "updated_at": saved_at.isoformat(),
+            },
         ],
         prefer="resolution=merge-duplicates,return=minimal",
     )
