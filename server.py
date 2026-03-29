@@ -494,6 +494,80 @@ def ensure_profile_account(state, profile, phone=""):
     return account
 
 
+def find_account_by_phone(state, phone, preferred_role=""):
+    phone_key = normalize_phone(phone)
+    if not phone_key:
+        return None
+
+    fallback = None
+    for account in ensure_account_registry(state).values():
+        if normalize_phone(account.get("phone")) != phone_key:
+            continue
+        if preferred_role and preferred_role in (account.get("profilesByRole") or {}):
+            return account
+        if fallback is None:
+            fallback = account
+    return fallback
+
+
+def reconcile_account_registry(state):
+    old_accounts = ensure_account_registry(state)
+    rebuilt_accounts = {}
+    phone_index = {}
+    changed = False
+
+    def build_account_seed(existing_account, phone=""):
+        normalized_phone = normalize_phone(phone or (existing_account or {}).get("phone"))
+        return {
+            "id": (existing_account or {}).get("id") or f"acct-{uuid.uuid4().hex[:10]}",
+            "restoreToken": (existing_account or {}).get("restoreToken") or f"restore-{uuid.uuid4().hex}",
+            "phone": normalized_phone,
+            "profilesByRole": {},
+            "createdAt": (existing_account or {}).get("createdAt") or iso_at(),
+        }
+
+    for profile in state.get("profiles", {}).values():
+        role = str(profile.get("role") or "").strip()
+        if role not in {"enthusiast", "gym", "coach"}:
+            continue
+
+        existing_account = old_accounts.get(profile.get("accountId") or "")
+        phone_key = normalize_phone(profile.get("phone") or (existing_account or {}).get("phone"))
+        target = None
+
+        if phone_key and phone_key in phone_index:
+            target = rebuilt_accounts[phone_index[phone_key]]
+        elif existing_account and existing_account.get("id") in rebuilt_accounts:
+            target = rebuilt_accounts[existing_account["id"]]
+        elif existing_account:
+            target = build_account_seed(existing_account, phone_key)
+            rebuilt_accounts[target["id"]] = target
+        else:
+            target = build_account_seed(None, phone_key)
+            rebuilt_accounts[target["id"]] = target
+            changed = True
+
+        if phone_key:
+            if target.get("phone") != phone_key:
+                target["phone"] = phone_key
+                changed = True
+            phone_index[phone_key] = target["id"]
+
+        if profile.get("accountId") != target["id"]:
+            profile["accountId"] = target["id"]
+            changed = True
+
+        if target["profilesByRole"].get(role) != profile["id"]:
+            target["profilesByRole"][role] = profile["id"]
+            changed = True
+
+    if rebuilt_accounts != old_accounts:
+        state["accounts"] = rebuilt_accounts
+        changed = True
+
+    return changed
+
+
 def attach_account_to_session(state, session, account, preferred_role=""):
     role_profiles = account.get("profilesByRole", {})
     for profile_id in role_profiles.values():
@@ -1159,7 +1233,10 @@ def load_state():
             if state is None:
                 state = initial_state()
                 save_state_to_supabase(state)
-            if merge_demo_state(state):
+            changed = merge_demo_state(state)
+            if reconcile_account_registry(state):
+                changed = True
+            if changed:
                 save_state_to_supabase(state)
             return sanitize_state(state)
         except Exception as exc:
@@ -1168,7 +1245,10 @@ def load_state():
     ensure_data_file()
     with STATE_FILE.open("r", encoding="utf-8") as handle:
         state = sanitize_state(json.load(handle))
-    if merge_demo_state(state):
+    changed = merge_demo_state(state)
+    if reconcile_account_registry(state):
+        changed = True
+    if changed:
         save_state(state)
     return sanitize_state(state)
 
@@ -1822,6 +1902,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/auth/login":
             def action(state):
                 session = ensure_session(state, session_id)
+                reconcile_account_registry(state)
                 role = str(payload.get("role") or "").strip()
                 account = find_account_by_token(state, payload.get("accountId"), payload.get("restoreToken"))
                 profile = None
@@ -1833,6 +1914,11 @@ class FitHubHandler(BaseHTTPRequestHandler):
 
                 if role not in {"enthusiast", "gym", "coach"}:
                     raise ValueError("请选择要登录的身份。")
+
+                account = find_account_by_phone(state, payload.get("phone"), role)
+                if account:
+                    attach_account_to_session(state, session, account, role)
+                    return bootstrap_response(state, session)
 
                 profile = find_profile_by_role_phone(state, role, payload.get("phone"))
                 if not profile:
@@ -1851,6 +1937,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/auth/restore":
             def action(state):
                 session = ensure_session(state, session_id)
+                reconcile_account_registry(state)
                 for account in payload.get("accounts", []):
                     item = account or {}
                     matched_account = find_account_by_token(state, item.get("accountId") or item.get("id"), item.get("restoreToken"))
@@ -1861,6 +1948,10 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     role = str(item.get("role") or "").strip()
                     phone = item.get("phone")
                     if role not in {"enthusiast", "gym", "coach"}:
+                        continue
+                    matched_account = find_account_by_phone(state, phone, role)
+                    if matched_account:
+                        attach_account_to_session(state, session, matched_account, role)
                         continue
                     profile = find_profile_by_role_phone(state, role, phone)
                     if not profile:
@@ -1922,6 +2013,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/register":
             def action(state):
                 session = ensure_session(state, session_id)
+                reconcile_account_registry(state)
                 role = payload["role"]
                 existing_profile = None
                 for profile_id in session["managedProfileIds"]:
@@ -1941,6 +2033,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                             continue
                         account = ensure_profile_account(state, managed_profile)
                         break
+                if not account:
+                    account = find_account_by_phone(state, payload.get("profile", {}).get("phone"), role)
                 if not account and existing_profile:
                     account = ensure_profile_account(state, existing_profile, payload.get("profile", {}).get("phone"))
                 if not account:

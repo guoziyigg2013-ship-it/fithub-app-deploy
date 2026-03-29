@@ -1078,9 +1078,22 @@ function getStoredAccounts() {
     const raw = window.localStorage.getItem(ACCOUNT_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
-    return parsed
+    const merged = new Map();
+    parsed
       .map((item) => normalizeStoredAccount(item))
-      .filter((item) => (item.id && item.restoreToken) || item.phone);
+      .filter((item) => (item.id && item.restoreToken) || item.phone)
+      .forEach((item) => {
+        const key = getStoredAccountKey(item);
+        if (!key) return;
+        const current = merged.get(key);
+        merged.set(key, {
+          id: item.id || current?.id || "",
+          restoreToken: item.restoreToken || current?.restoreToken || "",
+          phone: item.phone || current?.phone || "",
+          roles: Array.from(new Set([...(current?.roles || []), ...(item.roles || [])])).filter((role) => roleConfig[role])
+        });
+      });
+    return Array.from(merged.values()).slice(0, 8);
   } catch (_error) {
     return [];
   }
@@ -1095,8 +1108,8 @@ function storeAccounts(accounts) {
 }
 
 function getStoredAccountKey(account) {
+  if (account.phone) return `phone:${account.phone}`;
   if (account.id) return `id:${account.id}`;
-  if (account.phone && account.roles[0]) return `phone:${account.roles[0]}:${account.phone}`;
   return "";
 }
 
@@ -2369,12 +2382,30 @@ async function submitAuthLogin() {
     throw new Error("请输入注册时填写的手机号。");
   }
 
-  await postAndSync(`${API_BASE}/auth/login`, {
-    role,
-    phone,
-    accountId: state.authAccountId,
-    restoreToken: state.authRestoreToken
-  }, { keepOverlay: true });
+  try {
+    await postAndSync(`${API_BASE}/auth/login`, {
+      role,
+      phone,
+      accountId: state.authAccountId,
+      restoreToken: state.authRestoreToken
+    }, { keepOverlay: true });
+    state.authMessage = "";
+  } catch (error) {
+    if (!(canUseToken && phone)) {
+      throw error;
+    }
+
+    state.authAccountId = "";
+    state.authRestoreToken = "";
+
+    await postAndSync(`${API_BASE}/auth/login`, {
+      role,
+      phone,
+      accountId: "",
+      restoreToken: ""
+    }, { keepOverlay: true });
+    state.authMessage = "检测到本机旧凭证已失效，已自动改用手机号找回并刷新这个账号。";
+  }
 
   rememberManagedAccounts(state.managedAccounts);
   state.selectedRole = role;
