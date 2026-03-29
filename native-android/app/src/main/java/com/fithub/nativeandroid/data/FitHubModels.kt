@@ -12,6 +12,12 @@ data class FitHubBootstrap(
     val profiles: List<FitHubProfile>,
 )
 
+data class FitHubLoginRequest(
+    val sessionId: String,
+    val role: String,
+    val phone: String,
+)
+
 data class NativeHealthMetrics(
     val heightCm: Int?,
     val weightKg: Double?,

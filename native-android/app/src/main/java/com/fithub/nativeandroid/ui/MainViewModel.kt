@@ -18,6 +18,7 @@ data class MainUiState(
     val role: String = "enthusiast",
     val sessionId: String = UUID.randomUUID().toString(),
     val profileId: String = "",
+    val resolvedProfileName: String = "",
     val status: String = "连接 Health Connect 后即可把真实训练同步到 FitHub。",
     val preview: HealthPreview? = null,
     val isBusy: Boolean = false,
@@ -37,6 +38,45 @@ class MainViewModel(
     fun updateRole(value: String) = update { copy(role = value) }
     fun updateProfileId(value: String) = update { copy(profileId = value) }
 
+    fun loginToFitHub() {
+        viewModelScope.launch {
+            val state = _uiState.value
+            if (state.phone.isBlank()) {
+                update { copy(status = "请先填写手机号。") }
+                return@launch
+            }
+
+            update { copy(isBusy = true, status = "正在登录 FitHub...") }
+            runCatching {
+                FitHubApiClient(state.serverUrl).login(
+                    sessionId = state.sessionId,
+                    role = state.role,
+                    phone = state.phone,
+                )
+            }
+                .onSuccess { bootstrap ->
+                    val target = bootstrap.profiles.firstOrNull { it.role == "enthusiast" }
+                        ?: bootstrap.profiles.firstOrNull { it.id == bootstrap.currentActorProfileId }
+                        ?: bootstrap.profiles.firstOrNull()
+                    update {
+                        copy(
+                            isBusy = false,
+                            profileId = target?.id.orEmpty(),
+                            resolvedProfileName = target?.name.orEmpty(),
+                            status = if (target != null) {
+                                "已登录 ${target.name}，可以开始读取 Health Connect。"
+                            } else {
+                                "已登录，但还没有找到可同步的训练者身份。"
+                            },
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    update { copy(isBusy = false, status = error.message ?: "FitHub 登录失败。") }
+                }
+        }
+    }
+
     fun loadPreview() {
         viewModelScope.launch {
             update { copy(isBusy = true, status = "正在读取 Health Connect 数据...") }
@@ -54,7 +94,7 @@ class MainViewModel(
         viewModelScope.launch {
             val state = _uiState.value
             if (state.profileId.isBlank()) {
-                update { copy(status = "请先填入训练者 profileId，再同步。") }
+                update { copy(status = "请先登录 FitHub，拿到训练者身份后再同步。") }
                 return@launch
             }
 

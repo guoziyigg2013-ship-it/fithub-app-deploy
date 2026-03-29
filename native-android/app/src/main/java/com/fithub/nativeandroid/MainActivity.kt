@@ -4,7 +4,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -28,7 +28,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.PermissionController
-import androidx.health.connect.client.HealthConnectClient
 import com.fithub.nativeandroid.health.HealthConnectManager
 import com.fithub.nativeandroid.ui.MainUiState
 import com.fithub.nativeandroid.ui.MainViewModel
@@ -55,6 +54,7 @@ class MainActivity : ComponentActivity() {
                     onPhoneChanged = viewModel::updatePhone,
                     onRoleChanged = viewModel::updateRole,
                     onProfileChanged = viewModel::updateProfileId,
+                    onLogin = viewModel::loginToFitHub,
                     onGrantPermissions = {
                         permissionLauncher.launch(healthManager.permissions)
                     },
@@ -74,6 +74,7 @@ private fun MainScreen(
     onPhoneChanged: (String) -> Unit,
     onRoleChanged: (String) -> Unit,
     onProfileChanged: (String) -> Unit,
+    onLogin: () -> Unit,
     onGrantPermissions: () -> Unit,
     onLoadPreview: () -> Unit,
     onSync: () -> Unit,
@@ -103,12 +104,6 @@ private fun MainScreen(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("手机号") },
             )
-            OutlinedTextField(
-                value = uiState.profileId,
-                onValueChange = onProfileChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("训练者 profileId") },
-            )
 
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 listOf("enthusiast" to "健身爱好者", "gym" to "健身房", "coach" to "教练").forEachIndexed { index, option ->
@@ -120,6 +115,21 @@ private fun MainScreen(
                         Text(option.second)
                     }
                 }
+            }
+
+            Button(onClick = onLogin, modifier = Modifier.fillMaxWidth()) {
+                Text(if (uiState.isBusy) "登录中..." else "登录 FitHub")
+            }
+
+            if (uiState.resolvedProfileName.isNotBlank()) {
+                Text("当前训练者：${uiState.resolvedProfileName}", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                OutlinedTextField(
+                    value = uiState.profileId,
+                    onValueChange = onProfileChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("训练者 profileId（高级手动模式）") },
+                )
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -11,37 +11,35 @@ class FitHubApiClient(
     private val baseUrl: String,
 ) {
     fun bootstrap(sessionId: String): FitHubBootstrap {
-        val cleanBase = baseUrl.removeSuffix("/")
-        val apiBase = if (cleanBase.endsWith("/fitness-app-prototype")) {
-            "$cleanBase/api"
-        } else {
-            "$cleanBase/api"
-        }
-        val url = URL("$apiBase/bootstrap?session_id=$sessionId")
+        val url = URL("${apiBase()}/bootstrap?session_id=$sessionId")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 15000
             readTimeout = 15000
         }
-        return connection.useJsonObject { body ->
-            val session = body.getJSONObject("session")
-            val profiles = body.getJSONArray("profiles").toProfiles()
-            FitHubBootstrap(
-                sessionId = session.getString("id"),
-                currentActorProfileId = session.optString("currentActorProfileId").takeIf { it.isNotBlank() },
-                profiles = profiles,
-            )
+        return connection.useJsonObject(::toBootstrap)
+    }
+
+    fun login(sessionId: String, role: String, phone: String): FitHubBootstrap {
+        val url = URL("${apiBase()}/auth/login")
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15000
+            readTimeout = 15000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
         }
+
+        val body = JSONObject()
+            .put("sessionId", sessionId)
+            .put("role", role)
+            .put("phone", phone)
+        connection.outputStream.use { it.write(body.toString().toByteArray()) }
+        return connection.useJsonObject(::toBootstrap)
     }
 
     fun syncHealth(payload: NativeHealthSyncPayload) {
-        val cleanBase = baseUrl.removeSuffix("/")
-        val apiBase = if (cleanBase.endsWith("/fitness-app-prototype")) {
-            "$cleanBase/api"
-        } else {
-            "$cleanBase/api"
-        }
-        val url = URL("$apiBase/health/native-sync")
+        val url = URL("${apiBase()}/health/native-sync")
         val connection = (url.openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15000
@@ -87,6 +85,25 @@ class FitHubApiClient(
         connection.outputStream.use { it.write(body.toString().toByteArray()) }
         connection.useJsonObject { }
     }
+
+    private fun apiBase(): String {
+        val cleanBase = baseUrl.removeSuffix("/")
+        return if (cleanBase.endsWith("/fitness-app-prototype")) {
+            "$cleanBase/api"
+        } else {
+            "$cleanBase/api"
+        }
+    }
+}
+
+private fun toBootstrap(body: JSONObject): FitHubBootstrap {
+    val session = body.getJSONObject("session")
+    val profiles = body.getJSONArray("profiles").toProfiles()
+    return FitHubBootstrap(
+        sessionId = session.getString("id"),
+        currentActorProfileId = session.optString("currentActorProfileId").takeIf { it.isNotBlank() },
+        profiles = profiles,
+    )
 }
 
 private fun JSONArray.toProfiles(): List<FitHubProfile> {
