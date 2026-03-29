@@ -93,6 +93,17 @@ const roleConfig = {
   }
 };
 
+const CHECKIN_SPORTS = [
+  { id: "run", label: "跑步", hint: "户外 / 跑步机", icon: "跑" },
+  { id: "strength", label: "传统力量训练", hint: "器械 / 自由重量", icon: "力" },
+  { id: "cycling", label: "骑行", hint: "动感单车 / 户外", icon: "骑" },
+  { id: "hiit", label: "HIIT", hint: "燃脂间歇", icon: "燃" },
+  { id: "pilates", label: "普拉提", hint: "核心稳定", icon: "普" },
+  { id: "swim", label: "游泳", hint: "有氧耐力", icon: "泳" },
+  { id: "yoga", label: "瑜伽拉伸", hint: "恢复舒展", icon: "伸" },
+  { id: "basketball", label: "球类运动", hint: "篮球 / 羽毛球", icon: "球" }
+];
+
 function createDemoImage(title, accentA, accentB) {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="800" height="520" viewBox="0 0 800 520">
@@ -543,26 +554,13 @@ function createInitialProfiles() {
       tags: ["模拟用户", "减脂", "打卡"],
       level: "规律训练",
       goal: "减脂 5kg，维持一周四练",
-      followers: 1280,
-      following: 88,
+      followers: 0,
+      following: 0,
       ratingAvg: 0,
       ratingCount: 0,
-      listed: true,
-      posts: [
-        {
-          time: "2 小时前",
-          content: "模拟用户 A 今天完成胸背训练，方便测试动态流、点赞预期和时间排序。",
-          meta: "模拟动态 · 完成 720 kcal",
-          media: [
-            {
-              type: "image",
-              url: createDemoImage("胸背训练", "#f4a24a", "#df6d22"),
-              name: "demo-workout-a.jpg"
-            }
-          ]
-        },
-        { time: "昨天", content: "训练后加了 20 分钟有氧和肩颈拉伸。", meta: "模拟动态 · 恢复训练" }
-      ],
+      listed: false,
+      posts: [],
+      checkins: [],
       reviews: []
     },
     {
@@ -582,23 +580,13 @@ function createInitialProfiles() {
       tags: ["模拟用户", "新手入门", "塑形"],
       level: "新手入门",
       goal: "每周三练，改善体态",
-      followers: 960,
-      following: 46,
+      followers: 0,
+      following: 0,
       ratingAvg: 0,
       ratingCount: 0,
-      listed: true,
-      posts: [
-        {
-          time: "3 小时前",
-          content: "模拟用户 B 刚预约了晚间团课，主要测试预约和订单展示流程。",
-          meta: "模拟动态 · 预约记录"
-        },
-        {
-          time: "2 天前",
-          content: "第一次打卡力量区，准备长期记录训练变化。",
-          meta: "模拟动态 · 训练日记"
-        }
-      ],
+      listed: false,
+      posts: [],
+      checkins: [],
       reviews: []
     },
     {
@@ -774,35 +762,7 @@ function createInitialProfiles() {
     .concat(createSupplementalDemoProfiles());
 }
 
-const bookingCards = [
-  {
-    title: "模拟教练 A · 林燃 私教 1v1 体验课",
-    profileId: "coach-demo-a",
-    place: "厦门 · 思明区",
-    time: "今天 19:30",
-    status: "待上课",
-    action: "去评分",
-    price: "¥260/小时"
-  },
-  {
-    title: "模拟健身房 A · 万象燃炼馆 月卡",
-    profileId: "gym-demo-a",
-    place: "厦门 · 思明区",
-    time: "有效期至 2026-04-18",
-    status: "进行中",
-    action: "查看主页",
-    price: "¥119/月"
-  },
-  {
-    title: "模拟健身房 B · 轻氧塑能馆 恢复课程包",
-    profileId: "gym-demo-b",
-    place: "厦门 · 湖里区",
-    time: "周六 10:00",
-    status: "待确认",
-    action: "查看主页",
-    price: "¥699/8节"
-  }
-];
+const bookingCards = [];
 
 const appView = document.getElementById("appView");
 const overlay = document.getElementById("registerOverlay");
@@ -847,7 +807,7 @@ const state = {
   profiles: createInitialProfiles(),
   managedProfileIds: [],
   currentActorProfileId: "",
-  activeProfileId: "enthusiast-demo-a",
+  activeProfileId: "",
   followSet: new Set(),
   ratingDrafts: {},
   reviewDrafts: {},
@@ -861,6 +821,13 @@ const state = {
   composeMedia: [],
   bookings: bookingCards,
   threads: [],
+  checkinDraft: {
+    sport: "strength",
+    duration: "",
+    distance: "",
+    calories: "",
+    note: ""
+  },
   chatTargetProfileId: "",
   chatDraft: "",
   sessionId: "",
@@ -1724,24 +1691,7 @@ function renderField(field, seed) {
 }
 
 function createProfilePosts(role, name, summary) {
-  if (role === "gym") {
-    return [
-      { time: "刚刚", content: `${name} 已完成入驻，主页已生成。`, meta: "门店动态" },
-      { time: "稍后", content: summary || "欢迎大家来体验器械和团课。", meta: "入驻欢迎" }
-    ];
-  }
-
-  if (role === "coach") {
-    return [
-      { time: "刚刚", content: `${name} 已入驻平台，可开始接受预约。`, meta: "教练动态" },
-      { time: "稍后", content: summary || "欢迎聊训练目标，我会帮你定制计划。", meta: "招新中" }
-    ];
-  }
-
-  return [
-    { time: "刚刚", content: `${name} 已加入 FitHub，开始记录训练生活。`, meta: "加入社区" },
-    { time: "稍后", content: summary || "新的训练计划已经开启。", meta: "训练目标" }
-  ];
+  return [];
 }
 
 function buildProfileFromForm(role, formData, existingProfile) {
@@ -1791,6 +1741,7 @@ function buildProfileFromForm(role, formData, existingProfile) {
       contactName: (formData.get("contact_name") || "").toString(),
       phone: (formData.get("phone") || "").toString(),
       posts: existingProfile?.posts?.length ? existingProfile.posts : createProfilePosts(role, name, intro || facilities),
+      checkins: existingProfile?.checkins || [],
       reviews: existingProfile?.reviews || []
     };
   }
@@ -1834,6 +1785,7 @@ function buildProfileFromForm(role, formData, existingProfile) {
       ratingCount: existingProfile?.ratingCount || 0,
       listed: true,
       posts: existingProfile?.posts?.length ? existingProfile.posts : createProfilePosts(role, name, intro || specialties),
+      checkins: existingProfile?.checkins || [],
       reviews: existingProfile?.reviews || []
     };
   }
@@ -1870,6 +1822,7 @@ function buildProfileFromForm(role, formData, existingProfile) {
     ratingCount: 0,
     listed: true,
     posts: existingProfile?.posts?.length ? existingProfile.posts : createProfilePosts(role, name, goal),
+    checkins: existingProfile?.checkins || [],
     reviews: existingProfile?.reviews || []
   };
 }
@@ -1930,6 +1883,51 @@ async function submitComposePost() {
   state.composeMedia = [];
   syncNavActive();
   closeOverlay();
+  renderPage();
+}
+
+async function submitCheckin() {
+  const profile = getMyPageProfile();
+  if (!profile || profile.role !== "enthusiast") {
+    throw new Error("请先用健身爱好者身份注册后再打卡。");
+  }
+
+  const sport = getCheckinSport(state.checkinDraft.sport);
+  const duration = Number(state.checkinDraft.duration || 0);
+  const calories = Number(state.checkinDraft.calories || 0);
+  const distance = Number(state.checkinDraft.distance || 0);
+  const note = (state.checkinDraft.note || "").trim();
+
+  if (!duration) {
+    throw new Error("请先填写训练时长。");
+  }
+
+  const detailParts = [`${sport.label} ${duration} 分钟`];
+  if (distance) detailParts.push(`${distance} km`);
+  if (calories) detailParts.push(`${calories} kcal`);
+
+  await postAndSync(`${API_BASE}/checkin/create`, {
+    profileId: profile.id,
+    sportId: sport.id,
+    sportLabel: sport.label,
+    duration,
+    calories,
+    distance,
+    note,
+    content: note || `完成了一次 ${detailParts.join(" · ")} 的训练打卡。`
+  });
+
+  state.activePage = "profile";
+  state.activeProfileId = profile.id;
+  state.profileSubpage = "";
+  state.checkinDraft = {
+    sport: sport.id,
+    duration: "",
+    distance: "",
+    calories: "",
+    note: ""
+  };
+  syncNavActive();
   renderPage();
 }
 
@@ -2153,7 +2151,9 @@ function renderDiscover() {
 }
 
 function renderBooking() {
-  const bookingList = state.bookings.length ? state.bookings : bookingCards;
+  const myProfile = getMyPageProfile();
+  const bookingList = state.bookings || [];
+  const bookingDashboard = myProfile ? getBookingDashboard(myProfile) : { pendingCount: 0, weeklyCheckins: 0, points: 0 };
   appView.innerHTML = `
     <section class="page-header">
       <div>
@@ -2166,45 +2166,47 @@ function renderBooking() {
     <article class="summary-card">
       <div>
         <span>本周待上课</span>
-        <strong>${bookingList.length}</strong>
+        <strong>${bookingDashboard.pendingCount}</strong>
       </div>
       <div>
-        <span>可用优惠券</span>
-        <strong>3</strong>
+        <span>本周打卡</span>
+        <strong>${bookingDashboard.weeklyCheckins}</strong>
       </div>
       <div>
         <span>积分</span>
-        <strong>860</strong>
+        <strong>${bookingDashboard.points}</strong>
       </div>
     </article>
 
     <section class="stack-list">
-      ${bookingList
-        .map(
-          (card) => `
-            <article class="booking-card">
-              <div class="booking-top">
-                <strong>${escapeHtml(card.title)}</strong>
-                <span class="status-pill">${escapeHtml(card.status)}</span>
-              </div>
-              <p>${escapeHtml(card.place)}</p>
-              <div class="community-meta">
-                <span>${escapeHtml(card.price || "待确认")}</span>
-                <span>${escapeHtml(card.time)}</span>
-              </div>
-              <div class="booking-bottom">
-                <span>支持测试查看详情 / 去评分 / 跳转主页</span>
-                <button class="cta" type="button" data-open-profile="${card.profileId || card.targetProfileId || ""}">${escapeHtml(card.action)}</button>
-              </div>
-            </article>
-          `
-        )
-        .join("")}
+      ${bookingList.length
+        ? bookingList
+            .map(
+              (card) => `
+                <article class="booking-card">
+                  <div class="booking-top">
+                    <strong>${escapeHtml(card.title)}</strong>
+                    <span class="status-pill">${escapeHtml(card.status)}</span>
+                  </div>
+                  <p>${escapeHtml(card.place)}</p>
+                  <div class="community-meta">
+                    <span>${escapeHtml(card.price || "待确认")}</span>
+                    <span>${escapeHtml(card.time)}</span>
+                  </div>
+                  <div class="booking-bottom">
+                    <span>支持查看订单详情、跳转主页和后续评分。</span>
+                    <button class="cta" type="button" data-open-profile="${card.profileId || card.targetProfileId || ""}">${escapeHtml(card.action)}</button>
+                  </div>
+                </article>
+              `
+            )
+            .join("")
+        : '<article class="empty-card">你还没有正式预约。去首页、探索或教练/场馆主页选择价格方案后，这里才会出现排期和订单。</article>'}
     </section>
 
     <article class="helper-card">
-      <strong>测试说明</strong>
-      <p>本页用于测试预约入口、价格展示、订单状态和跳转逻辑。教练与健身房定价也会同步出现在首页卡片、主页定价模块和探索流里。</p>
+      <strong>预约说明</strong>
+      <p>教练与健身房的定价会同步展示在首页卡片、主页定价模块和探索流里；完成正式预约后，本页才会出现待上课与订单内容。</p>
     </article>
   `;
 }
@@ -2287,6 +2289,16 @@ function renderPostCard(profile, post, options = {}) {
   const { compact = false, showProfileButton = true } = options;
   const commentDraft = state.commentDrafts[post.id] || "";
   const showChatButton = canOpenChatWith(profile.id);
+  const checkinMeta = post.checkin
+    ? `
+        <div class="checkin-inline-row">
+          <span>${escapeHtml(post.checkin.sportLabel || "训练打卡")}</span>
+          <span>${escapeHtml(`${post.checkin.duration || 0} 分钟`)}</span>
+          ${post.checkin.calories ? `<span>${escapeHtml(`${post.checkin.calories} kcal`)}</span>` : ""}
+          ${post.checkin.distance ? `<span>${escapeHtml(`${post.checkin.distance} km`)}</span>` : ""}
+        </div>
+      `
+    : "";
 
   return `
     <article class="timeline-card ${compact ? "timeline-card--compact" : ""}">
@@ -2301,6 +2313,7 @@ function renderPostCard(profile, post, options = {}) {
         <span>${escapeHtml(getRoleLabel(profile.role))}</span>
       </div>
       <p>${escapeHtml(post.content)}</p>
+      ${checkinMeta}
       ${renderPostMedia(post)}
       <small>${escapeHtml(post.meta)}</small>
       <div class="post-action-bar">
@@ -2410,14 +2423,82 @@ function renderProfileFeatureSection(profile) {
   `;
 }
 
+function getCheckinSport(optionId) {
+  return CHECKIN_SPORTS.find((item) => item.id === optionId) || CHECKIN_SPORTS[0];
+}
+
+function getSafeDate(value) {
+  const date = value ? new Date(value) : null;
+  return Number.isNaN(date?.getTime()) ? null : date;
+}
+
+function isSameLocalDay(left, right) {
+  return (
+    left &&
+    right &&
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+function getWeekAnchor(date) {
+  const anchor = new Date(date);
+  const day = anchor.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  anchor.setHours(0, 0, 0, 0);
+  anchor.setDate(anchor.getDate() - diff);
+  return anchor;
+}
+
+function getProfileCheckins(profile) {
+  return [...(profile?.checkins || [])].sort(
+    (left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()
+  );
+}
+
+function getWeeklyCheckins(profile) {
+  const weekStart = getWeekAnchor(new Date());
+  return getProfileCheckins(profile).filter((item) => {
+    const createdAt = getSafeDate(item.createdAt);
+    return createdAt && createdAt >= weekStart;
+  });
+}
+
+function getTodayCheckins(profile) {
+  const today = new Date();
+  return getProfileCheckins(profile).filter((item) => isSameLocalDay(getSafeDate(item.createdAt), today));
+}
+
+function getProfilePoints(profile, bookings = []) {
+  const weeklyCheckins = getWeeklyCheckins(profile).length;
+  const completedBookings = bookings.filter((item) => ["已预约", "待上课", "已完成"].includes(item.status)).length;
+  return weeklyCheckins * 12 + completedBookings * 18;
+}
+
 function getPersonalDashboard(profile) {
-  const posts = profile.posts || [];
-  const todaysPosts = posts.filter((post) => /刚刚|分钟|小时|今天/.test(post.time || "")).length;
+  const checkins = getProfileCheckins(profile);
+  const todayCheckins = getTodayCheckins(profile);
+  const totalMinutes = checkins.reduce((sum, item) => sum + Number(item.duration || 0), 0);
+  const badgeCount =
+    (checkins.length >= 1 ? 1 : 0) +
+    (checkins.length >= 3 ? 1 : 0) +
+    (checkins.length >= 7 ? 1 : 0) +
+    (totalMinutes >= 300 ? 1 : 0);
 
   return {
-    trainingScore: Math.max(72, posts.length * 26 + profile.following * 12 + 48),
-    todayTraining: Math.max(1, todaysPosts || 1),
-    badges: Math.max(6, Math.min(32, 6 + posts.length * 2 + profile.following))
+    trainingScore: totalMinutes ? (totalMinutes / 60).toFixed(totalMinutes >= 600 ? 0 : 1) : "0",
+    todayTraining: String(todayCheckins.length),
+    badges: String(badgeCount)
+  };
+}
+
+function getBookingDashboard(profile) {
+  const bookings = state.bookings || [];
+  return {
+    pendingCount: bookings.filter((item) => ["待上课", "待确认", "已预约"].includes(item.status)).length,
+    weeklyCheckins: getWeeklyCheckins(profile).length,
+    points: getProfilePoints(profile, bookings)
   };
 }
 
@@ -2428,6 +2509,28 @@ function renderPersonalShortcutTile(label, sublabel, icon, attrs = "") {
       <strong>${escapeHtml(label)}</strong>
       <span>${escapeHtml(sublabel)}</span>
     </button>
+  `;
+}
+
+function renderCheckinEntry(profile) {
+  const activeSport = getCheckinSport(state.checkinDraft.sport);
+  const weeklyCount = getWeeklyCheckins(profile).length;
+  const todayCount = getTodayCheckins(profile).length;
+
+  return `
+    <article class="dashboard-checkin">
+      <div class="dashboard-checkin-copy">
+        <span class="dashboard-checkin-kicker">本周已打卡 ${weeklyCount} 次</span>
+        <h3>今日训练，马上记录</h3>
+        <p>像 Keep 一样，把跑步、传统力量训练、普拉提这些项目直接记进你的个人训练档案。</p>
+        <div class="dashboard-checkin-pills">
+          <span>${escapeHtml(activeSport.label)}</span>
+          <span>今日 ${todayCount} 次</span>
+          <span>自动进入我的动态</span>
+        </div>
+      </div>
+      <button class="mini-button mini-button--accent" data-open-my-feature="checkin" type="button">去打卡</button>
+    </article>
   `;
 }
 
@@ -2458,9 +2561,107 @@ function renderPersonalMoments(profile) {
                 `
               )
               .join("")
-          : '<article class="empty-card">你还没有发布动态，点底部 + 就能发第一条训练记录。</article>'
+          : '<article class="empty-card">你还没有发布动态。完成一次打卡，或点底部 + 发布第一条健身圈记录。</article>'
       }
     </section>
+  `;
+}
+
+function renderCheckinHistory(profile) {
+  const recentCheckins = getProfileCheckins(profile).slice(0, 3);
+
+  if (!recentCheckins.length) {
+    return '<article class="empty-card">这周还没有打卡记录。先完成一次训练，系统会自动生成第一条打卡动态。</article>';
+  }
+
+  return `
+    <section class="checkin-history-list">
+      ${recentCheckins
+        .map(
+          (item) => `
+            <article class="checkin-history-item">
+              <div>
+                <strong>${escapeHtml(item.sportLabel || "训练打卡")}</strong>
+                <p>${escapeHtml(item.note || "已记录到你的训练档案")}</p>
+              </div>
+              <div class="checkin-history-meta">
+                <span>${escapeHtml(item.time || "")}</span>
+                <strong>${escapeHtml(`${item.duration || 0} min`)}</strong>
+              </div>
+            </article>
+          `
+        )
+        .join("")}
+    </section>
+  `;
+}
+
+function renderCheckinFeature(profile) {
+  const draft = state.checkinDraft;
+  const weeklyCheckins = getWeeklyCheckins(profile).length;
+
+  return `
+    <article class="detail-card checkin-feature-card">
+      <div class="section-title-row">
+        <div>
+          <h3>运动打卡</h3>
+          <p class="result-tip">选择项目、填上时长，提交后会自动进入“我的动态”。</p>
+        </div>
+        <span class="status-pill">本周 ${weeklyCheckins} 次</span>
+      </div>
+
+      <form class="checkin-form" id="checkinForm">
+        <section class="checkin-sport-grid">
+          ${CHECKIN_SPORTS.map(
+            (item) => `
+              <button
+                class="checkin-sport-button ${draft.sport === item.id ? "is-active" : ""}"
+                data-checkin-sport="${item.id}"
+                type="button"
+              >
+                <span class="checkin-sport-icon">${escapeHtml(item.icon)}</span>
+                <strong>${escapeHtml(item.label)}</strong>
+                <small>${escapeHtml(item.hint)}</small>
+              </button>
+            `
+          ).join("")}
+        </section>
+
+        <div class="checkin-form-grid">
+          <label class="checkin-field">
+            <span>训练时长（分钟）</span>
+            <input data-checkin-field="duration" type="number" min="1" value="${escapeHtml(draft.duration)}" placeholder="例如 45">
+          </label>
+          <label class="checkin-field">
+            <span>消耗热量（kcal）</span>
+            <input data-checkin-field="calories" type="number" min="0" value="${escapeHtml(draft.calories)}" placeholder="例如 320">
+          </label>
+          <label class="checkin-field">
+            <span>距离（km，可选）</span>
+            <input data-checkin-field="distance" type="number" min="0" step="0.1" value="${escapeHtml(draft.distance)}" placeholder="例如 5.2">
+          </label>
+          <label class="checkin-field checkin-field--wide">
+            <span>训练备注（可选）</span>
+            <textarea data-checkin-field="note" placeholder="例如：今天做了深蹲、卧推和 15 分钟爬坡有氧">${escapeHtml(draft.note)}</textarea>
+          </label>
+        </div>
+
+        <div class="action-row action-row--checkin">
+          <button class="mini-button" data-open-my-home="1" type="button">稍后再记</button>
+          <button class="primary-submit" type="submit">完成打卡</button>
+        </div>
+      </form>
+    </article>
+
+    <article class="detail-card">
+      <div class="section-title-row">
+        <div>
+          <h3>最近打卡</h3>
+          <p class="result-tip">最近的训练记录会沉淀成你的个人主页内容。</p>
+        </div>
+      </div>
+      ${renderCheckinHistory(profile)}
+    </article>
   `;
 }
 
@@ -2495,26 +2696,20 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
 
       <div class="dashboard-stats">
         <div>
-          <strong>${stats.trainingScore}</strong>
+          <strong>${escapeHtml(stats.trainingScore)}</strong>
           <span>练时</span>
         </div>
         <div>
-          <strong>${stats.todayTraining}</strong>
+          <strong>${escapeHtml(stats.todayTraining)}</strong>
           <span>今日训练</span>
         </div>
         <div>
-          <strong>${stats.badges}</strong>
+          <strong>${escapeHtml(stats.badges)}</strong>
           <span>勋章</span>
         </div>
       </div>
 
-      <div class="dashboard-assistant">
-        <div>
-          <strong>FitHub AI 训练助理</strong>
-          <p>帮你整理训练节奏、预约建议和打卡提醒</p>
-        </div>
-        <button class="mini-button mini-button--accent" type="button">去看看</button>
-      </div>
+      ${renderCheckinEntry(profile)}
     </article>
 
     <section class="account-section">
@@ -2524,10 +2719,10 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
       </div>
       <div class="account-grid">
         ${renderPersonalShortcutTile("账户", "资料与安全", "账", 'data-open-my-feature="account"')}
-        ${renderPersonalShortcutTile("卡券", "优惠与会员", "券", 'data-open-my-feature="coupons"')}
+        ${renderPersonalShortcutTile("打卡", "记录运动项目", "卡", 'data-open-my-feature="checkin"')}
         ${renderPersonalShortcutTile("订单", "预约记录", "单", 'data-open-my-feature="orders"')}
-        ${renderPersonalShortcutTile("收藏", "关注与保存", "藏", 'data-open-my-feature="favorites"')}
-        ${renderPersonalShortcutTile("会员", "训练权益", "会", 'data-open-my-feature="membership"')}
+        ${renderPersonalShortcutTile("关注", "收藏与关注", "关", 'data-open-my-feature="favorites"')}
+        ${renderPersonalShortcutTile("积分", `${getProfilePoints(profile, state.bookings || [])} 分`, "分", 'data-open-my-feature="points"')}
         ${renderPersonalShortcutTile("预约", "查看排期", "约", 'data-open-my-feature="schedule"')}
         ${renderPersonalShortcutTile("定位", "实时位置", "位", 'data-open-my-feature="location"')}
         ${renderPersonalShortcutTile("动态", `${profile.posts?.length || 0} 条记录`, "圈", 'data-open-my-feature="moments"')}
@@ -2537,7 +2732,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
     <section class="section-title-row section-title-row--moments">
       <div>
         <h3>我的动态</h3>
-        <p class="result-tip">按发布时间从近到远展示，风格参考自己的朋友圈</p>
+        <p class="result-tip">按发布时间从近到远展示，像微信朋友圈一样记录自己的训练生活。</p>
       </div>
       <button class="text-link" data-open-profile="${profile.id}" type="button">刷新</button>
     </section>
@@ -2577,6 +2772,7 @@ function renderFavoriteProfilesSection() {
 
 function renderMyFeaturePage(profile, managedProfiles, feature) {
   const bookings = state.bookings || [];
+  const emptyBookingMarkup = '<article class="empty-card">你还没有正式预约。去首页、探索或教练/场馆主页完成第一次预约后，这里才会出现记录。</article>';
   const featureMap = {
     account: {
       title: "账户",
@@ -2615,49 +2811,32 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
         </article>
       `
     },
-    coupons: {
-      title: "卡券",
-      subtitle: "你的优惠券、会员权益和可用礼包",
-      content: `
-        <section class="stack-list">
-          <article class="booking-card">
-            <div class="booking-top">
-              <strong>新人体验券</strong>
-              <span class="status-pill">可使用</span>
-            </div>
-            <p>任意教练私教首单立减 ¥60</p>
-            <div class="community-meta"><span>有效期 7 天</span><span>适用于厦门站</span></div>
-          </article>
-          <article class="booking-card">
-            <div class="booking-top">
-              <strong>月卡升级券</strong>
-              <span class="status-pill">待激活</span>
-            </div>
-            <p>开通月卡可加送 3 天恢复区体验</p>
-            <div class="community-meta"><span>仅限场馆会员</span><span>支持叠加展示</span></div>
-          </article>
-        </section>
-      `
+    checkin: {
+      title: "打卡",
+      subtitle: "记录跑步、传统力量训练和其他运动项目",
+      content: renderCheckinFeature(profile)
     },
     orders: {
       title: "订单",
       subtitle: "查看最近预约、付款与订单状态",
       content: `
         <section class="stack-list">
-          ${bookings
-            .map(
-              (card) => `
-                <article class="booking-card">
-                  <div class="booking-top">
-                    <strong>${escapeHtml(card.title)}</strong>
-                    <span class="status-pill">${escapeHtml(card.status)}</span>
-                  </div>
-                  <p>${escapeHtml(card.place)}</p>
-                  <div class="community-meta"><span>${escapeHtml(card.price || "待确认")}</span><span>${escapeHtml(card.time)}</span></div>
-                </article>
-              `
-            )
-            .join("")}
+          ${bookings.length
+            ? bookings
+                .map(
+                  (card) => `
+                    <article class="booking-card">
+                      <div class="booking-top">
+                        <strong>${escapeHtml(card.title)}</strong>
+                        <span class="status-pill">${escapeHtml(card.status)}</span>
+                      </div>
+                      <p>${escapeHtml(card.place)}</p>
+                      <div class="community-meta"><span>${escapeHtml(card.price || "待确认")}</span><span>${escapeHtml(card.time)}</span></div>
+                    </article>
+                  `
+                )
+                .join("")
+            : emptyBookingMarkup}
         </section>
       `
     },
@@ -2666,29 +2845,29 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
       subtitle: "这里集中展示你已经关注的用户、教练和健身房",
       content: renderFavoriteProfilesSection()
     },
-    membership: {
-      title: "会员",
-      subtitle: "训练权益、成长值与当前会员状态",
+    points: {
+      title: "积分",
+      subtitle: "由预约和打卡累积的成长积分",
       content: `
         <article class="summary-card">
           <div>
-            <span>当前会员</span>
-            <strong>FitHub 测试会员</strong>
+            <span>当前积分</span>
+            <strong>${getProfilePoints(profile, bookings)}</strong>
           </div>
           <div>
-            <span>成长值</span>
-            <strong>${Math.max(360, (profile.posts?.length || 0) * 80 + profile.following * 20)}</strong>
+            <span>本周打卡</span>
+            <strong>${getWeeklyCheckins(profile).length}</strong>
           </div>
           <div>
-            <span>可用积分</span>
-            <strong>${Math.max(120, profile.following * 30 + 90)}</strong>
+            <span>已预约</span>
+            <strong>${bookings.length}</strong>
           </div>
         </article>
         <article class="detail-card">
           <div class="detail-grid">
-            <div class="detail-item"><span>权益 1</span><strong>预约优先提醒</strong></div>
-            <div class="detail-item"><span>权益 2</span><strong>动态曝光加权</strong></div>
-            <div class="detail-item"><span>权益 3</span><strong>专属训练勋章</strong></div>
+            <div class="detail-item"><span>积分来源</span><strong>每次打卡 +12</strong></div>
+            <div class="detail-item"><span>预约完成</span><strong>每单 +18</strong></div>
+            <div class="detail-item"><span>当前状态</span><strong>${getProfilePoints(profile, bookings) ? "持续积累中" : "还未开始"}</strong></div>
           </div>
         </article>
       `
@@ -2698,24 +2877,26 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
       subtitle: "查看你的课程排期与待上课记录",
       content: `
         <section class="stack-list">
-          ${bookings
-            .map(
-              (card) => `
-                <article class="booking-card">
-                  <div class="booking-top">
-                    <strong>${escapeHtml(card.title)}</strong>
-                    <span class="status-pill">${escapeHtml(card.status)}</span>
-                  </div>
-                  <p>${escapeHtml(card.place)}</p>
-                  <div class="community-meta"><span>${escapeHtml(card.time)}</span><span>${escapeHtml(card.price || "待确认")}</span></div>
-                  <div class="booking-bottom">
-                    <span>支持继续测试预约与价格展示</span>
-                    <button class="cta" data-go-booking="1" type="button">去订单页</button>
-                  </div>
-                </article>
-              `
-            )
-            .join("")}
+          ${bookings.length
+            ? bookings
+                .map(
+                  (card) => `
+                    <article class="booking-card">
+                      <div class="booking-top">
+                        <strong>${escapeHtml(card.title)}</strong>
+                        <span class="status-pill">${escapeHtml(card.status)}</span>
+                      </div>
+                      <p>${escapeHtml(card.place)}</p>
+                      <div class="community-meta"><span>${escapeHtml(card.time)}</span><span>${escapeHtml(card.price || "待确认")}</span></div>
+                      <div class="booking-bottom">
+                        <span>支持继续测试预约与价格展示</span>
+                        <button class="cta" data-go-booking="1" type="button">去订单页</button>
+                      </div>
+                    </article>
+                  `
+                )
+                .join("")
+            : emptyBookingMarkup}
         </section>
       `
     },
@@ -2749,7 +2930,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
         <p class="page-label">My</p>
         <h1>${escapeHtml(currentFeature.title)}</h1>
       </div>
-      <button class="mini-button" data-open-my-home="1" type="button">我的主页</button>
+      <button class="mini-button" data-open-my-home="1" type="button">我的</button>
     </section>
 
     <article class="swipe-tip">
@@ -3426,6 +3607,12 @@ appView.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.dataset.checkinSport) {
+    state.checkinDraft.sport = target.dataset.checkinSport;
+    renderPage();
+    return;
+  }
+
   if (target.dataset.createBooking) {
     const profile = getProfile(target.dataset.createBooking);
     const planIndex = Number(target.dataset.planIndex || 0);
@@ -3446,6 +3633,10 @@ appView.addEventListener("input", (event) => {
 
   if (event.target.dataset.commentInput) {
     state.commentDrafts[event.target.dataset.commentInput] = event.target.value;
+  }
+
+  if (event.target.dataset.checkinField) {
+    state.checkinDraft[event.target.dataset.checkinField] = event.target.value;
   }
 });
 
@@ -3573,6 +3764,12 @@ overlay.addEventListener("submit", (event) => {
   if (event.target.id === "chatForm") {
     event.preventDefault();
     runTask(() => sendDirectMessage(state.chatTargetProfileId));
+    return;
+  }
+
+  if (event.target.id === "checkinForm") {
+    event.preventDefault();
+    runTask(() => submitCheckin());
   }
 });
 

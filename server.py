@@ -69,6 +69,7 @@ STORE_LOCK = threading.Lock()
 STATE_CACHE = None
 MAX_INLINE_AVATAR_CHARS = 120_000
 MAX_INLINE_MEDIA_CHARS = 180_000
+LEGACY_DEMO_ENTHUSIAST_IDS = {"enthusiast-demo-a", "enthusiast-demo-b"}
 
 
 def now_utc():
@@ -238,6 +239,7 @@ def make_profile(**kwargs):
         "pricingPlans": kwargs.get("pricingPlans", []),
         "years": kwargs.get("years", ""),
         "certifications": kwargs.get("certifications", []),
+        "checkins": kwargs.get("checkins", []),
         "listed": kwargs.get("listed", True),
         "reviews": kwargs.get("reviews", []),
         "createdAt": kwargs.get("createdAt", iso_at()),
@@ -260,10 +262,82 @@ def merge_records_by_id(seed_items, existing_items):
     return list(merged.values())
 
 
+def cleanup_formal_test_state(state):
+    changed = False
+
+    for profile_id in LEGACY_DEMO_ENTHUSIAST_IDS:
+        profile = state.get("profiles", {}).get(profile_id)
+        if profile and profile.get("listed", True):
+            profile["listed"] = False
+            changed = True
+
+    stale_post_ids = [
+        post_id
+        for post_id, post in state.get("posts", {}).items()
+        if post.get("authorProfileId") in LEGACY_DEMO_ENTHUSIAST_IDS
+    ]
+    for post_id in stale_post_ids:
+        del state["posts"][post_id]
+        changed = True
+
+    filtered_follows = [
+        item
+        for item in state.get("follows", [])
+        if item.get("sourceProfileId") not in LEGACY_DEMO_ENTHUSIAST_IDS
+        and item.get("targetProfileId") not in LEGACY_DEMO_ENTHUSIAST_IDS
+    ]
+    if len(filtered_follows) != len(state.get("follows", [])):
+        state["follows"] = filtered_follows
+        changed = True
+
+    filtered_bookings = [
+        item for item in state.get("bookings", []) if item.get("createdByProfileId") not in LEGACY_DEMO_ENTHUSIAST_IDS
+    ]
+    if len(filtered_bookings) != len(state.get("bookings", [])):
+        state["bookings"] = filtered_bookings
+        changed = True
+
+    filtered_threads = [
+        item
+        for item in state.get("threads", [])
+        if not any(participant in LEGACY_DEMO_ENTHUSIAST_IDS for participant in item.get("participants", []))
+    ]
+    if len(filtered_threads) != len(state.get("threads", [])):
+        state["threads"] = filtered_threads
+        changed = True
+
+    for post in state.get("posts", {}).values():
+        likes = [item for item in post.get("likes", []) if item not in LEGACY_DEMO_ENTHUSIAST_IDS]
+        comments = [item for item in post.get("comments", []) if item.get("authorProfileId") not in LEGACY_DEMO_ENTHUSIAST_IDS]
+        if likes != post.get("likes", []):
+            post["likes"] = likes
+            changed = True
+        if comments != post.get("comments", []):
+            post["comments"] = comments
+            changed = True
+
+    for profile in state.get("profiles", {}).values():
+        reviews = [item for item in profile.get("reviews", []) if item.get("authorProfileId") not in LEGACY_DEMO_ENTHUSIAST_IDS]
+        if reviews != profile.get("reviews", []):
+            profile["reviews"] = reviews
+            changed = True
+
+    for session in state.get("sessions", {}).values():
+        managed_ids = [item for item in session.get("managedProfileIds", []) if item not in LEGACY_DEMO_ENTHUSIAST_IDS]
+        if managed_ids != session.get("managedProfileIds", []):
+            session["managedProfileIds"] = managed_ids
+            changed = True
+        if session.get("currentActorProfileId") in LEGACY_DEMO_ENTHUSIAST_IDS:
+            session["currentActorProfileId"] = managed_ids[0] if managed_ids else None
+            changed = True
+
+    return changed
+
+
 def merge_demo_state(state):
     seed = initial_state()
     demo_profile_ids = set(seed["profiles"].keys())
-    changed = False
+    changed = cleanup_formal_test_state(state)
 
     for profile_id, seed_profile in seed["profiles"].items():
         existing = state["profiles"].get(profile_id)
@@ -330,10 +404,13 @@ def merge_demo_state(state):
         del state["posts"][post_id]
         changed = True
 
+    if cleanup_formal_test_state(state):
+        changed = True
+
     return changed
 
 
-def make_post(post_id, author_profile_id, minutes_ago, content, meta, media=None, likes=None, comments=None):
+def make_post(post_id, author_profile_id, minutes_ago, content, meta, media=None, likes=None, comments=None, checkin=None):
     return {
         "id": post_id,
         "authorProfileId": author_profile_id,
@@ -343,6 +420,7 @@ def make_post(post_id, author_profile_id, minutes_ago, content, meta, media=None
         "media": media or [],
         "likes": likes or [],
         "comments": comments or [],
+        "checkin": checkin,
     }
 
 
@@ -886,6 +964,20 @@ def serialize_comment(state, comment):
     }
 
 
+def serialize_checkin(checkin):
+    return {
+        "id": checkin["id"],
+        "sportId": checkin.get("sportId", ""),
+        "sportLabel": checkin.get("sportLabel", "训练打卡"),
+        "duration": checkin.get("duration", 0),
+        "distance": checkin.get("distance", 0),
+        "calories": checkin.get("calories", 0),
+        "note": checkin.get("note", ""),
+        "createdAt": checkin["createdAt"],
+        "time": relative_time_label(checkin["createdAt"]),
+    }
+
+
 def serialize_post(state, post, current_actor_profile_id):
     return {
         "id": post["id"],
@@ -898,6 +990,7 @@ def serialize_post(state, post, current_actor_profile_id):
         "likeCount": len(post.get("likes", [])),
         "likedByCurrentActor": current_actor_profile_id in post.get("likes", []),
         "comments": [serialize_comment(state, item) for item in sorted(post.get("comments", []), key=lambda value: value["createdAt"])],
+        "checkin": serialize_checkin(post["checkin"]) if post.get("checkin") else None,
     }
 
 
@@ -913,6 +1006,7 @@ def serialize_profile(state, profile_id, current_actor_profile_id):
     profile["reviews"] = reviews
     profile["avatarImage"] = compact_avatar_image(profile.get("avatarImage"), profile["role"])
     profile["posts"] = [serialize_post(state, post, current_actor_profile_id) for post in profile_posts(state, profile_id)[:4]]
+    profile["checkins"] = [serialize_checkin(item) for item in sorted(profile.get("checkins", []), key=lambda value: value["createdAt"], reverse=True)[:12]]
     return profile
 
 
@@ -1031,6 +1125,7 @@ def build_profile_payload(role, payload, existing_profile, session):
                 {"title": "会员卡", "detail": "到店训练 / 团课预约", "price": payload.get("price") or "¥99/月起"}
             ],
             "reviews": (existing_profile or {}).get("reviews", []),
+            "checkins": (existing_profile or {}).get("checkins", []),
             "listed": True,
             "createdAt": (existing_profile or {}).get("createdAt", iso_at()),
         }
@@ -1063,6 +1158,7 @@ def build_profile_payload(role, payload, existing_profile, session):
                 {"title": "私教课程", "detail": "一对一训练服务", "price": payload.get("price") or "¥220/小时"}
             ],
             "reviews": (existing_profile or {}).get("reviews", []),
+            "checkins": (existing_profile or {}).get("checkins", []),
             "listed": True,
             "createdAt": (existing_profile or {}).get("createdAt", iso_at()),
         }
@@ -1090,6 +1186,7 @@ def build_profile_payload(role, payload, existing_profile, session):
         "level": level,
         "goal": goal,
         "reviews": [],
+        "checkins": (existing_profile or {}).get("checkins", []),
         "listed": True,
         "createdAt": (existing_profile or {}).get("createdAt", iso_at()),
     }
@@ -1232,14 +1329,6 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 state["profiles"][profile_data["id"]] = profile_data
                 if not existing_profile:
                     session["managedProfileIds"].append(profile_data["id"])
-                    seed_post = make_post(
-                        f"post-{profile_data['id']}-seed",
-                        profile_data["id"],
-                        0,
-                        f"{profile_data['name']} 已加入 FitHub，开始体验健身圈互动。",
-                        "入驻动态" if role in {"gym", "coach"} else "加入社区",
-                    )
-                    state["posts"][seed_post["id"]] = seed_post
                 session["selectedRole"] = role
                 session["currentActorProfileId"] = profile_data["id"]
                 return bootstrap_response(state, session)
@@ -1285,6 +1374,54 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 }
                 session["currentActorProfileId"] = profile_id
                 return bootstrap_response(state, session)
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/checkin/create":
+            def action(state):
+                session = ensure_session(state, session_id)
+                profile_id = payload.get("profileId") or session.get("currentActorProfileId")
+                if not profile_id or profile_id not in session["managedProfileIds"]:
+                    raise ValueError("请先注册后再打卡。")
+                profile = state["profiles"][profile_id]
+                if profile.get("role") != "enthusiast":
+                    raise ValueError("当前只有健身爱好者身份支持训练打卡。")
+
+                duration = int(payload.get("duration") or 0)
+                if duration <= 0:
+                    raise ValueError("训练时长需要大于 0。")
+
+                checkin = {
+                    "id": f"checkin-{uuid.uuid4().hex[:10]}",
+                    "sportId": payload.get("sportId") or "strength",
+                    "sportLabel": payload.get("sportLabel") or "训练打卡",
+                    "duration": duration,
+                    "distance": payload.get("distance") or 0,
+                    "calories": payload.get("calories") or 0,
+                    "note": (payload.get("note") or "").strip(),
+                    "createdAt": iso_at(),
+                }
+                profile.setdefault("checkins", []).insert(0, checkin)
+
+                post_id = f"post-{uuid.uuid4().hex[:10]}"
+                state["posts"][post_id] = {
+                    "id": post_id,
+                    "authorProfileId": profile_id,
+                    "createdAt": checkin["createdAt"],
+                    "content": payload.get("content") or f"完成了一次 {checkin['sportLabel']} 打卡。",
+                    "meta": f"训练打卡 · {profile.get('locationLabel', DEFAULT_POSITION['label'])}",
+                    "media": [],
+                    "likes": [],
+                    "comments": [],
+                    "checkin": deepcopy(checkin),
+                }
+
+                session["currentActorProfileId"] = profile_id
+                return bootstrap_response(state, session)
+
             try:
                 self._write_json(self._with_state(action))
             except ValueError as exc:
