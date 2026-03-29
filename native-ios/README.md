@@ -37,6 +37,11 @@
 open FitHubNative.xcodeproj
 ```
 
+更适合直接照着跑的联调文档在这里：
+
+- [native-device-quickstart.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-device-quickstart.md)
+- [native-ios-device-checklist.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-ios-device-checklist.md)
+
 如果后面你想继续用 XcodeGen 重生工程，再走下面这套：
 
 1. 安装完整 Xcode。

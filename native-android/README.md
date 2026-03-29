@@ -38,6 +38,11 @@
 3. 同步 Gradle
 4. 在 Android 设备安装并启用 Health Connect
 
+更适合直接照着跑的联调文档在这里：
+
+- [native-device-quickstart.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-device-quickstart.md)
+- [native-android-device-checklist.md](/Users/guoziyi/Documents/gpt/fitness-app-prototype/docs/native-android-device-checklist.md)
+
 ### 当前真机体验
 
 - 先用 `手机号 + 身份` 登录现有 FitHub 账户
