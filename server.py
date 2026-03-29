@@ -2,6 +2,7 @@ import argparse
 import json
 import mimetypes
 import os
+import sys
 import threading
 import uuid
 from copy import deepcopy
@@ -10,6 +11,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parent
@@ -32,6 +34,11 @@ def default_data_dir():
 URL_PREFIX = normalize_url_prefix(os.getenv("FITHUB_URL_PREFIX", "/"))
 DATA_DIR = Path(os.getenv("FITHUB_DATA_DIR", str(default_data_dir()))).expanduser().resolve()
 STATE_FILE = DATA_DIR / "shared_state.json"
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+SUPABASE_STATE_TABLE = (os.getenv("FITHUB_SUPABASE_TABLE") or "fithub_app_state").strip()
+SUPABASE_STATE_ROW_ID = (os.getenv("FITHUB_SUPABASE_ROW_ID") or "primary").strip()
+SUPABASE_TIMEOUT_SECONDS = float(os.getenv("FITHUB_SUPABASE_TIMEOUT") or "12")
 
 
 def url_with_prefix(path="/"):
@@ -260,6 +267,76 @@ def estimate_body_fat(gender, bmi):
     else:
         estimate = bmi * 1.12 - 8.8
     return round(max(8.0, min(42.0, estimate)), 1)
+
+
+def storage_log(message):
+    print(f"[FitHub storage] {message}", file=sys.stderr)
+
+
+def supabase_storage_enabled():
+    return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
+
+
+def supabase_rest_url(path):
+    return f"{SUPABASE_URL}/rest/v1/{path.lstrip('/')}"
+
+
+def supabase_request(method, path, payload=None, prefer=None):
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Accept": "application/json",
+    }
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+    if prefer:
+        headers["Prefer"] = prefer
+
+    data = None
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    request = Request(
+        supabase_rest_url(path),
+        data=data,
+        headers=headers,
+        method=method.upper(),
+    )
+
+    with urlopen(request, timeout=SUPABASE_TIMEOUT_SECONDS) as response:
+        raw = response.read()
+        if not raw:
+            return None
+        return json.loads(raw.decode("utf-8"))
+
+
+def load_state_from_supabase():
+    rows = supabase_request(
+        "GET",
+        f"{SUPABASE_STATE_TABLE}?id=eq.{quote(SUPABASE_STATE_ROW_ID, safe='')}&select=payload",
+    )
+    if not rows:
+        return None
+    payload = rows[0].get("payload")
+    if not isinstance(payload, dict):
+        return None
+    return sanitize_state(payload)
+
+
+def save_state_to_supabase(state):
+    payload = sanitize_state(deepcopy(state))
+    supabase_request(
+        "POST",
+        f"{SUPABASE_STATE_TABLE}?on_conflict=id",
+        [
+            {
+                "id": SUPABASE_STATE_ROW_ID,
+                "payload": payload,
+                "updated_at": now_utc().isoformat(),
+            }
+        ],
+        prefer="resolution=merge-duplicates,return=minimal",
+    )
 
 
 def find_profile_by_role_phone(state, role, phone):
@@ -1032,6 +1109,18 @@ def ensure_data_file():
 
 
 def load_state():
+    if supabase_storage_enabled():
+        try:
+            state = load_state_from_supabase()
+            if state is None:
+                state = initial_state()
+                save_state_to_supabase(state)
+            if merge_demo_state(state):
+                save_state_to_supabase(state)
+            return sanitize_state(state)
+        except Exception as exc:
+            storage_log(f"Supabase load failed, fallback to local file: {exc}")
+
     ensure_data_file()
     with STATE_FILE.open("r", encoding="utf-8") as handle:
         state = sanitize_state(json.load(handle))
@@ -1041,6 +1130,13 @@ def load_state():
 
 
 def save_state(state):
+    if supabase_storage_enabled():
+        try:
+            save_state_to_supabase(state)
+            return
+        except Exception as exc:
+            storage_log(f"Supabase save failed, fallback to local file: {exc}")
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with STATE_FILE.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, ensure_ascii=False, indent=2)

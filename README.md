@@ -46,3 +46,26 @@ python3 server.py --port 8010
 - `/var/data/fithub/shared_state.json`
 
 如果没有挂载 Render Persistent Disk，数据会写进实例本地文件系统，服务重启或重建后可能丢失。
+
+## Supabase 模式
+
+如果你暂时没有 Render 付费 Disk，可以直接把持久化切到 `Supabase`。
+
+当前服务端已经支持：
+
+- 优先使用 `Supabase`
+- 如果没有配置 `Supabase`，自动回退到本地 JSON
+
+需要在 Render 环境变量里设置：
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+可选：
+
+- `FITHUB_SUPABASE_TABLE=fithub_app_state`
+- `FITHUB_SUPABASE_ROW_ID=primary`
+
+详细初始化 SQL 和步骤见：
+
+- [docs/fithub-supabase-setup.md](./docs/fithub-supabase-setup.md)
