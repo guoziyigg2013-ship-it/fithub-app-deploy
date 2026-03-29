@@ -10,8 +10,12 @@ struct RootView: View {
                     loginCard
                     if let profile = store.currentProfile {
                         profileCard(profile)
-                        syncCard
-                        if let preview = store.healthPreview {
+                        if profile.role == "enthusiast" {
+                            syncCard
+                        } else {
+                            unsupportedRoleCard(profile)
+                        }
+                        if let preview = store.healthPreview, profile.role == "enthusiast" {
                             previewCard(preview)
                         }
                     }
@@ -45,7 +49,11 @@ struct RootView: View {
                 .textFieldStyle(.roundedBorder)
             Button {
                 Task {
-                    try? await store.login()
+                    do {
+                        try await store.login()
+                    } catch {
+                        store.statusMessage = error.localizedDescription
+                    }
                 }
             } label: {
                 Text(store.isBusy ? "连接中..." : "登录 FitHub")
@@ -57,6 +65,20 @@ struct RootView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
+        .padding(18)
+        .background(.background)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private func unsupportedRoleCard(_ profile: BootstrapResponse.Profile) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("当前身份暂不支持健康同步")
+                .font(.headline)
+            Text("\(profile.name) 目前是 \(roleLabel(profile.role))，Apple Health / Apple Watch 同步仅对健身爱好者开放。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .background(.background)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -147,5 +169,16 @@ struct RootView: View {
                 .fontWeight(.medium)
         }
         .font(.subheadline)
+    }
+
+    private func roleLabel(_ role: String) -> String {
+        switch role {
+        case "gym":
+            return "健身房"
+        case "coach":
+            return "健身教练"
+        default:
+            return "健身爱好者"
+        }
     }
 }

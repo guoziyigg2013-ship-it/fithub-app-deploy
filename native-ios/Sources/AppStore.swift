@@ -80,6 +80,10 @@ final class AppStore: ObservableObject {
             statusMessage = "请先用手机号登录 FitHub 账户。"
             return
         }
+        guard profile.role == "enthusiast" else {
+            statusMessage = "当前只有健身爱好者身份支持同步 Apple Health。"
+            return
+        }
 
         isBusy = true
         defer { isBusy = false }

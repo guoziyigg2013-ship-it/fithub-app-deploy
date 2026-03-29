@@ -24,7 +24,20 @@
 - `Sources/`
   SwiftUI 页面、网络层、HealthKit 服务和模型。
 
-### 本地生成工程
+### 打开工程
+
+当前目录已经附带：
+
+- `FitHubNative.xcodeproj`
+- `project.yml`
+
+如果你的机器已经装了 Xcode，可以先直接打开：
+
+```bash
+open FitHubNative.xcodeproj
+```
+
+如果后面你想继续用 XcodeGen 重生工程，再走下面这套：
 
 1. 安装完整 Xcode。
 2. 执行：

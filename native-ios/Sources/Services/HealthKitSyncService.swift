@@ -3,28 +3,37 @@ import HealthKit
 
 final class HealthKitSyncService {
     private let healthStore: HKHealthStore
+    private let isoFormatter = ISO8601DateFormatter()
 
     init(healthStore: HKHealthStore) {
         self.healthStore = healthStore
     }
 
     func loadPreview(days: Int = 30) async throws -> HealthPreview {
-        async let heightCm = latestQuantity(.height, unit: HKUnit.meterUnit(with: .centi)).map { Int(round($0)) }
-        async let weightKg = latestQuantity(.bodyMass, unit: HKUnit.gramUnit(with: .kilo))
-        async let bodyFat = latestQuantity(.bodyFatPercentage, unit: HKUnit.percent()).map { $0 * 100.0 }
-        async let restingHeartRate = latestQuantity(.restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute())).map { Int(round($0)) }
-        async let stepCountToday = cumulativeQuantityToday(.stepCount, unit: HKUnit.count()).map { Int(round($0)) }
-        async let activeEnergyToday = cumulativeQuantityToday(.activeEnergyBurned, unit: HKUnit.kilocalorie())
+        async let rawHeight = latestQuantity(.height, unit: HKUnit.meterUnit(with: .centi))
+        async let rawWeight = latestQuantity(.bodyMass, unit: HKUnit.gramUnit(with: .kilo))
+        async let rawBodyFat = latestQuantity(.bodyFatPercentage, unit: HKUnit.percent())
+        async let rawRestingHeartRate = latestQuantity(.restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute()))
+        async let rawStepCountToday = cumulativeQuantityToday(.stepCount, unit: HKUnit.count())
+        async let rawActiveEnergyToday = cumulativeQuantityToday(.activeEnergyBurned, unit: HKUnit.kilocalorie())
         async let workouts = recentWorkouts(since: Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date())
 
-        return try await HealthPreview(
+        let heightCm = try await rawHeight.map { Int(round($0)) }
+        let weightKg = try await rawWeight
+        let bodyFat = try await rawBodyFat.map { $0 * 100.0 }
+        let restingHeartRate = try await rawRestingHeartRate.map { Int(round($0)) }
+        let stepCountToday = try await rawStepCountToday.map { Int(round($0)) }
+        let activeEnergyToday = try await rawActiveEnergyToday
+        let recent = try await workouts
+
+        return HealthPreview(
             heightCm: heightCm,
             weightKg: weightKg,
             bodyFatPercentage: bodyFat,
             restingHeartRate: restingHeartRate,
             stepCountToday: stepCountToday,
             activeEnergyToday: activeEnergyToday,
-            workouts: workouts
+            workouts: recent
         )
     }
 
@@ -111,8 +120,8 @@ final class HealthKitSyncService {
                         durationMinutes: max(1, Int(round(workout.duration / 60))),
                         distanceKm: workout.totalDistance?.doubleValue(for: HKUnit.meterUnit(with: .kilo)),
                         activeEnergyBurned: workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()),
-                        startedAt: ISO8601DateFormatter().string(from: workout.startDate),
-                        endedAt: ISO8601DateFormatter().string(from: workout.endDate)
+                        startedAt: self.isoFormatter.string(from: workout.startDate),
+                        endedAt: self.isoFormatter.string(from: workout.endDate)
                     )
                 }
 
