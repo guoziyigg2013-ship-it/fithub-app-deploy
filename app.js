@@ -218,6 +218,26 @@ const CHECKIN_SPORT_METRICS = {
   meditation: { met: 1.5, paceKmh: 0, impact: "low" }
 };
 
+const OUTDOOR_ROUTE_SPORT_IDS = new Set(["run", "outdoor-walk", "outdoor-cycling", "hiking", "trail-run"]);
+
+const OUTDOOR_ROUTE_TEMPLATES = {
+  run: [
+    [10, 63], [18, 46], [36, 34], [54, 37], [72, 32], [89, 40], [84, 58], [71, 73], [52, 81], [31, 78], [16, 70], [10, 63]
+  ],
+  "outdoor-walk": [
+    [12, 61], [22, 49], [34, 40], [49, 38], [63, 44], [78, 47], [84, 60], [70, 68], [53, 72], [34, 71], [19, 66], [12, 61]
+  ],
+  "outdoor-cycling": [
+    [8, 67], [16, 43], [36, 24], [61, 20], [85, 30], [92, 52], [82, 74], [60, 84], [34, 80], [17, 67], [8, 67]
+  ],
+  hiking: [
+    [12, 70], [20, 55], [31, 45], [43, 32], [58, 28], [74, 34], [82, 50], [76, 66], [61, 76], [42, 79], [24, 75], [12, 70]
+  ],
+  "trail-run": [
+    [10, 68], [19, 49], [30, 34], [47, 26], [65, 31], [82, 42], [88, 59], [78, 74], [59, 82], [37, 79], [20, 72], [10, 68]
+  ]
+};
+
 function createDemoImage(title, accentA, accentB) {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="800" height="520" viewBox="0 0 800 520">
@@ -970,6 +990,7 @@ const state = {
   checkinSelectionDraft: [],
   checkinCurrentSportId: "",
   workoutSession: null,
+  outdoorShareCheckinId: "",
   chatTargetProfileId: "",
   chatDraft: "",
   sessionId: "",
@@ -1796,6 +1817,7 @@ function openMyPage() {
   state.activePage = "profile";
   state.activeProfileId = myProfile?.id || state.currentActorProfileId || "";
   state.profileSubpage = "";
+  state.outdoorShareCheckinId = "";
   syncNavActive();
   renderPage();
   appView.scrollTop = 0;
@@ -2664,6 +2686,7 @@ function startWorkoutSession(sportId = "") {
   }
 
   state.checkinCurrentSportId = targetSport;
+  state.outdoorShareCheckinId = "";
   state.workoutSession = {
     sportId: targetSport,
     startedAt: Date.now()
@@ -2680,6 +2703,7 @@ async function finishWorkoutSession() {
   const profile = getMyPageProfile();
   const session = getWorkoutSessionStats(profile);
   if (!profile || !session) return;
+  const routePayload = buildOutdoorRoutePayload(profile, session);
 
   await postAndSync(`${API_BASE}/checkin/create`, {
     profileId: profile.id,
@@ -2688,11 +2712,25 @@ async function finishWorkoutSession() {
     duration: session.elapsedMinutes,
     calories: session.calories,
     distance: session.distance,
+    paceLabel: routePayload?.avgPaceLabel || "",
+    bestPaceLabel: routePayload?.bestPaceLabel || "",
+    heartRateAvg: routePayload?.avgHeartRate || 0,
+    elevationGain: routePayload?.elevationGain || 0,
+    route: routePayload,
     note: "",
-    content: `完成了一次 ${session.sport.label} 训练，持续 ${session.elapsedMinutes} 分钟，估算消耗 ${session.calories} kcal。`
+    content: routePayload
+      ? `完成了一次 ${session.sport.label}，累计 ${routePayload.distanceKm} km，耗时 ${routePayload.durationLabel}，估算消耗 ${session.calories} kcal。`
+      : `完成了一次 ${session.sport.label} 训练，持续 ${session.elapsedMinutes} 分钟，估算消耗 ${session.calories} kcal。`
   });
 
   state.workoutSession = null;
+  const latestProfile = getProfile(profile.id);
+  const latestCheckin = latestProfile?.checkins?.[0];
+  if (routePayload && latestCheckin?.route) {
+    state.outdoorShareCheckinId = latestCheckin.id;
+    state.profileSubpage = "outdoor-share";
+    if (appView) appView.scrollTop = 0;
+  }
   renderPage();
 }
 
@@ -3251,6 +3289,124 @@ function formatWorkoutTimer(totalSeconds) {
   return `${hours}:${minutes}:${seconds}`;
 }
 
+function formatWorkoutDurationLabel(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds || 0));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = String(Math.floor((safeSeconds % 3600) / 60)).padStart(2, "0");
+  const seconds = String(safeSeconds % 60).padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+function formatWorkoutPaceLabel(durationMinutes, distanceKm) {
+  if (!distanceKm || distanceKm <= 0) return "--";
+  const totalSeconds = Math.max(1, Math.round((Number(durationMinutes || 0) * 60) / distanceKm));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}'${seconds}"`;
+}
+
+function formatShareDateLabel(dateInput) {
+  const date = getSafeDate(dateInput) || new Date();
+  return date.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function supportsOutdoorRouteShare(sportId) {
+  return OUTDOOR_ROUTE_SPORT_IDS.has(sportId);
+}
+
+function getSeedFromText(value) {
+  return String(value || "")
+    .split("")
+    .reduce((sum, char, index) => sum + char.charCodeAt(0) * (index + 3), 0);
+}
+
+function getSeededOffset(seed, index, amplitude) {
+  const wave = Math.sin(seed * 0.17 + index * 1.73) + Math.cos(seed * 0.11 + index * 1.21);
+  return Number((wave * amplitude).toFixed(2));
+}
+
+function buildOutdoorRoutePoints(sportId, seed) {
+  const template = OUTDOOR_ROUTE_TEMPLATES[sportId] || OUTDOOR_ROUTE_TEMPLATES.run;
+  return template.map(([x, y], index) => [
+    clampNumber(x + getSeededOffset(seed, index, 2.1), 6, 94),
+    clampNumber(y + getSeededOffset(seed + 13, index, 2.6), 18, 88)
+  ]);
+}
+
+function buildOutdoorRoutePayload(profile, session) {
+  if (!profile || !session || !supportsOutdoorRouteShare(session.sport.id)) return null;
+
+  const seed = getSeedFromText(`${profile.id}-${session.startedAt}-${session.sport.id}`);
+  const points = buildOutdoorRoutePoints(session.sport.id, seed);
+  const checkpointCount = clampNumber(Math.round(session.distance || 4), 3, 12);
+  const checkpoints = Array.from({ length: checkpointCount }, (_, index) => {
+    const point = points[Math.min(points.length - 1, index + 1)] || points[points.length - 1] || [50, 50];
+    return {
+      label: String(index + 1),
+      x: point[0],
+      y: point[1]
+    };
+  });
+
+  const restingHeartRate = Number(profile.restingHeartRate || 64) || 64;
+  const avgHeartRateOffset =
+    session.sport.id === "outdoor-walk"
+      ? 42
+      : session.sport.id === "outdoor-cycling"
+        ? 58
+        : session.sport.id === "hiking"
+          ? 52
+          : session.sport.id === "trail-run"
+            ? 72
+            : 66;
+  const avgHeartRate = Math.round(restingHeartRate + avgHeartRateOffset);
+
+  const bestPaceSeconds = session.distance
+    ? Math.max(
+        205,
+        Math.round((session.elapsedMinutes * 60) / session.distance * (session.sport.id === "outdoor-walk" ? 0.93 : 0.86))
+      )
+    : 0;
+  const bestPaceLabel = bestPaceSeconds
+    ? `${Math.floor(bestPaceSeconds / 60)}'${String(bestPaceSeconds % 60).padStart(2, "0")}"`
+    : "--";
+  const elevationGain = Math.max(
+    4,
+    Math.round(
+      (session.distance || 1) *
+        (session.sport.id === "trail-run"
+          ? 12
+          : session.sport.id === "hiking"
+            ? 15
+            : session.sport.id === "outdoor-cycling"
+              ? 8
+              : 5)
+    )
+  );
+
+  return {
+    city: profile.city || state.userPosition.city,
+    district: profile.locationLabel || state.userPosition.label,
+    shareTitle: `${profile.city || state.userPosition.city}市 ${session.sport.label}`,
+    startedAt: new Date(session.startedAt).toISOString(),
+    dateLabel: formatShareDateLabel(session.startedAt),
+    durationLabel: formatWorkoutDurationLabel(session.elapsedSeconds),
+    distanceKm: Number((session.distance || 0).toFixed(2)),
+    avgPaceLabel: formatWorkoutPaceLabel(session.elapsedMinutes, session.distance),
+    bestPaceLabel,
+    avgHeartRate,
+    elevationGain,
+    calories: session.calories,
+    points,
+    checkpoints
+  };
+}
+
 function getProfileWeight(profile) {
   return Number(profile?.weightKg || 0);
 }
@@ -3552,6 +3708,11 @@ function renderCheckinHistory(profile) {
               <div>
                 <strong>${escapeHtml(item.sportLabel || "训练打卡")}</strong>
                 <p>${escapeHtml(item.note || "已记录到你的训练档案")}</p>
+                ${
+                  item.route
+                    ? `<button class="mini-button mini-button--accent" data-open-route-share="${item.id}" type="button">查看轨迹</button>`
+                    : ""
+                }
               </div>
               <div class="checkin-history-meta">
                 <span>${escapeHtml(item.time || "")}</span>
@@ -3562,6 +3723,131 @@ function renderCheckinHistory(profile) {
         )
         .join("")}
     </section>
+  `;
+}
+
+function getOutdoorShareCheckin(profile) {
+  const routeCheckins = getProfileCheckins(profile).filter((item) => item?.route);
+  if (!routeCheckins.length) return null;
+  if (state.outdoorShareCheckinId) {
+    return routeCheckins.find((item) => item.id === state.outdoorShareCheckinId) || routeCheckins[0];
+  }
+  return routeCheckins[0];
+}
+
+function renderRouteMap(route) {
+  const points = Array.isArray(route?.points) ? route.points : [];
+  if (!points.length) {
+    return '<div class="route-map-empty">完成一次户外运动后，这里会展示你的运动轨迹。</div>';
+  }
+
+  const polyline = points.map(([x, y]) => `${x * 3.2},${y * 2.28}`).join(" ");
+  const checkpoints = Array.isArray(route?.checkpoints) ? route.checkpoints : [];
+  const startPoint = points[0];
+  const endPoint = points[points.length - 1];
+
+  return `
+    <svg class="route-map-svg" viewBox="0 0 320 228" role="img" aria-label="户外运动轨迹">
+      <defs>
+        <linearGradient id="route-bg" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#eef6ea"/>
+          <stop offset="100%" stop-color="#e6edf8"/>
+        </linearGradient>
+        <linearGradient id="route-line" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0%" stop-color="#ffe100"/>
+          <stop offset="100%" stop-color="#ffd148"/>
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width="320" height="228" rx="24" fill="url(#route-bg)"/>
+      <g opacity="0.26" stroke="#c3d5bf" stroke-width="1">
+        <path d="M18 40 H302"/>
+        <path d="M18 88 H302"/>
+        <path d="M18 136 H302"/>
+        <path d="M18 184 H302"/>
+        <path d="M64 20 V208"/>
+        <path d="M128 20 V208"/>
+        <path d="M192 20 V208"/>
+        <path d="M256 20 V208"/>
+      </g>
+      <polyline points="${polyline}" fill="none" stroke="#19222b" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" opacity="0.18"/>
+      <polyline points="${polyline}" fill="none" stroke="url(#route-line)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+      ${checkpoints
+        .map(
+          (item) => `
+            <g transform="translate(${item.x * 3.2}, ${item.y * 2.28})">
+              <circle r="10" fill="#121212"/>
+              <text y="3" text-anchor="middle" font-size="10" font-weight="700" fill="#ffffff">${escapeHtml(item.label)}</text>
+            </g>
+          `
+        )
+        .join("")}
+      <g transform="translate(${startPoint[0] * 3.2}, ${startPoint[1] * 2.28})">
+        <circle r="7" fill="#1fd27b" stroke="#ffffff" stroke-width="2"/>
+      </g>
+      <g transform="translate(${endPoint[0] * 3.2}, ${endPoint[1] * 2.28})">
+        <circle r="7" fill="#ff6b58" stroke="#ffffff" stroke-width="2"/>
+      </g>
+    </svg>
+  `;
+}
+
+function renderOutdoorRouteFeature(profile) {
+  const checkin = getOutdoorShareCheckin(profile);
+  if (!checkin?.route) {
+    return '<article class="empty-card">完成一次户外跑步、行走、骑行或徒步后，这里会自动生成轨迹分享页。</article>';
+  }
+
+  const route = checkin.route;
+  const speedOrPaceLabel = checkin.sportId === "outdoor-cycling" ? "平均速度" : "平均配速";
+  const speedOrPaceValue =
+    checkin.sportId === "outdoor-cycling"
+      ? `${Math.max(8, Math.round((route.distanceKm / Math.max(1, checkin.duration / 60)) * 10) / 10)} km/h`
+      : `${route.avgPaceLabel}/km`;
+
+  return `
+    <article class="route-share-card">
+      <div class="route-share-map-shell">
+        <div class="route-share-map-head">
+          <div>
+            <strong>${escapeHtml(route.shareTitle || `${route.city || "厦门"} ${checkin.sportLabel}`)}</strong>
+            <p>${escapeHtml(route.dateLabel || formatShareDateLabel(checkin.createdAt))}</p>
+          </div>
+          <span class="status-pill">${escapeHtml(route.district || profile.locationLabel || state.userPosition.label)}</span>
+        </div>
+        <div class="route-share-map-canvas">
+          ${renderRouteMap(route)}
+        </div>
+      </div>
+
+      <article class="route-share-stat-board">
+        <div class="route-share-topline">
+          <div>
+            <span>距离</span>
+            <strong>${escapeHtml(`${route.distanceKm || checkin.distance || 0} km`)}</strong>
+          </div>
+          <div>
+            <span>运动类型</span>
+            <strong>${escapeHtml(checkin.sportLabel || "户外运动")}</strong>
+          </div>
+        </div>
+
+        <div class="route-share-grid">
+          <div><span>运动时间</span><strong>${escapeHtml(route.durationLabel || formatWorkoutDurationLabel((checkin.duration || 0) * 60))}</strong></div>
+          <div><span>${escapeHtml(speedOrPaceLabel)}</span><strong>${escapeHtml(speedOrPaceValue)}</strong></div>
+          <div><span>最快 1 公里</span><strong>${escapeHtml(route.bestPaceLabel ? `${route.bestPaceLabel}/km` : "--")}</strong></div>
+          <div><span>平均心率</span><strong>${escapeHtml(route.avgHeartRate ? `${route.avgHeartRate} bpm` : "--")}</strong></div>
+          <div><span>累计上升</span><strong>${escapeHtml(route.elevationGain ? `${route.elevationGain} m` : "--")}</strong></div>
+          <div><span>卡路里</span><strong>${escapeHtml(`${route.calories || checkin.calories || 0} kcal`)}</strong></div>
+        </div>
+
+        <p class="result-tip">这是一张适合分享的户外运动成绩页。后续接入真实定位后，可以直接按 GPS 点位生成真实轨迹。</p>
+
+        <div class="action-row action-row--checkin">
+          <button class="mini-button" data-open-my-feature="checkin" type="button">返回打卡</button>
+          <button class="primary-submit" data-open-my-feature="moments" type="button">去看动态</button>
+        </div>
+      </article>
+    </article>
   `;
 }
 
@@ -4029,6 +4315,11 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
       title: "打卡",
       subtitle: "记录跑步、传统力量训练和其他运动项目",
       content: renderCheckinFeature(profile)
+    },
+    "outdoor-share": {
+      title: "户外轨迹",
+      subtitle: "像 Keep 或咕咚那样，把户外运动沉淀成一张更有成就感的分享页",
+      content: renderOutdoorRouteFeature(profile)
     },
     orders: {
       title: "订单",
@@ -4826,6 +5117,19 @@ appView.addEventListener("click", (event) => {
     state.activePage = "profile";
     state.activeProfileId = myProfile.id;
     state.profileSubpage = target.dataset.openMyFeature;
+    syncNavActive();
+    renderPage();
+    appView.scrollTop = 0;
+    return;
+  }
+
+  if (target.dataset.openRouteShare) {
+    const myProfile = getMyPageProfile();
+    if (!myProfile) return;
+    state.activePage = "profile";
+    state.activeProfileId = myProfile.id;
+    state.profileSubpage = "outdoor-share";
+    state.outdoorShareCheckinId = target.dataset.openRouteShare;
     syncNavActive();
     renderPage();
     appView.scrollTop = 0;

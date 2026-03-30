@@ -1,0 +1,38 @@
+<svg width="920" height="260" viewBox="0 0 920 260" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fithub-premium-bg" x1="34" y1="24" x2="222" y2="236" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFBE63"/>
+      <stop offset="1" stop-color="#E56D13"/>
+    </linearGradient>
+    <linearGradient id="fithub-premium-stroke" x1="82" y1="58" x2="182" y2="192" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4E6" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#FFF9F0" stop-opacity="0.72"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="22" y="22" width="212" height="212" rx="62" fill="url(#fithub-premium-bg)"/>
+  <circle cx="84" cy="78" r="72" fill="#FFFFFF" fill-opacity="0.1"/>
+  <circle cx="184" cy="176" r="66" fill="#1C120C" fill-opacity="0.08"/>
+
+  <path d="M84 68H170C179.941 68 188 76.0589 188 86V86C188 95.9411 179.941 104 170 104H120V190" stroke="url(#fithub-premium-stroke)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M134 130H182" stroke="url(#fithub-premium-stroke)" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="162" cy="146" r="10" fill="#FFF7EE"/>
+  <circle cx="190" cy="146" r="10" fill="#FFF7EE" fill-opacity="0.94"/>
+  <circle cx="176" cy="172" r="10" fill="#FFF7EE" fill-opacity="0.9"/>
+
+  <g fill="#18120E">
+    <path d="M301 83.5H443.5V115.5H377.25V188H337.25V115.5H301V83.5Z"/>
+    <path d="M461.5 83.5H500.5V125.5H553V83.5H592V188H553V157H500.5V188H461.5V83.5Z"/>
+    <path d="M624.5 83.5H663.5V188H624.5V83.5Z"/>
+    <path d="M699.5 83.5H738.5V156.5H806V188H699.5V83.5Z"/>
+    <path d="M829 83.5H868V121.5H898V151H868V188H829V151H799V121.5H829V83.5Z"/>
+  </g>
+
+  <g fill="#5B4A3B">
+    <path d="M303 204.5H430.5V217.5H303V204.5Z"/>
+    <path d="M451 204.5H592V217.5H451V204.5Z"/>
+    <path d="M624.5 204.5H899V217.5H624.5V204.5Z"/>
+  </g>
+
+  <text x="304" y="64" fill="#7A6550" font-family="Avenir, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="5">FITNESS SOCIAL CLUB</text>
+</svg>

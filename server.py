@@ -2358,6 +2358,11 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     "duration": duration,
                     "distance": payload.get("distance") or 0,
                     "calories": payload.get("calories") or 0,
+                    "paceLabel": payload.get("paceLabel") or "",
+                    "bestPaceLabel": payload.get("bestPaceLabel") or "",
+                    "heartRateAvg": payload.get("heartRateAvg") or 0,
+                    "elevationGain": payload.get("elevationGain") or 0,
+                    "route": deepcopy(payload.get("route")) if isinstance(payload.get("route"), dict) else None,
                     "note": (payload.get("note") or "").strip(),
                     "createdAt": iso_at(),
                 }
