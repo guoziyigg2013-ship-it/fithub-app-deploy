@@ -950,7 +950,9 @@ function detectUrlPrefix() {
 }
 
 const URL_PREFIX = detectUrlPrefix();
-const API_BASE = `${URL_PREFIX}/api`;
+const APP_CONFIG = window.__FITHUB_CONFIG__ || {};
+const EXTERNAL_API_ORIGIN = String(APP_CONFIG.apiOrigin || "").trim().replace(/\/+$/, "");
+const API_BASE = EXTERNAL_API_ORIGIN ? `${EXTERNAL_API_ORIGIN}/api` : `${URL_PREFIX}/api`;
 
 const state = {
   activePage: "home",
