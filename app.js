@@ -1614,8 +1614,8 @@ function renderAvatarMarkup(profile, className = "avatar") {
 
   if (profile?.avatarImage) {
     return `
-      <div class="${safeClassName} avatar--photo image-shell image-shell--avatar">
-        <img class="avatar-image" src="${optimizeRemoteImageUrl(profile.avatarImage, "avatar")}" alt="${avatarAlt}" loading="lazy" decoding="async">
+      <div class="${safeClassName} avatar--photo">
+        <img class="avatar-image" src="${optimizeRemoteImageUrl(profile.avatarImage, "avatar")}" alt="${avatarAlt}" decoding="async">
       </div>
     `;
   }
@@ -2741,7 +2741,7 @@ async function saveFavoriteSports() {
   renderPage();
 }
 
-function startWorkoutSession(sportId = "") {
+async function startWorkoutSession(sportId = "") {
   const profile = getMyPageProfile();
   if (!profile || profile.role !== "enthusiast") {
     throw new Error("请先用健身爱好者身份注册后再开始运动。");
@@ -2762,14 +2762,17 @@ function startWorkoutSession(sportId = "") {
 
   state.checkinCurrentSportId = targetSport;
   state.outdoorShareCheckinId = "";
+  const gps = supportsOutdoorRouteShare(targetSport) ? await startOutdoorGpsTracking(targetSport) : null;
   state.workoutSession = {
     sportId: targetSport,
-    startedAt: Date.now()
+    startedAt: Date.now(),
+    gps
   };
   renderPage();
 }
 
 function cancelWorkoutSession() {
+  stopOutdoorGpsTracking();
   state.workoutSession = null;
   renderPage();
 }
@@ -2778,6 +2781,7 @@ async function finishWorkoutSession() {
   const profile = getMyPageProfile();
   const session = getWorkoutSessionStats(profile);
   if (!profile || !session) return;
+  stopOutdoorGpsTracking();
   const routePayload = buildOutdoorRoutePayload(profile, session);
 
   await postAndSync(`${API_BASE}/checkin/create`, {
@@ -3394,6 +3398,149 @@ function supportsOutdoorRouteShare(sportId) {
   return OUTDOOR_ROUTE_SPORT_IDS.has(sportId);
 }
 
+function getOutdoorGpsStatus(session) {
+  if (!session?.gps) return "";
+  const status = session.gps.status || "";
+  const pointCount = Array.isArray(session.gps.points) ? session.gps.points.length : 0;
+  return pointCount > 1 ? `${status} · 已记录 ${pointCount} 个定位点` : status;
+}
+
+function getGeoPositionErrorMessage(error) {
+  if (!error) return "定位失败，请检查浏览器权限。";
+  if (error.code === 1) return "户外运动需要定位权限，请允许浏览器访问你的位置。";
+  if (error.code === 2) return "暂时无法获取定位，请移动到空旷区域后重试。";
+  if (error.code === 3) return "定位超时，请检查网络和定位权限后重试。";
+  return error.message || "定位失败，请稍后再试。";
+}
+
+function getGeoPointAltitude(coords = {}) {
+  const altitude = Number(coords.altitude);
+  return Number.isFinite(altitude) ? altitude : null;
+}
+
+function buildGeoPoint(position) {
+  return {
+    lat: Number(position.coords.latitude),
+    lng: Number(position.coords.longitude),
+    accuracy: Number(position.coords.accuracy || 0),
+    altitude: getGeoPointAltitude(position.coords),
+    recordedAt: new Date(position.timestamp || Date.now()).toISOString()
+  };
+}
+
+function getOutdoorSpeedLimit(sportId) {
+  const limitBySport = {
+    run: 7.5,
+    "trail-run": 7,
+    "outdoor-walk": 3,
+    hiking: 3.2,
+    "outdoor-cycling": 18
+  };
+  return limitBySport[sportId] || 8;
+}
+
+function appendWorkoutGeoPoint(position, sportId, gpsState = null) {
+  const gps = gpsState || state.workoutSession?.gps;
+  if (!gps) return;
+  const point = buildGeoPoint(position);
+  gps.status = point.accuracy ? `GPS 已连接 · 精度 ${Math.round(point.accuracy)}m` : "GPS 已连接";
+  gps.lastAccuracy = point.accuracy || 0;
+
+  if (!gps.points.length) {
+    gps.points = [point];
+    return;
+  }
+
+  const lastPoint = gps.points[gps.points.length - 1];
+  const segmentMeters = getDistanceMeters(
+    { lat: lastPoint.lat, lng: lastPoint.lng },
+    { lat: point.lat, lng: point.lng }
+  );
+  const elapsedSeconds = Math.max(
+    1,
+    Math.round(
+      (new Date(point.recordedAt).getTime() - new Date(lastPoint.recordedAt).getTime()) / 1000
+    )
+  );
+  const speedMps = segmentMeters / elapsedSeconds;
+  const maxSpeed = getOutdoorSpeedLimit(sportId);
+  const accuracyLimit = Math.max(12, Math.min(point.accuracy || 12, 28));
+
+  if (segmentMeters < accuracyLimit || speedMps > maxSpeed) {
+    return;
+  }
+
+  gps.points.push(point);
+  gps.totalDistanceMeters = Number((gps.totalDistanceMeters + segmentMeters).toFixed(2));
+
+  if (typeof point.altitude === "number" && typeof lastPoint.altitude === "number") {
+    const gain = point.altitude - lastPoint.altitude;
+    if (gain > 1) {
+      gps.totalElevationGain = Number((gps.totalElevationGain + gain).toFixed(1));
+    }
+  }
+}
+
+function stopOutdoorGpsTracking() {
+  const watchId = state.workoutSession?.gps?.watchId;
+  if (watchId != null && navigator.geolocation?.clearWatch) {
+    navigator.geolocation.clearWatch(watchId);
+  }
+}
+
+function getCurrentGeoPosition(options) {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
+async function startOutdoorGpsTracking(sportId) {
+  if (!navigator.geolocation) {
+    throw new Error("当前浏览器不支持定位，户外运动暂时无法记录真实轨迹。");
+  }
+
+  const initialPosition = await getCurrentGeoPosition({
+    enableHighAccuracy: true,
+    timeout: 15000,
+    maximumAge: 0
+  }).catch((error) => {
+    throw new Error(getGeoPositionErrorMessage(error));
+  });
+
+  const gps = {
+    source: "gps",
+    status: "GPS 已连接",
+    watchId: null,
+    points: [],
+    totalDistanceMeters: 0,
+    totalElevationGain: 0,
+    lastAccuracy: 0
+  };
+
+  appendWorkoutGeoPoint(initialPosition, sportId, gps);
+
+  gps.watchId = navigator.geolocation.watchPosition(
+    (position) => {
+      appendWorkoutGeoPoint(position, sportId);
+    },
+    (error) => {
+      const errorMessage = getGeoPositionErrorMessage(error);
+      gps.status = errorMessage;
+      if (state.workoutSession?.gps) {
+        state.workoutSession.gps.status = errorMessage;
+        renderPage();
+      }
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 20000
+    }
+  );
+
+  return gps;
+}
+
 function getSeedFromText(value) {
   return String(value || "")
     .split("")
@@ -3413,8 +3560,96 @@ function buildOutdoorRoutePoints(sportId, seed) {
   ]);
 }
 
+function buildRoutePointsFromGeo(geoPoints) {
+  if (!Array.isArray(geoPoints) || geoPoints.length < 2) return [];
+
+  const lngs = geoPoints.map((item) => item.lng);
+  const lats = geoPoints.map((item) => item.lat);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const lngSpan = Math.max(maxLng - minLng, 0.0008);
+  const latSpan = Math.max(maxLat - minLat, 0.0008);
+
+  return geoPoints.map((item) => {
+    const x = 10 + ((item.lng - minLng) / lngSpan) * 80;
+    const y = 84 - ((item.lat - minLat) / latSpan) * 60;
+    return [Number(x.toFixed(2)), Number(y.toFixed(2))];
+  });
+}
+
+function buildRouteCheckpointsFromPoints(points, desiredCount) {
+  if (!points.length) return [];
+  const checkpointCount = clampNumber(desiredCount, 2, 12);
+  return Array.from({ length: checkpointCount }, (_, index) => {
+    const ratio = (index + 1) / (checkpointCount + 1);
+    const pointIndex = clampNumber(Math.round(ratio * (points.length - 1)), 0, points.length - 1);
+    const point = points[pointIndex] || points[points.length - 1];
+    return {
+      label: String(index + 1),
+      x: point[0],
+      y: point[1]
+    };
+  });
+}
+
 function buildOutdoorRoutePayload(profile, session) {
   if (!profile || !session || !supportsOutdoorRouteShare(session.sport.id)) return null;
+
+  const geoPoints = Array.isArray(session.gps?.points) ? session.gps.points : [];
+  const routePoints = buildRoutePointsFromGeo(geoPoints);
+
+  if (routePoints.length >= 2) {
+    const checkpointCount = clampNumber(Math.round(Math.max(session.distance || 1, 2)), 3, 12);
+    const checkpoints = buildRouteCheckpointsFromPoints(routePoints, checkpointCount);
+    const restingHeartRate = Number(profile.restingHeartRate || 64) || 64;
+    const avgHeartRateOffset =
+      session.sport.id === "outdoor-walk"
+        ? 42
+        : session.sport.id === "outdoor-cycling"
+          ? 58
+          : session.sport.id === "hiking"
+            ? 52
+            : session.sport.id === "trail-run"
+              ? 72
+              : 66;
+    const avgHeartRate = Math.round(restingHeartRate + avgHeartRateOffset);
+    const bestPaceSeconds = session.distance
+      ? Math.max(
+          205,
+          Math.round((session.elapsedMinutes * 60) / session.distance * (session.sport.id === "outdoor-walk" ? 0.93 : 0.86))
+        )
+      : 0;
+    const bestPaceLabel = bestPaceSeconds
+      ? `${Math.floor(bestPaceSeconds / 60)}'${String(bestPaceSeconds % 60).padStart(2, "0")}"`
+      : "--";
+
+    return {
+      source: "gps",
+      city: profile.city || state.userPosition.city,
+      district: profile.locationLabel || state.userPosition.label,
+      shareTitle: `${profile.city || state.userPosition.city}市 ${session.sport.label}`,
+      startedAt: new Date(session.startedAt).toISOString(),
+      dateLabel: formatShareDateLabel(session.startedAt),
+      durationLabel: formatWorkoutDurationLabel(session.elapsedSeconds),
+      distanceKm: Number((session.distance || 0).toFixed(2)),
+      avgPaceLabel: formatWorkoutPaceLabel(session.elapsedMinutes, session.distance),
+      bestPaceLabel,
+      avgHeartRate,
+      elevationGain: Math.round(session.gps?.totalElevationGain || 0),
+      calories: session.calories,
+      points: routePoints,
+      checkpoints,
+      geoPoints: geoPoints.map((item) => ({
+        lat: item.lat,
+        lng: item.lng,
+        accuracy: item.accuracy || 0,
+        altitude: item.altitude,
+        recordedAt: item.recordedAt
+      }))
+    };
+  }
 
   const seed = getSeedFromText(`${profile.id}-${session.startedAt}-${session.sport.id}`);
   const points = buildOutdoorRoutePoints(session.sport.id, seed);
@@ -3465,6 +3700,7 @@ function buildOutdoorRoutePayload(profile, session) {
   );
 
   return {
+    source: "generated",
     city: profile.city || state.userPosition.city,
     district: profile.locationLabel || state.userPosition.label,
     shareTitle: `${profile.city || state.userPosition.city}市 ${session.sport.label}`,
@@ -3514,6 +3750,7 @@ function getWorkoutSessionStats(profile) {
   const sport = getCheckinSport(session.sportId);
   const metrics = getCheckinMetrics(session.sportId);
   const calibration = getWorkoutCalibration(profile, metrics);
+  const gps = session.gps || null;
   const elapsedSeconds = Math.max(0, Math.floor((Date.now() - session.startedAt) / 1000));
   const elapsedMinutes = Math.max(1, Math.floor(elapsedSeconds / 60));
   const hours = elapsedSeconds / 3600;
@@ -3522,9 +3759,19 @@ function getWorkoutSessionStats(profile) {
     1,
     Math.round(((metrics.met * 3.5 * weightKg * elapsedMinutes) / 200) * calibration.calorieFactor)
   );
-  const distance = metrics.paceKmh
-    ? Number((metrics.paceKmh * hours * calibration.distanceFactor).toFixed(hours >= 1 ? 1 : 2))
+  const gpsDistanceKm = gps?.totalDistanceMeters
+    ? Number((gps.totalDistanceMeters / 1000).toFixed(hours >= 1 ? 2 : 3))
     : 0;
+  const distance = supportsOutdoorRouteShare(session.sportId)
+    ? gpsDistanceKm
+    : metrics.paceKmh
+      ? Number((metrics.paceKmh * hours * calibration.distanceFactor).toFixed(hours >= 1 ? 1 : 2))
+      : 0;
+  const sourceLabel = supportsOutdoorRouteShare(session.sportId)
+    ? gps?.points?.length >= 2
+      ? "已结合实时定位点位与身体数据记录户外轨迹"
+      : gps?.status || "正在连接 GPS，连接成功后会开始记录真实轨迹"
+    : calibration.sourceLabel;
 
   return {
     ...session,
@@ -3534,7 +3781,7 @@ function getWorkoutSessionStats(profile) {
     timerLabel: formatWorkoutTimer(elapsedSeconds),
     calories,
     distance,
-    sourceLabel: calibration.sourceLabel
+    sourceLabel
   };
 }
 
@@ -3915,7 +4162,13 @@ function renderOutdoorRouteFeature(profile) {
           <div><span>卡路里</span><strong>${escapeHtml(`${route.calories || checkin.calories || 0} kcal`)}</strong></div>
         </div>
 
-        <p class="result-tip">这是一张适合分享的户外运动成绩页。后续接入真实定位后，可以直接按 GPS 点位生成真实轨迹。</p>
+        <p class="result-tip">${
+          escapeHtml(
+            route.source === "gps"
+              ? "这次轨迹已按真实 GPS 点位生成；后续接入地图 SDK 后，会直接叠加到真实地图底图。"
+              : "这是一张适合分享的户外运动成绩页；如果允许定位，后面会优先按真实 GPS 点位生成轨迹。"
+          )
+        }</p>
 
         <div class="action-row action-row--checkin">
           <button class="mini-button" data-open-my-feature="checkin" type="button">返回打卡</button>
@@ -4057,6 +4310,7 @@ function renderWorkoutLauncher(profile) {
 function renderWorkoutSession(profile) {
   const session = getWorkoutSessionStats(profile);
   if (!session) return "";
+  const gpsStatus = supportsOutdoorRouteShare(session.sport.id) ? getOutdoorGpsStatus(session) : "";
 
   return `
     <article class="detail-card workout-session-card">
@@ -4069,6 +4323,17 @@ function renderWorkoutSession(profile) {
       </div>
 
       <div class="workout-timer">${escapeHtml(session.timerLabel)}</div>
+
+      ${
+        gpsStatus
+          ? `
+            <div class="workout-gps-strip">
+              <span>真实 GPS 轨迹</span>
+              <strong>${escapeHtml(gpsStatus)}</strong>
+            </div>
+          `
+          : ""
+      }
 
       <div class="workout-stat-grid">
         <div>
@@ -4084,7 +4349,7 @@ function renderWorkoutSession(profile) {
           <strong>${escapeHtml(String(getProfileBMI(profile)))}</strong>
         </div>
         <div>
-          <span>估算距离</span>
+          <span>${escapeHtml(supportsOutdoorRouteShare(session.sport.id) ? "GPS距离" : "估算距离")}</span>
           <strong>${session.distance ? escapeHtml(`${session.distance} km`) : "--"}</strong>
         </div>
       </div>

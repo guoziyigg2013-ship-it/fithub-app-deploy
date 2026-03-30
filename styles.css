@@ -1211,7 +1211,7 @@ input {
 }
 
 .avatar--photo {
-  background: #f2f2f2;
+  background: transparent;
 }
 
 .avatar-image {
@@ -1903,6 +1903,35 @@ input {
   font-weight: 800;
   letter-spacing: -0.04em;
   line-height: 0.95;
+}
+
+.workout-gps-strip {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(47, 140, 136, 0.16);
+}
+
+.workout-gps-strip span,
+.workout-gps-strip strong {
+  margin: 0;
+}
+
+.workout-gps-strip span {
+  color: #2f8c88;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workout-gps-strip strong {
+  color: #23414f;
+  font-size: 13px;
+  text-align: right;
 }
 
 .workout-stat-grid {
