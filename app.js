@@ -906,6 +906,12 @@ const SESSION_STORAGE_KEY = "fithub_trial_session_id";
 const SNAPSHOT_STORAGE_KEY = "fithub_trial_snapshot_v2";
 const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
 const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
+const DEFAULT_RUNTIME_CONFIG = Object.freeze({
+  mapProvider: "",
+  amapKey: "",
+  amapSecurityCode: "",
+  baiduAk: ""
+});
 const REGISTER_WHEEL_ITEM_HEIGHT = 52;
 const REGISTER_WHEEL_FIELDS = {
   height_cm: {
@@ -995,6 +1001,7 @@ const state = {
   chatTargetProfileId: "",
   chatDraft: "",
   sessionId: "",
+  runtimeConfig: { ...DEFAULT_RUNTIME_CONFIG },
   isBootstrapping: false
 };
 
@@ -1011,6 +1018,9 @@ let refreshPromise = null;
 let restorePromise = null;
 let lastSuccessfulSyncAt = 0;
 let authLookupTimeout = null;
+let mapSdkPromise = null;
+let mapSdkProvider = "";
+const routeMapRegistry = new Map();
 
 function escapeHtml(value = "") {
   return String(value)
@@ -1123,6 +1133,22 @@ function rememberManagedProfileBackups(payload) {
 
 function normalizePhone(value = "") {
   return String(value).replace(/\D+/g, "");
+}
+
+function normalizeRuntimeConfig(config = {}) {
+  const normalized = {
+    mapProvider: String(config?.mapProvider || "").trim().toLowerCase(),
+    amapKey: String(config?.amapKey || "").trim(),
+    amapSecurityCode: String(config?.amapSecurityCode || "").trim(),
+    baiduAk: String(config?.baiduAk || "").trim()
+  };
+
+  if (!normalized.mapProvider) {
+    if (normalized.amapKey) normalized.mapProvider = "amap";
+    else if (normalized.baiduAk) normalized.mapProvider = "baidu";
+  }
+
+  return normalized;
 }
 
 function normalizeStoredAccount(item) {
@@ -1404,6 +1430,7 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   storeSnapshot(payload);
 
   state.sessionId = payload.session.id || state.sessionId;
+  state.runtimeConfig = normalizeRuntimeConfig(payload.config || state.runtimeConfig);
   storeSessionId(state.sessionId);
   state.selectedRole = payload.session.selectedRole || state.selectedRole;
   state.registerRole = payload.session.selectedRole || state.registerRole;
@@ -4057,7 +4084,31 @@ function getOutdoorShareCheckin(profile) {
   return routeCheckins[0];
 }
 
-function renderRouteMap(route) {
+function canRenderAmapRoute(route) {
+  const config = normalizeRuntimeConfig(state.runtimeConfig);
+  return (
+    config.mapProvider === "amap" &&
+    Boolean(config.amapKey) &&
+    route?.source === "gps" &&
+    Array.isArray(route?.geoPoints) &&
+    route.geoPoints.length >= 2
+  );
+}
+
+function getAmapRuntimeConfig() {
+  const config = normalizeRuntimeConfig(state.runtimeConfig);
+  if (config.mapProvider !== "amap" || !config.amapKey) return null;
+  return config;
+}
+
+function registerRouteMap(route, mapId) {
+  if (!mapId || !route) return;
+  routeMapRegistry.set(mapId, {
+    route: JSON.parse(JSON.stringify(route))
+  });
+}
+
+function buildRouteFallbackSvg(route) {
   const points = Array.isArray(route?.points) ? route.points : [];
   if (!points.length) {
     return '<div class="route-map-empty">完成一次户外运动后，这里会展示你的运动轨迹。</div>';
@@ -4113,6 +4164,143 @@ function renderRouteMap(route) {
   `;
 }
 
+function renderRouteMap(route, mapId = "") {
+  if (canRenderAmapRoute(route) && mapId) {
+    registerRouteMap(route, mapId);
+    return `<div class="route-map-live" data-route-map="${escapeHtml(mapId)}" aria-label="户外运动轨迹地图"></div>`;
+  }
+
+  return buildRouteFallbackSvg(route);
+}
+
+function loadAmapSdk() {
+  const config = getAmapRuntimeConfig();
+  if (!config) {
+    return Promise.reject(new Error("未配置高德地图 Key。"));
+  }
+
+  if (window.AMap?.Map) {
+    return Promise.resolve(window.AMap);
+  }
+
+  if (mapSdkPromise && mapSdkProvider === "amap") {
+    return mapSdkPromise;
+  }
+
+  mapSdkProvider = "amap";
+  mapSdkPromise = new Promise((resolve, reject) => {
+    if (config.amapSecurityCode) {
+      window._AMapSecurityConfig = {
+        ...(window._AMapSecurityConfig || {}),
+        securityJsCode: config.amapSecurityCode
+      };
+    }
+
+    const existing = document.getElementById("fithub-amap-sdk");
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.AMap), { once: true });
+      existing.addEventListener("error", () => reject(new Error("高德地图 SDK 加载失败")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "fithub-amap-sdk";
+    script.async = true;
+    script.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(config.amapKey)}`;
+    script.onload = () => {
+      if (window.AMap?.Map) {
+        resolve(window.AMap);
+      } else {
+        reject(new Error("高德地图 SDK 未初始化成功。"));
+      }
+    };
+    script.onerror = () => reject(new Error("高德地图 SDK 加载失败"));
+    document.head.appendChild(script);
+  }).catch((error) => {
+    mapSdkPromise = null;
+    throw error;
+  });
+
+  return mapSdkPromise;
+}
+
+function initAmapRouteMap(container, AMap, route) {
+  if (!container || container.dataset.routeMapHydrated === "1") return;
+  const geoPoints = Array.isArray(route?.geoPoints)
+    ? route.geoPoints
+        .map((item) => [Number(item.lng), Number(item.lat)])
+        .filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))
+    : [];
+
+  if (geoPoints.length < 2) {
+    container.innerHTML = buildRouteFallbackSvg(route);
+    container.dataset.routeMapHydrated = "1";
+    return;
+  }
+
+  const map = new AMap.Map(container, {
+    viewMode: "2D",
+    zoom: 14,
+    center: geoPoints[0],
+    mapStyle: "amap://styles/whitesmoke",
+    resizeEnable: true,
+    dragEnable: true,
+    zoomEnable: true,
+    jogEnable: false
+  });
+
+  const polyline = new AMap.Polyline({
+    path: geoPoints,
+    strokeColor: "#ffe066",
+    strokeWeight: 6,
+    strokeOpacity: 0.96,
+    lineJoin: "round",
+    lineCap: "round"
+  });
+
+  const startMarker = new AMap.CircleMarker({
+    center: geoPoints[0],
+    radius: 7,
+    strokeColor: "#ffffff",
+    strokeWeight: 3,
+    fillColor: "#1fd27b",
+    fillOpacity: 1
+  });
+
+  const endMarker = new AMap.CircleMarker({
+    center: geoPoints[geoPoints.length - 1],
+    radius: 7,
+    strokeColor: "#ffffff",
+    strokeWeight: 3,
+    fillColor: "#ff6b58",
+    fillOpacity: 1
+  });
+
+  map.add([polyline, startMarker, endMarker]);
+  map.setFitView([polyline], false, [28, 28, 28, 28]);
+  container.dataset.routeMapHydrated = "1";
+  container._fithubAmap = map;
+}
+
+async function hydrateRouteMaps(root = document) {
+  const containers = Array.from(root.querySelectorAll("[data-route-map]"));
+  if (!containers.length) return;
+  if (!getAmapRuntimeConfig()) return;
+
+  const AMap = await loadAmapSdk();
+  containers.forEach((container) => {
+    if (container.dataset.routeMapHydrated === "1") return;
+    const payload = routeMapRegistry.get(container.dataset.routeMap);
+    if (!payload?.route) return;
+    try {
+      initAmapRouteMap(container, AMap, payload.route);
+    } catch (_error) {
+      container.innerHTML = '<div class="route-map-empty">高德地图加载失败，已回退为普通轨迹图。</div>';
+      container.dataset.routeMapHydrated = "1";
+    }
+  });
+}
+
 function renderOutdoorRouteFeature(profile) {
   const checkin = getOutdoorShareCheckin(profile);
   if (!checkin?.route) {
@@ -4137,7 +4325,7 @@ function renderOutdoorRouteFeature(profile) {
           <span class="status-pill">${escapeHtml(route.district || profile.locationLabel || state.userPosition.label)}</span>
         </div>
         <div class="route-share-map-canvas">
-          ${renderRouteMap(route)}
+          ${renderRouteMap(route, checkin.id)}
         </div>
       </div>
 
@@ -4164,8 +4352,10 @@ function renderOutdoorRouteFeature(profile) {
 
         <p class="result-tip">${
           escapeHtml(
-            route.source === "gps"
-              ? "这次轨迹已按真实 GPS 点位生成；后续接入地图 SDK 后，会直接叠加到真实地图底图。"
+            route.source === "gps" && canRenderAmapRoute(route)
+              ? "这次轨迹已按真实 GPS 点位叠加高德地图底图生成。"
+              : route.source === "gps"
+                ? "这次轨迹已按真实 GPS 点位生成；补充高德地图 Web Key 后会自动显示真实地图底图。"
               : "这是一张适合分享的户外运动成绩页；如果允许定位，后面会优先按真实 GPS 点位生成轨迹。"
           )
         }</p>
@@ -4758,6 +4948,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
   };
 
   const currentFeature = featureMap[feature] || featureMap.account;
+  const showFeatureIntro = !["checkin"].includes(feature);
 
   return `
     <section class="page-header">
@@ -4788,10 +4979,16 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
         .join("")}
     </section>
 
-    <article class="helper-card helper-card--my-feature">
-      <strong>${escapeHtml(currentFeature.title)}</strong>
-      <p>${escapeHtml(currentFeature.subtitle)}</p>
-    </article>
+    ${
+      showFeatureIntro
+        ? `
+          <article class="helper-card helper-card--my-feature">
+            <strong>${escapeHtml(currentFeature.title)}</strong>
+            <p>${escapeHtml(currentFeature.subtitle)}</p>
+          </article>
+        `
+        : ""
+    }
 
     <section class="profile-subpage-stack">
       ${currentFeature.content}
@@ -5408,6 +5605,7 @@ function renderOverlay() {
 
 function renderPage() {
   resetProfileSwipe();
+  routeMapRegistry.clear();
   appView.dataset.page = state.activePage;
   if (state.isBootstrapping) {
     appView.innerHTML = `
@@ -5429,6 +5627,7 @@ function renderPage() {
   syncNavActive();
   renderOverlay();
   hydrateAsyncImages(appView);
+  hydrateRouteMaps(appView).catch(() => {});
 }
 
 appView.addEventListener("click", (event) => {
@@ -6059,7 +6258,16 @@ function syncViewportHeight() {
   document.documentElement.style.setProperty("--app-vh", `${window.innerHeight}px`);
 }
 
+function registerAppServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  const swUrl = `${URL_PREFIX || ""}/sw.js`;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register(swUrl).catch(() => {});
+  });
+}
+
 syncViewportHeight();
+registerAppServiceWorker();
 window.addEventListener("resize", syncViewportHeight, { passive: true });
 window.addEventListener("orientationchange", syncViewportHeight, { passive: true });
 

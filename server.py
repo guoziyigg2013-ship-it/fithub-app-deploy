@@ -40,6 +40,10 @@ SUPABASE_STATE_TABLE = (os.getenv("FITHUB_SUPABASE_TABLE") or "fithub_app_state"
 SUPABASE_STATE_ROW_ID = (os.getenv("FITHUB_SUPABASE_ROW_ID") or "primary").strip()
 SUPABASE_TIMEOUT_SECONDS = float(os.getenv("FITHUB_SUPABASE_TIMEOUT") or "12")
 SUPABASE_BACKUP_PREFIX = f"{SUPABASE_STATE_ROW_ID}-backup"
+MAP_PROVIDER = (os.getenv("FITHUB_MAP_PROVIDER") or "").strip().lower()
+AMAP_WEB_KEY = (os.getenv("FITHUB_AMAP_WEB_KEY") or "").strip()
+AMAP_SECURITY_CODE = (os.getenv("FITHUB_AMAP_SECURITY_CODE") or "").strip()
+BAIDU_MAP_AK = (os.getenv("FITHUB_BAIDU_MAP_AK") or "").strip()
 
 
 def url_with_prefix(path="/"):
@@ -60,6 +64,22 @@ def strip_url_prefix(path):
             return path[len(URL_PREFIX):]
         return None
     return path
+
+
+def runtime_config():
+    provider = MAP_PROVIDER if MAP_PROVIDER in {"amap", "baidu"} else ""
+    if not provider:
+        if AMAP_WEB_KEY:
+            provider = "amap"
+        elif BAIDU_MAP_AK:
+            provider = "baidu"
+
+    return {
+        "mapProvider": provider,
+        "amapKey": AMAP_WEB_KEY,
+        "amapSecurityCode": AMAP_SECURITY_CODE,
+        "baiduAk": BAIDU_MAP_AK,
+    }
 
 DEFAULT_POSITION = {
     "key": "xiamen",
@@ -1553,6 +1573,7 @@ def bootstrap_response(state, session):
     current_actor_profile_id = session.get("currentActorProfileId")
     profiles = [serialize_profile(state, profile_id, current_actor_profile_id) for profile_id in state["profiles"]]
     return {
+        "config": runtime_config(),
         "session": {
             "id": session["id"],
             "selectedRole": session["selectedRole"],
