@@ -414,6 +414,19 @@ def find_profile_by_role_phone(state, role, phone):
     return None
 
 
+def find_profiles_by_phone(state, phone):
+    phone_key = normalize_phone(phone)
+    if not phone_key:
+        return []
+    profiles = [
+        profile
+        for profile in state.get("profiles", {}).values()
+        if normalize_phone(profile.get("phone")) == phone_key
+    ]
+    profiles.sort(key=lambda item: (item.get("createdAt") or "", item.get("id") or ""))
+    return profiles
+
+
 def make_profile(**kwargs):
     profile = {
         "id": kwargs["id"],
@@ -530,6 +543,59 @@ def find_account_by_phone(state, phone, preferred_role=""):
         if fallback is None:
             fallback = account
     return fallback
+
+
+def resolve_account_by_phone(state, phone):
+    phone_key = normalize_phone(phone)
+    if not phone_key:
+        return None
+
+    account = find_account_by_phone(state, phone)
+    matched_profiles = find_profiles_by_phone(state, phone)
+
+    if not account and not matched_profiles:
+        return None
+
+    if not account and matched_profiles:
+        account = ensure_profile_account(state, matched_profiles[0], phone)
+
+    if not account:
+        return None
+
+    account["phone"] = phone_key
+    role_map = account.setdefault("profilesByRole", {})
+
+    for profile in matched_profiles:
+        role = str(profile.get("role") or "").strip()
+        if role not in {"enthusiast", "gym", "coach"}:
+            continue
+        if profile.get("accountId") != account["id"]:
+            profile["accountId"] = account["id"]
+        role_map[role] = profile["id"]
+
+    return account
+
+
+def serialize_phone_matches(state, phone):
+    account = resolve_account_by_phone(state, phone)
+    if not account:
+        return []
+
+    items = []
+    for role, profile_id in sorted(account.get("profilesByRole", {}).items()):
+        profile = state.get("profiles", {}).get(profile_id)
+        if not profile:
+            continue
+        items.append(
+            {
+                "role": role,
+                "profileId": profile_id,
+                "name": profile.get("name") or "平台用户",
+                "phone": account.get("phone", ""),
+                "avatarImage": compact_avatar_image(profile.get("avatarImage"), role),
+            }
+        )
+    return items
 
 
 def reconcile_account_registry(state):
@@ -2005,27 +2071,46 @@ class FitHubHandler(BaseHTTPRequestHandler):
         payload = self._read_json()
         session_id = payload.get("sessionId")
 
+        if parsed.path == f"{API_PREFIX}/auth/lookup-phone":
+            def action(state):
+                ensure_session(state, session_id)
+                reconcile_account_registry(state)
+                phone = normalize_phone(payload.get("phone"))
+                if not phone:
+                    raise ValueError("请输入注册时填写的手机号。")
+                return {
+                    "phone": phone,
+                    "matches": serialize_phone_matches(state, phone),
+                }
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if parsed.path == f"{API_PREFIX}/auth/login":
             def action(state):
                 session = ensure_session(state, session_id)
                 reconcile_account_registry(state)
                 role = str(payload.get("role") or "").strip()
                 account = find_account_by_token(state, payload.get("accountId"), payload.get("restoreToken"))
-                profile = None
 
                 if account:
                     preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
                     attach_account_to_session(state, session, account, preferred_role)
                     return bootstrap_response(state, session)
 
-                if role not in {"enthusiast", "gym", "coach"}:
-                    raise ValueError("请选择要登录的身份。")
-
-                account = find_account_by_phone(state, payload.get("phone"), role)
+                account = resolve_account_by_phone(state, payload.get("phone"))
                 if account:
-                    attach_account_to_session(state, session, account, role)
+                    preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
+                    attach_account_to_session(state, session, account, preferred_role)
                     return bootstrap_response(state, session)
 
+                if role not in {"enthusiast", "gym", "coach"}:
+                    raise ValueError("请输入手机号后选择要登录的身份。")
+
+                profile = None
                 profile = find_profile_by_role_phone(state, role, payload.get("phone"))
                 if not profile:
                     raise ValueError("没有找到这个身份，请先注册后再登录。")
@@ -2053,11 +2138,12 @@ class FitHubHandler(BaseHTTPRequestHandler):
 
                     role = str(item.get("role") or "").strip()
                     phone = item.get("phone")
-                    if role not in {"enthusiast", "gym", "coach"}:
-                        continue
-                    matched_account = find_account_by_phone(state, phone, role)
+                    matched_account = resolve_account_by_phone(state, phone)
                     if matched_account:
-                        attach_account_to_session(state, session, matched_account, role)
+                        preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
+                        attach_account_to_session(state, session, matched_account, preferred_role)
+                        continue
+                    if role not in {"enthusiast", "gym", "coach"}:
                         continue
                     profile = find_profile_by_role_phone(state, role, phone)
                     if not profile:

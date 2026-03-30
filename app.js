@@ -966,6 +966,7 @@ const state = {
   authRole: "enthusiast",
   authPhone: "",
   authMessage: "",
+  authMatches: [],
   authAccountId: "",
   authRestoreToken: "",
   cityInput: "",
@@ -1009,6 +1010,7 @@ const profileSwipe = {
 let refreshPromise = null;
 let restorePromise = null;
 let lastSuccessfulSyncAt = 0;
+let authLookupTimeout = null;
 
 function escapeHtml(value = "") {
   return String(value)
@@ -1217,6 +1219,57 @@ function rememberAccount(role, phone, accountId = "", restoreToken = "") {
 
 function getStoredAccountForRole(role) {
   return getStoredAccounts().find((item) => item.roles.includes(role)) || null;
+}
+
+function clearAuthResolution({ preservePhone = true } = {}) {
+  state.authMatches = [];
+  state.authAccountId = "";
+  state.authRestoreToken = "";
+  if (!preservePhone) {
+    state.authPhone = "";
+  }
+}
+
+async function lookupAuthMatches(phone, { silent = false } = {}) {
+  const normalizedPhone = normalizePhone(phone);
+  if (!normalizedPhone) {
+    state.authMatches = [];
+    if (!silent) {
+      state.authMessage = "";
+      renderOverlay();
+    }
+    return [];
+  }
+
+  const payload = await apiRequest(`${API_BASE}/auth/lookup-phone`, {
+    method: "POST",
+    body: {
+      sessionId: state.sessionId || getStoredSessionId(),
+      phone: normalizedPhone
+    }
+  });
+
+  state.authMatches = Array.isArray(payload?.matches) ? payload.matches : [];
+
+  if (!state.authMatches.length) {
+    if (!silent) {
+      state.authMessage = "这个手机号暂时没有查到已注册身份，请确认号码是否填写正确。";
+      renderOverlay();
+    }
+    return [];
+  }
+
+  const matchedRole = state.authMatches.find((item) => item.role === state.authRole);
+  if (!matchedRole) {
+    state.authRole = state.authMatches[0].role;
+  }
+
+  if (!silent) {
+    state.authMessage = `已识别到这个手机号下的 ${state.authMatches.length} 个身份，请选择要登录的身份。`;
+    renderOverlay();
+  }
+
+  return state.authMatches;
 }
 
 function findRecoverableSnapshotProfile(role, phone) {
@@ -1806,6 +1859,7 @@ function openAuth(role = state.selectedRole) {
   state.authAccountId = remembered?.id || "";
   state.authRestoreToken = remembered?.restoreToken || "";
   state.authMessage = "";
+  state.authMatches = [];
   openOverlay("auth");
 }
 
@@ -2516,14 +2570,34 @@ async function upsertManagedProfile(role, formData) {
 }
 
 async function submitAuthLogin() {
-  const role = state.authRole;
+  let role = state.authRole;
   const phone = normalizePhone(state.authPhone);
   const canUseToken = Boolean(state.authAccountId && state.authRestoreToken);
-  if (!roleConfig[role]) {
-    throw new Error("请先选择要登录的身份。");
-  }
   if (!canUseToken && !phone) {
     throw new Error("请输入注册时填写的手机号。");
+  }
+
+  if (phone && !canUseToken) {
+    const matches = await lookupAuthMatches(phone, { silent: true });
+    const selectedMatch = matches.find((item) => item.role === role);
+
+    if (!matches.length) {
+      throw new Error("没有找到这个手机号下的已注册身份，请先注册后再登录。");
+    }
+
+    if (!selectedMatch && matches.length === 1) {
+      role = matches[0].role;
+      state.authRole = role;
+      state.authMessage = `已自动识别为 ${getRoleLabel(role)}，现在可以直接登录。`;
+    } else if (!selectedMatch && matches.length > 1) {
+      state.authMessage = "这个手机号下有多个已注册身份，请先点上方身份卡选择要登录的角色。";
+      renderOverlay();
+      throw new Error("请选择要登录的身份。");
+    }
+  }
+
+  if (!roleConfig[role]) {
+    throw new Error("请先选择要登录的身份。");
   }
 
   try {
@@ -2563,6 +2637,7 @@ async function submitAuthLogin() {
   state.activeProfileId = state.currentActorProfileId;
   state.composeProfileId = state.currentActorProfileId;
   state.locationStatus = `${getRoleLabel(role)}登录成功，这个设备会继续记住你的账号。`;
+  state.authMatches = [];
   closeOverlay();
   syncNavActive();
   renderPage();
@@ -4657,6 +4732,7 @@ function renderWelcomeOverlay() {
 
 function renderAuthOverlay() {
   const storedAccounts = getStoredAccounts();
+  const matchedRoleSet = new Set(state.authMatches.map((item) => item.role));
 
   return `
     <div class="overlay-backdrop" data-close-overlay="1"></div>
@@ -4664,8 +4740,8 @@ function renderAuthOverlay() {
       <div class="overlay-head">
         <div>
           <p class="page-label">账户登录</p>
-          <h2>找回这个设备上的账号</h2>
-          <p>优先使用这个设备保存的账户凭证恢复身份；只有本机没有凭证时，才回退到手机号方式。</p>
+          <h2>找回你的账号</h2>
+          <p>这个设备有历史凭证时会优先自动恢复；换设备时，输入手机号后会识别这个手机号下已注册的所有身份。</p>
         </div>
         <button class="close-button" data-close-overlay="1" type="button">×</button>
       </div>
@@ -4676,7 +4752,7 @@ function renderAuthOverlay() {
             ([key, config]) => `
               <button class="role-option ${key === state.authRole ? "is-active" : ""}" data-auth-role="${key}" type="button">
                 <strong>${config.label}</strong>
-                <span>${config.short}</span>
+                <span>${matchedRoleSet.has(key) ? "已识别" : config.short}</span>
               </button>
             `
           )
@@ -4723,11 +4799,35 @@ function renderAuthOverlay() {
           <span>手机号 ${state.authAccountId ? "（可选，当前会优先用本机凭证恢复）" : "*"}</span>
           <input data-auth-phone="1" name="phone" type="tel" value="${escapeHtml(state.authPhone)}" placeholder="${escapeHtml(state.authAccountId ? "本机已保存账户凭证，也可以补填手机号" : "请输入注册时填写的手机号")}" ${state.authAccountId ? "" : "required"}>
         </label>
+        ${
+          state.authMatches.length
+            ? `
+              <div class="helper-inline">
+                <span>这个手机号下已识别到 ${state.authMatches.length} 个身份</span>
+              </div>
+              <div class="managed-strip managed-strip--matches">
+                ${state.authMatches
+                  .map(
+                    (item) => `
+                      <button
+                        class="managed-chip ${item.role === state.authRole ? "is-active" : ""}"
+                        data-auth-match-role="${escapeHtml(item.role)}"
+                        type="button"
+                      >
+                        ${escapeHtml(roleConfig[item.role].label)} · ${escapeHtml(item.name)}
+                      </button>
+                    `
+                  )
+                  .join("")}
+              </div>
+            `
+            : ""
+        }
         <button class="primary-submit" type="submit">登录这个身份</button>
         ${
           state.authMessage
             ? `<p class="helper-note">${escapeHtml(state.authMessage)}</p>`
-            : '<p class="helper-note">如果这个设备注册过账号，后面更新或重新打开时会优先自动恢复，不再只靠手机号检索。</p>'
+            : '<p class="helper-note">如果这个设备注册过账号，后面会优先自动恢复；换设备时，输入手机号后会自动识别可登录的身份。</p>'
         }
         <button class="text-link" data-open-register-from-auth="${escapeHtml(state.authRole)}" type="button">还没有账号？去注册</button>
       </form>
@@ -5356,7 +5456,8 @@ overlay.addEventListener("click", (event) => {
   if (target.dataset.authRole) {
     state.authRole = target.dataset.authRole;
     const remembered = getStoredAccountForRole(state.authRole);
-    if (remembered) {
+    const hasTypedPhone = Boolean(normalizePhone(state.authPhone));
+    if (remembered && !hasTypedPhone && !state.authMatches.length) {
       state.authAccountId = remembered.id;
       state.authRestoreToken = remembered.restoreToken;
       state.authPhone = remembered.phone;
@@ -5364,6 +5465,14 @@ overlay.addEventListener("click", (event) => {
       state.authAccountId = "";
       state.authRestoreToken = "";
     }
+    state.authMessage = "";
+    renderOverlay();
+    return;
+  }
+
+  if (target.dataset.authMatchRole) {
+    state.authRole = target.dataset.authMatchRole;
+    state.authMessage = `已切换到 ${getRoleLabel(state.authRole)}，现在可以直接登录。`;
     renderOverlay();
     return;
   }
@@ -5415,10 +5524,24 @@ overlay.addEventListener("input", (event) => {
   if (event.target.dataset.authPhone) {
     const nextPhone = event.target.value;
     if (normalizePhone(nextPhone) !== normalizePhone(state.authPhone)) {
-      state.authAccountId = "";
-      state.authRestoreToken = "";
+      clearAuthResolution();
+      state.authMessage = "";
+      if (authLookupTimeout) {
+        window.clearTimeout(authLookupTimeout);
+        authLookupTimeout = null;
+      }
     }
     state.authPhone = nextPhone;
+    const normalizedPhone = normalizePhone(nextPhone);
+    if (normalizedPhone.length >= 11) {
+      authLookupTimeout = window.setTimeout(() => {
+        runTask(async () => {
+          if (state.overlayMode !== "auth") return;
+          if (normalizePhone(state.authPhone) !== normalizedPhone) return;
+          await lookupAuthMatches(normalizedPhone);
+        });
+      }, 220);
+    }
   }
 
   if (event.target.dataset.composeContent) {
