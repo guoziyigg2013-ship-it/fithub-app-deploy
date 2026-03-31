@@ -1156,6 +1156,13 @@ function normalizeRuntimeConfig(config = {}) {
   return normalized;
 }
 
+function getEffectiveRuntimeConfig() {
+  return normalizeRuntimeConfig({
+    ...(window.__FITHUB_CONFIG__ || {}),
+    ...(state.runtimeConfig || {})
+  });
+}
+
 function normalizeStoredAccount(item) {
   const roles = Array.isArray(item?.roles)
     ? item.roles.filter((role) => roleConfig[role])
@@ -3848,7 +3855,8 @@ function buildOutdoorRoutePoints(sportId, seed) {
 }
 
 function buildRoutePointsFromGeo(geoPoints) {
-  if (!Array.isArray(geoPoints) || geoPoints.length < 2) return [];
+  if (!Array.isArray(geoPoints) || !geoPoints.length) return [];
+  if (geoPoints.length === 1) return [[50, 52]];
 
   const lngs = geoPoints.map((item) => item.lng);
   const lats = geoPoints.map((item) => item.lat);
@@ -3887,9 +3895,9 @@ function buildOutdoorRoutePayload(profile, session) {
   const geoPoints = Array.isArray(session.gps?.points) ? session.gps.points : [];
   const routePoints = buildRoutePointsFromGeo(geoPoints);
 
-  if (routePoints.length >= 2) {
+  if (geoPoints.length >= 1 && routePoints.length >= 1) {
     const checkpointCount = clampNumber(Math.round(Math.max(session.distance || 1, 2)), 3, 12);
-    const checkpoints = buildRouteCheckpointsFromPoints(routePoints, checkpointCount);
+    const checkpoints = routePoints.length >= 2 ? buildRouteCheckpointsFromPoints(routePoints, checkpointCount) : [];
     const restingHeartRate = Number(profile.restingHeartRate || 64) || 64;
     const avgHeartRateOffset =
       session.sport.id === "outdoor-walk"
@@ -4284,13 +4292,13 @@ function getOutdoorShareCheckin(profile) {
 }
 
 function canRenderAmapRoute(route) {
-  const config = normalizeRuntimeConfig(state.runtimeConfig);
+  const config = getEffectiveRuntimeConfig();
   return (
     config.mapProvider === "amap" &&
     Boolean(config.amapKey) &&
     route?.source === "gps" &&
     Array.isArray(route?.geoPoints) &&
-    route.geoPoints.length >= 2
+    route.geoPoints.length >= 1
   );
 }
 
@@ -4330,7 +4338,7 @@ function wgs84ToGcj02(lng, lat) {
 }
 
 function getAmapRuntimeConfig() {
-  const config = normalizeRuntimeConfig(state.runtimeConfig);
+  const config = getEffectiveRuntimeConfig();
   if (config.mapProvider !== "amap" || !config.amapKey) return null;
   return config;
 }
@@ -4466,7 +4474,7 @@ function initAmapRouteMap(container, AMap, route) {
         .filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat))
     : [];
 
-  if (geoPoints.length < 2) {
+  if (!geoPoints.length) {
     container.innerHTML = buildRouteFallbackSvg(route);
     container.dataset.routeMapHydrated = "1";
     return;
@@ -4483,14 +4491,20 @@ function initAmapRouteMap(container, AMap, route) {
     jogEnable: false
   });
 
-  const polyline = new AMap.Polyline({
-    path: geoPoints,
-    strokeColor: "#ffe066",
-    strokeWeight: 6,
-    strokeOpacity: 0.96,
-    lineJoin: "round",
-    lineCap: "round"
-  });
+  const overlays = [];
+
+  if (geoPoints.length >= 2) {
+    overlays.push(
+      new AMap.Polyline({
+        path: geoPoints,
+        strokeColor: "#ffe066",
+        strokeWeight: 6,
+        strokeOpacity: 0.96,
+        lineJoin: "round",
+        lineCap: "round"
+      })
+    );
+  }
 
   const startMarker = new AMap.CircleMarker({
     center: geoPoints[0],
@@ -4501,17 +4515,27 @@ function initAmapRouteMap(container, AMap, route) {
     fillOpacity: 1
   });
 
-  const endMarker = new AMap.CircleMarker({
-    center: geoPoints[geoPoints.length - 1],
-    radius: 7,
-    strokeColor: "#ffffff",
-    strokeWeight: 3,
-    fillColor: "#ff6b58",
-    fillOpacity: 1
-  });
+  overlays.push(startMarker);
 
-  map.add([polyline, startMarker, endMarker]);
-  map.setFitView([polyline], false, [28, 28, 28, 28]);
+  if (geoPoints.length >= 2) {
+    overlays.push(
+      new AMap.CircleMarker({
+        center: geoPoints[geoPoints.length - 1],
+        radius: 7,
+        strokeColor: "#ffffff",
+        strokeWeight: 3,
+        fillColor: "#ff6b58",
+        fillOpacity: 1
+      })
+    );
+  }
+
+  map.add(overlays);
+  if (geoPoints.length >= 2) {
+    map.setFitView(overlays, false, [28, 28, 28, 28]);
+  } else {
+    map.setZoomAndCenter(16, geoPoints[0]);
+  }
   container.dataset.routeMapHydrated = "1";
   container._fithubAmap = map;
 }
@@ -4589,8 +4613,8 @@ function renderOutdoorRouteFeature(profile) {
             route.source === "gps" && canRenderAmapRoute(route)
               ? "这次轨迹已按真实 GPS 点位叠加高德地图底图生成。"
               : route.source === "gps"
-                ? "这次轨迹已按真实 GPS 点位生成；补充高德地图 Web Key 后会自动显示真实地图底图。"
-              : "这是一张适合分享的户外运动成绩页；如果允许定位，后面会优先按真实 GPS 点位生成轨迹。"
+                ? "这次轨迹已按真实 GPS 点位生成；当前点位过少或地图服务暂未就绪时，会先显示简化轨迹图。"
+                : "这是一张适合分享的户外运动成绩页；如果允许定位，后面会优先按真实 GPS 点位生成轨迹。"
           )
         }</p>
 
@@ -6531,7 +6555,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260331-2`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260331-3`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
