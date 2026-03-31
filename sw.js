@@ -1,4 +1,4 @@
-const CACHE_NAME = "fithub-shell-v1";
+const CACHE_NAME = "fithub-shell-v2";
 
 function coreUrls() {
   const scope = self.registration.scope;
@@ -29,19 +29,21 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-async function staleWhileRevalidate(request) {
+async function networkFirst(request) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request, { ignoreSearch: true });
-  const networkPromise = fetch(request)
-    .then((response) => {
-      if (response && response.ok) {
-        cache.put(request, response.clone());
-      }
-      return response;
-    })
-    .catch(() => null);
-
-  return cached || networkPromise || fetch(request);
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (_error) {
+    const cached = await cache.match(request, { ignoreSearch: true });
+    if (cached) {
+      return cached;
+    }
+    throw _error;
+  }
 }
 
 self.addEventListener("fetch", (event) => {
@@ -55,24 +57,15 @@ self.addEventListener("fetch", (event) => {
   if (request.mode === "navigate") {
     const shellUrl = new URL("index.html", self.registration.scope).href;
     event.respondWith(
-      (async () => {
+      networkFirst(request).catch(async () => {
         const cache = await caches.open(CACHE_NAME);
-        const cachedShell = await cache.match(shellUrl, { ignoreSearch: true });
-        const networkShell = fetch(request)
-          .then((response) => {
-            if (response && response.ok) {
-              cache.put(shellUrl, response.clone());
-            }
-            return response;
-          })
-          .catch(() => null);
-        return cachedShell || networkShell || fetch(request);
-      })()
+        return cache.match(shellUrl, { ignoreSearch: true });
+      })
     );
     return;
   }
 
   if (/\.(?:js|css|html)$/i.test(url.pathname) || url.pathname.endsWith("/")) {
-    event.respondWith(staleWhileRevalidate(request));
+    event.respondWith(networkFirst(request));
   }
 });

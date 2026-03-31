@@ -907,14 +907,7 @@ const SNAPSHOT_STORAGE_KEY = "fithub_trial_snapshot_v2";
 const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
 const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
 const ACTIVE_ACCOUNT_STORAGE_KEY = "fithub_trial_active_account_v1";
-const DEFAULT_RUNTIME_CONFIG = Object.freeze(
-  normalizeRuntimeConfig({
-    mapProvider: APP_CONFIG.mapProvider || "",
-    amapKey: APP_CONFIG.amapKey || "",
-    amapSecurityCode: APP_CONFIG.amapSecurityCode || "",
-    baiduAk: APP_CONFIG.baiduAk || ""
-  })
-);
+const DEFAULT_RUNTIME_CONFIG = Object.freeze(normalizeRuntimeConfig(window.__FITHUB_CONFIG__ || {}));
 const REGISTER_WHEEL_ITEM_HEIGHT = 52;
 const REGISTER_WHEEL_FIELDS = {
   height_cm: {
@@ -6351,9 +6344,12 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260331-2`;
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register(swUrl).catch(() => {});
+    navigator.serviceWorker
+      .register(swUrl, { updateViaCache: "none" })
+      .then((registration) => registration.update().catch(() => {}))
+      .catch(() => {});
   });
 }
 
