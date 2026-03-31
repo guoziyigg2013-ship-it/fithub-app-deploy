@@ -995,6 +995,8 @@ const state = {
   checkinSelectionDraft: [],
   checkinCurrentSportId: "",
   workoutSession: null,
+  workoutFinishing: null,
+  pendingFinishedWorkout: null,
   outdoorShareCheckinId: "",
   chatTargetProfileId: "",
   chatDraft: "",
@@ -1775,6 +1777,10 @@ async function buildRegistrationPayload(role, formData) {
 
 function getThreadForProfile(profileId) {
   return state.threads.find((thread) => thread.withProfileId === profileId) || null;
+}
+
+function deepClone(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
 function showError(message) {
@@ -2928,6 +2934,9 @@ async function saveFavoriteSports() {
 }
 
 async function startWorkoutSession(sportId = "") {
+  if (state.workoutFinishing?.status === "saving") {
+    throw new Error("上一条打卡还在保存，请稍等 1-2 秒。");
+  }
   const profile = getMyPageProfile();
   if (!profile || profile.role !== "enthusiast") {
     throw new Error("请先用健身爱好者身份注册后再开始运动。");
@@ -2993,51 +3002,71 @@ async function toggleWorkoutPause() {
 
 async function finishWorkoutSession() {
   const profile = getMyPageProfile();
+  const liveSession = state.workoutSession;
   const session = getWorkoutSessionStats(profile);
-  if (!profile || !session) return;
-  if (supportsOutdoorRouteShare(session.sport.id) && navigator.geolocation && state.workoutSession?.gps) {
-    const finalPosition = await getCurrentGeoPosition({
-      enableHighAccuracy: true,
-      timeout: 8000,
-      maximumAge: 0
-    }).catch(() => null);
-    if (finalPosition) {
-      appendWorkoutGeoPoint(finalPosition, session.sport.id, state.workoutSession.gps);
-    }
-  }
-  stopOutdoorGpsTracking();
-  const routePayload = buildOutdoorRoutePayload(profile, session);
-  const expectsOutdoorRoute = supportsOutdoorRouteShare(session.sport.id);
+  if (!profile || !session || !liveSession) return;
+  if (state.workoutFinishing?.status === "saving") return;
 
-  await postAndSync(`${API_BASE}/checkin/create`, {
+  state.pendingFinishedWorkout = {
     profileId: profile.id,
+    profileSnapshot: deepClone(profile),
+    sessionState: deepClone(liveSession)
+  };
+  stopOutdoorGpsTracking(liveSession.gps);
+  state.workoutSession = null;
+  state.workoutFinishing = {
+    status: "saving",
     sportId: session.sport.id,
     sportLabel: session.sport.label,
-    duration: session.elapsedMinutes,
-    calories: session.calories,
-    distance: session.distance,
-    paceLabel: routePayload?.avgPaceLabel || "",
-    bestPaceLabel: routePayload?.bestPaceLabel || "",
-    heartRateAvg: routePayload?.avgHeartRate || 0,
-    elevationGain: routePayload?.elevationGain || 0,
-    route: routePayload,
-    note: "",
-    content: routePayload
-      ? `完成了一次 ${session.sport.label}，累计 ${routePayload.distanceKm} km，耗时 ${routePayload.durationLabel}，估算消耗 ${session.calories} kcal。`
-      : `完成了一次 ${session.sport.label} 训练，持续 ${session.elapsedMinutes} 分钟，估算消耗 ${session.calories} kcal。`
-  });
-
-  state.workoutSession = null;
-  const latestProfile = getProfile(profile.id);
-  const latestCheckin = latestProfile?.checkins?.[0];
-  if (routePayload && latestCheckin?.route) {
-    state.outdoorShareCheckinId = latestCheckin.id;
-    state.profileSubpage = "outdoor-share";
-    if (appView) appView.scrollTop = 0;
-  } else if (expectsOutdoorRoute) {
-    showError("这次训练已记录，但没有采集到足够的真实定位点位，所以没有生成轨迹页。请在空旷区域允许持续定位后再试。");
-  }
+    startedAt: Date.now(),
+    message: "正在保存这次训练..."
+  };
+  state.activePage = "profile";
+  state.profileSubpage = "checkin";
+  if (appView) appView.scrollTop = 0;
   renderPage();
+
+  try {
+    await persistFinishedWorkout();
+  } catch (error) {
+    state.workoutFinishing = {
+      status: "failed",
+      sportId: session.sport.id,
+      sportLabel: session.sport.label,
+      startedAt: Date.now(),
+      message: error?.message || "这次训练暂时没有保存成功。"
+    };
+    renderPage();
+    throw error;
+  }
+}
+
+async function retryFinishedWorkoutSave() {
+  const draft = state.pendingFinishedWorkout;
+  if (!draft || state.workoutFinishing?.status === "saving") return;
+  const sport = getCheckinSport(draft.sessionState?.sportId);
+  state.workoutFinishing = {
+    status: "saving",
+    sportId: draft.sessionState?.sportId || "",
+    sportLabel: sport?.label || "本次训练",
+    startedAt: Date.now(),
+    message: "正在重新保存这次训练..."
+  };
+  renderPage();
+
+  try {
+    await persistFinishedWorkout({ forceFinalPoint: true });
+  } catch (error) {
+    state.workoutFinishing = {
+      status: "failed",
+      sportId: draft.sessionState?.sportId || "",
+      sportLabel: sport?.label || "本次训练",
+      startedAt: Date.now(),
+      message: error?.message || "重试失败，请稍后再试。"
+    };
+    renderPage();
+    throw error;
+  }
 }
 
 async function importHealthDevice(source) {
@@ -3735,8 +3764,8 @@ function pauseOutdoorGpsTracking(gpsState = null) {
   }
 }
 
-function stopOutdoorGpsTracking() {
-  pauseOutdoorGpsTracking();
+function stopOutdoorGpsTracking(gpsState = null) {
+  pauseOutdoorGpsTracking(gpsState);
 }
 
 function getCurrentGeoPosition(options) {
@@ -3965,7 +3994,10 @@ function getProfileBMI(profile) {
 }
 
 function getWorkoutSessionStats(profile) {
-  const session = state.workoutSession;
+  return getWorkoutSessionStatsForState(profile, state.workoutSession);
+}
+
+function getWorkoutSessionStatsForState(profile, session) {
   if (!session) return null;
 
   const sport = getCheckinSport(session.sportId);
@@ -4008,6 +4040,77 @@ function getWorkoutSessionStats(profile) {
     distance,
     sourceLabel
   };
+}
+
+function shouldCaptureFinalWorkoutPoint(gpsState) {
+  const points = Array.isArray(gpsState?.points) ? gpsState.points : [];
+  if (!points.length) return true;
+  const lastPoint = points[points.length - 1];
+  const lastRecordedAt = new Date(lastPoint?.recordedAt || 0).getTime();
+  if (!Number.isFinite(lastRecordedAt) || !lastRecordedAt) return true;
+  return Date.now() - lastRecordedAt > 5000 || points.length < 2;
+}
+
+async function persistFinishedWorkout({ forceFinalPoint = false } = {}) {
+  const draft = state.pendingFinishedWorkout;
+  if (!draft?.sessionState || !draft?.profileSnapshot) return;
+
+  const profile = getProfile(draft.profileId) || draft.profileSnapshot;
+  const sessionState = draft.sessionState;
+  const sport = getCheckinSport(sessionState.sportId);
+  const expectsOutdoorRoute = supportsOutdoorRouteShare(sport.id);
+
+  if (
+    expectsOutdoorRoute &&
+    navigator.geolocation &&
+    sessionState.gps &&
+    (forceFinalPoint || shouldCaptureFinalWorkoutPoint(sessionState.gps))
+  ) {
+    const finalPosition = await getCurrentGeoPosition({
+      enableHighAccuracy: true,
+      timeout: 1800,
+      maximumAge: 2000
+    }).catch(() => null);
+
+    if (finalPosition) {
+      appendWorkoutGeoPoint(finalPosition, sport.id, sessionState.gps);
+    }
+  }
+
+  const session = getWorkoutSessionStatsForState(profile, sessionState);
+  const routePayload = buildOutdoorRoutePayload(profile, session);
+
+  await postAndSync(`${API_BASE}/checkin/create`, {
+    profileId: profile.id,
+    sportId: session.sport.id,
+    sportLabel: session.sport.label,
+    duration: session.elapsedMinutes,
+    calories: session.calories,
+    distance: session.distance,
+    paceLabel: routePayload?.avgPaceLabel || "",
+    bestPaceLabel: routePayload?.bestPaceLabel || "",
+    heartRateAvg: routePayload?.avgHeartRate || 0,
+    elevationGain: routePayload?.elevationGain || 0,
+    route: routePayload,
+    note: "",
+    content: routePayload
+      ? `完成了一次 ${session.sport.label}，累计 ${routePayload.distanceKm} km，耗时 ${routePayload.durationLabel}，估算消耗 ${session.calories} kcal。`
+      : `完成了一次 ${session.sport.label} 训练，持续 ${session.elapsedMinutes} 分钟，估算消耗 ${session.calories} kcal。`
+  });
+
+  state.pendingFinishedWorkout = null;
+  state.workoutFinishing = null;
+
+  const latestProfile = getProfile(profile.id);
+  const latestCheckin = latestProfile?.checkins?.[0];
+  if (routePayload && latestCheckin?.route) {
+    state.outdoorShareCheckinId = latestCheckin.id;
+    state.profileSubpage = "outdoor-share";
+    if (appView) appView.scrollTop = 0;
+  } else if (expectsOutdoorRoute) {
+    showError("这次训练已记录，但没有采集到足够的真实定位点位，所以没有生成轨迹页。请在空旷区域允许持续定位后再试。");
+  }
+  renderPage();
 }
 
 function getProfileCheckins(profile) {
@@ -4739,6 +4842,21 @@ function renderWorkoutLauncher(profile) {
   const connectedDevices = getConnectedDevices(profile);
   const bodySummary = `${profile.gender || "未填"} · ${getProfileWeight(profile) || "--"} kg`;
   const deviceSummary = connectedDevices.length ? `已连接 ${connectedDevices.length} 台设备` : "未连接设备";
+  const finishState = state.workoutFinishing;
+  const isSavingWorkout = finishState?.status === "saving";
+  const saveStatusMarkup = finishState
+    ? `
+        <article class="helper-card helper-card--workout-sync">
+          <strong>${escapeHtml(isSavingWorkout ? "正在保存打卡" : "打卡保存失败")}</strong>
+          <p>${escapeHtml(finishState.message || (isSavingWorkout ? "本次训练已先退出运动模式，系统正在后台补定位并保存。" : "本次训练仍保留在本机，你可以重新尝试保存。"))}</p>
+          ${
+            isSavingWorkout
+              ? `<span class="status-pill">请稍等 1-2 秒</span>`
+              : `<div class="action-row action-row--checkin"><button class="primary-submit" data-retry-finish-workout="1" type="button">重新保存这次训练</button></div>`
+          }
+        </article>
+      `
+    : "";
 
   if (!favoriteSports.length || state.checkinEditing) {
     return renderFavoriteSportEditor(profile);
@@ -4746,12 +4864,13 @@ function renderWorkoutLauncher(profile) {
 
   return `
     <article class="detail-card checkin-feature-card workout-studio-card">
+      ${saveStatusMarkup}
       <div class="section-title-row workout-studio-head">
         <div>
           <span class="dashboard-checkin-kicker">今日运动</span>
           <h3>选一个常用项目，直接开始</h3>
         </div>
-        <button class="mini-button" data-edit-common-sports="1" type="button">切换项目</button>
+        <button class="mini-button" ${isSavingWorkout ? "disabled" : ""} data-edit-common-sports="1" type="button">切换项目</button>
       </div>
 
       <div class="dashboard-checkin-pills dashboard-checkin-pills--toolbar workout-type-strip">
@@ -4761,6 +4880,7 @@ function renderWorkoutLauncher(profile) {
               <button
                 class="workout-type-chip ${item.id === currentSport.id ? "is-active" : ""}"
                 data-select-workout-sport="${item.id}"
+                ${isSavingWorkout ? "disabled" : ""}
                 type="button"
               >
                 ${escapeHtml(item.label)}
@@ -4786,14 +4906,14 @@ function renderWorkoutLauncher(profile) {
                 <span>${escapeHtml(deviceSummary)}</span>
               </div>
 
-              <button class="workout-go-orb" ${currentSport ? 'data-go-workout="1"' : 'data-edit-common-sports="1"'} type="button">
+              <button class="workout-go-orb" ${isSavingWorkout ? "disabled" : ""} ${currentSport ? 'data-go-workout="1"' : 'data-edit-common-sports="1"'} type="button">
                 <small>运动</small>
-                <strong>${currentSport ? "GO" : "选项目"}</strong>
+                <strong>${isSavingWorkout ? "保存中" : currentSport ? "GO" : "选项目"}</strong>
               </button>
 
               <div class="workout-start-footer">
                 <button class="text-link" data-open-my-feature="health" type="button">${connectedDevices.length ? "管理设备" : "连接设备"}</button>
-                <span>${escapeHtml(currentSport ? "按下 GO 后会直接进入全屏运动记录。" : "第一次先选项目，避免默认进跑步。")}</span>
+                <span>${escapeHtml(isSavingWorkout ? "正在后台补最后一个定位点并同步这次训练。" : currentSport ? "按下 GO 后会直接进入全屏运动记录。" : "第一次先选项目，避免默认进跑步。")}</span>
               </div>
             </article>
           `
@@ -6157,6 +6277,11 @@ appView.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.dataset.retryFinishWorkout) {
+    runTask(() => retryFinishedWorkoutSave());
+    return;
+  }
+
   if (target.dataset.pauseWorkout) {
     runTask(() => toggleWorkoutPause());
     return;
@@ -6609,7 +6734,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260331-5`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260331-6`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
