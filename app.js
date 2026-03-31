@@ -2812,6 +2812,7 @@ async function finishWorkoutSession() {
   if (!profile || !session) return;
   stopOutdoorGpsTracking();
   const routePayload = buildOutdoorRoutePayload(profile, session);
+  const expectsOutdoorRoute = supportsOutdoorRouteShare(session.sport.id);
 
   await postAndSync(`${API_BASE}/checkin/create`, {
     profileId: profile.id,
@@ -2838,6 +2839,8 @@ async function finishWorkoutSession() {
     state.outdoorShareCheckinId = latestCheckin.id;
     state.profileSubpage = "outdoor-share";
     if (appView) appView.scrollTop = 0;
+  } else if (expectsOutdoorRoute) {
+    showError("这次训练已记录，但没有采集到足够的真实定位点位，所以没有生成轨迹页。请在空旷区域允许持续定位后再试。");
   }
   renderPage();
 }
@@ -3679,72 +3682,7 @@ function buildOutdoorRoutePayload(profile, session) {
       }))
     };
   }
-
-  const seed = getSeedFromText(`${profile.id}-${session.startedAt}-${session.sport.id}`);
-  const points = buildOutdoorRoutePoints(session.sport.id, seed);
-  const checkpointCount = clampNumber(Math.round(session.distance || 4), 3, 12);
-  const checkpoints = Array.from({ length: checkpointCount }, (_, index) => {
-    const point = points[Math.min(points.length - 1, index + 1)] || points[points.length - 1] || [50, 50];
-    return {
-      label: String(index + 1),
-      x: point[0],
-      y: point[1]
-    };
-  });
-
-  const restingHeartRate = Number(profile.restingHeartRate || 64) || 64;
-  const avgHeartRateOffset =
-    session.sport.id === "outdoor-walk"
-      ? 42
-      : session.sport.id === "outdoor-cycling"
-        ? 58
-        : session.sport.id === "hiking"
-          ? 52
-          : session.sport.id === "trail-run"
-            ? 72
-            : 66;
-  const avgHeartRate = Math.round(restingHeartRate + avgHeartRateOffset);
-
-  const bestPaceSeconds = session.distance
-    ? Math.max(
-        205,
-        Math.round((session.elapsedMinutes * 60) / session.distance * (session.sport.id === "outdoor-walk" ? 0.93 : 0.86))
-      )
-    : 0;
-  const bestPaceLabel = bestPaceSeconds
-    ? `${Math.floor(bestPaceSeconds / 60)}'${String(bestPaceSeconds % 60).padStart(2, "0")}"`
-    : "--";
-  const elevationGain = Math.max(
-    4,
-    Math.round(
-      (session.distance || 1) *
-        (session.sport.id === "trail-run"
-          ? 12
-          : session.sport.id === "hiking"
-            ? 15
-            : session.sport.id === "outdoor-cycling"
-              ? 8
-              : 5)
-    )
-  );
-
-  return {
-    source: "generated",
-    city: profile.city || state.userPosition.city,
-    district: profile.locationLabel || state.userPosition.label,
-    shareTitle: `${profile.city || state.userPosition.city}市 ${session.sport.label}`,
-    startedAt: new Date(session.startedAt).toISOString(),
-    dateLabel: formatShareDateLabel(session.startedAt),
-    durationLabel: formatWorkoutDurationLabel(session.elapsedSeconds),
-    distanceKm: Number((session.distance || 0).toFixed(2)),
-    avgPaceLabel: formatWorkoutPaceLabel(session.elapsedMinutes, session.distance),
-    bestPaceLabel,
-    avgHeartRate,
-    elevationGain,
-    calories: session.calories,
-    points,
-    checkpoints
-  };
+  return null;
 }
 
 function getProfileWeight(profile) {
