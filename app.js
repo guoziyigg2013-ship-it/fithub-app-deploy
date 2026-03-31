@@ -906,12 +906,14 @@ const SESSION_STORAGE_KEY = "fithub_trial_session_id";
 const SNAPSHOT_STORAGE_KEY = "fithub_trial_snapshot_v2";
 const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
 const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
-const DEFAULT_RUNTIME_CONFIG = Object.freeze({
-  mapProvider: "",
-  amapKey: "",
-  amapSecurityCode: "",
-  baiduAk: ""
-});
+const DEFAULT_RUNTIME_CONFIG = Object.freeze(
+  normalizeRuntimeConfig({
+    mapProvider: APP_CONFIG.mapProvider || "",
+    amapKey: APP_CONFIG.amapKey || "",
+    amapSecurityCode: APP_CONFIG.amapSecurityCode || "",
+    baiduAk: APP_CONFIG.baiduAk || ""
+  })
+);
 const REGISTER_WHEEL_ITEM_HEIGHT = 52;
 const REGISTER_WHEEL_FIELDS = {
   height_cm: {
@@ -1432,7 +1434,10 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   storeSnapshot(payload);
 
   state.sessionId = payload.session.id || state.sessionId;
-  state.runtimeConfig = normalizeRuntimeConfig(payload.config || state.runtimeConfig);
+  state.runtimeConfig = normalizeRuntimeConfig({
+    ...state.runtimeConfig,
+    ...(payload.config || {})
+  });
   storeSessionId(state.sessionId);
   state.selectedRole = payload.session.selectedRole || state.selectedRole;
   state.registerRole = payload.session.selectedRole || state.registerRole;
