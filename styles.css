@@ -141,6 +141,17 @@ input {
   box-shadow: -18px 0 40px rgba(15, 15, 15, 0.1);
 }
 
+body.is-workout-live .bottom-nav,
+body.is-workout-live .fab {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(22px);
+}
+
+body.is-workout-live .app {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 22px);
+}
+
 .brand {
   display: flex;
   gap: 10px;
@@ -1787,6 +1798,11 @@ input {
   margin-top: 16px;
 }
 
+.workout-type-strip--live {
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+
 .workout-start-panel {
   margin-top: 16px;
   border-radius: 28px;
@@ -1943,13 +1959,38 @@ input {
   font-weight: 700;
 }
 
+.workout-live-screen {
+  min-height: calc(var(--app-vh) - 56px);
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.workout-live-screen-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workout-live-picker {
+  border: 0;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: rgba(242, 140, 40, 0.12);
+  color: #8c520f;
+  font-weight: 700;
+}
+
 .workout-session-card--live {
-  padding: 18px;
-  color: white;
+  min-height: calc(var(--app-vh) - 270px);
+  padding: 18px 18px 22px;
+  color: #fffaf5;
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 26%),
-    linear-gradient(180deg, #30283b, #221c2c 74%, #1a1522);
-  box-shadow: 0 24px 36px rgba(18, 12, 28, 0.24);
+    radial-gradient(circle at top right, rgba(255, 212, 163, 0.2), transparent 24%),
+    linear-gradient(180deg, #4a332c, #35251f 68%, #291c18);
+  box-shadow: 0 24px 44px rgba(71, 42, 22, 0.22);
 }
 
 .workout-live-top,
@@ -2036,6 +2077,7 @@ input {
 
 .workout-live-actions {
   margin-top: 22px;
+  justify-content: center;
 }
 
 .workout-live-side,
@@ -2044,24 +2086,29 @@ input {
 }
 
 .workout-live-side {
-  min-width: 72px;
-  height: 42px;
-  padding: 0 14px;
+  min-width: 84px;
+  height: 44px;
+  padding: 0 16px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 250, 245, 0.12);
+  color: rgba(255, 250, 245, 0.88);
+}
+
+.workout-live-side--pause.is-active {
+  background: rgba(255, 184, 87, 0.24);
+  color: #fff4e2;
 }
 
 .workout-live-finish {
-  width: 92px;
-  height: 92px;
+  width: 104px;
+  height: 104px;
   border-radius: 50%;
   flex-shrink: 0;
-  color: #211b2a;
-  font-size: 20px;
+  color: #8d4b05;
+  font-size: 18px;
   font-weight: 800;
-  background: white;
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.22);
+  background: linear-gradient(180deg, #fffdfa, #ffe7c2);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.2);
 }
 
 .summary-card--health {
@@ -2076,6 +2123,14 @@ input {
 
 .section-title-row--moments {
   margin-top: 20px;
+}
+
+.page-header--workout-live {
+  margin-bottom: 10px;
+}
+
+.profile-subpage-stack--live {
+  min-height: calc(var(--app-vh) - 180px);
 }
 
 .moments-list {

@@ -1080,7 +1080,14 @@ function getStoredSnapshot() {
 function storeSnapshot(payload) {
   if (!payload?.session) return;
   try {
-    window.localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(payload));
+    const previous = getStoredSnapshot();
+    const incomingManagedIds = Array.isArray(payload.session.managedProfileIds) ? payload.session.managedProfileIds : [];
+    const previousManagedIds = Array.isArray(previous?.session?.managedProfileIds)
+      ? previous.session.managedProfileIds
+      : [];
+    const snapshotToStore =
+      !incomingManagedIds.length && previousManagedIds.length ? previous : payload;
+    window.localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshotToStore));
   } catch (_error) {
     // Ignore storage quota failures.
   }
@@ -1525,6 +1532,25 @@ async function apiRequest(path, { method = "GET", body } = {}) {
 function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   if (!payload?.session) return;
   storeSnapshot(payload);
+  const preserveManagedSession =
+    !Array.isArray(payload.session.managedProfileIds) || !payload.session.managedProfileIds.length
+      ? state.managedProfileIds.length > 0
+      : false;
+  const previousManagedIds = [...state.managedProfileIds];
+  const previousManagedAccounts = [...state.managedAccounts];
+  const previousCurrentActorProfileId = state.currentActorProfileId;
+  const previousSelectedRole = state.selectedRole;
+  const previousRegisterRole = state.registerRole;
+  const incomingProfiles = enhanceProfiles(payload.profiles || []);
+  const mergedProfileMap = new Map(incomingProfiles.map((profile) => [profile.id, profile]));
+
+  if (preserveManagedSession) {
+    state.profiles.forEach((profile) => {
+      if (profile?.id && previousManagedIds.includes(profile.id) && !mergedProfileMap.has(profile.id)) {
+        mergedProfileMap.set(profile.id, profile);
+      }
+    });
+  }
 
   state.sessionId = payload.session.id || state.sessionId;
   state.runtimeConfig = normalizeRuntimeConfig({
@@ -1532,16 +1558,22 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
     ...(payload.config || {})
   });
   storeSessionId(state.sessionId);
-  state.selectedRole = payload.session.selectedRole || state.selectedRole;
-  state.registerRole = payload.session.selectedRole || state.registerRole;
+  state.selectedRole = preserveManagedSession ? previousSelectedRole : payload.session.selectedRole || state.selectedRole;
+  state.registerRole = preserveManagedSession ? previousRegisterRole : payload.session.selectedRole || state.registerRole;
   state.userPosition = payload.session.userPosition || state.userPosition;
   state.locationStatus = payload.session.locationStatus || state.locationStatus;
-  state.profiles = enhanceProfiles(payload.profiles || []);
-  state.managedProfileIds = payload.session.managedProfileIds || [];
-  state.managedAccounts = (payload.session.managedAccounts || []).map((item) => normalizeStoredAccount(item));
-  rememberManagedAccounts(state.managedAccounts);
+  state.profiles = Array.from(mergedProfileMap.values());
+  state.managedProfileIds = preserveManagedSession ? previousManagedIds : payload.session.managedProfileIds || [];
+  state.managedAccounts = preserveManagedSession
+    ? previousManagedAccounts
+    : (payload.session.managedAccounts || []).map((item) => normalizeStoredAccount(item));
+  if (state.managedAccounts.length) {
+    rememberManagedAccounts(state.managedAccounts);
+  }
   rememberManagedProfileBackups(payload);
-  state.currentActorProfileId = payload.session.currentActorProfileId || state.managedProfileIds[0] || "";
+  state.currentActorProfileId = preserveManagedSession
+    ? previousCurrentActorProfileId || previousManagedIds[0] || ""
+    : payload.session.currentActorProfileId || state.managedProfileIds[0] || "";
   state.followSet = new Set(payload.followSet || []);
   state.bookings = payload.bookings || [];
   state.threads = payload.threads || [];
@@ -2844,7 +2876,25 @@ function toggleCommonSportSelection(sportId) {
   renderPage();
 }
 
-function selectWorkoutSport(sportId) {
+async function selectWorkoutSport(sportId) {
+  if (!sportId) return;
+  if (state.workoutSession) {
+    const session = state.workoutSession;
+    const wasOutdoor = supportsOutdoorRouteShare(session.sportId);
+    const willOutdoor = supportsOutdoorRouteShare(sportId);
+
+    if (wasOutdoor && session.gps) {
+      pauseOutdoorGpsTracking(session.gps);
+    }
+
+    session.sportId = sportId;
+
+    if (willOutdoor && !session.pausedAt) {
+      session.gps = await resumeOutdoorGpsTracking(sportId, session.gps);
+    } else if (!willOutdoor) {
+      session.gps = null;
+    }
+  }
   state.checkinCurrentSportId = sportId;
   renderPage();
 }
@@ -2909,14 +2959,42 @@ async function startWorkoutSession(sportId = "") {
   state.workoutSession = {
     sportId: targetSport,
     startedAt: Date.now(),
+    pausedAt: 0,
+    pausedDurationMs: 0,
     gps
   };
+  state.activePage = "profile";
+  state.profileSubpage = "checkin";
+  appView.scrollTop = 0;
   renderPage();
 }
 
 function cancelWorkoutSession() {
   stopOutdoorGpsTracking();
   state.workoutSession = null;
+  renderPage();
+}
+
+async function toggleWorkoutPause() {
+  const session = state.workoutSession;
+  if (!session) return;
+
+  if (session.pausedAt) {
+    session.pausedDurationMs = Number(session.pausedDurationMs || 0) + Math.max(0, Date.now() - session.pausedAt);
+    session.pausedAt = 0;
+    if (supportsOutdoorRouteShare(session.sportId)) {
+      session.gps = await resumeOutdoorGpsTracking(session.sportId, session.gps);
+    }
+  } else {
+    session.pausedAt = Date.now();
+    if (supportsOutdoorRouteShare(session.sportId)) {
+      pauseOutdoorGpsTracking(session.gps);
+      if (session.gps) {
+        session.gps.status = "已暂停定位记录";
+      }
+    }
+  }
+
   renderPage();
 }
 
@@ -3627,11 +3705,29 @@ function appendWorkoutGeoPoint(position, sportId, gpsState = null) {
   }
 }
 
-function stopOutdoorGpsTracking() {
-  const watchId = state.workoutSession?.gps?.watchId;
+function createOutdoorGpsState() {
+  return {
+    source: "gps",
+    status: "GPS 已连接",
+    watchId: null,
+    points: [],
+    totalDistanceMeters: 0,
+    totalElevationGain: 0,
+    lastAccuracy: 0
+  };
+}
+
+function pauseOutdoorGpsTracking(gpsState = null) {
+  const gps = gpsState || state.workoutSession?.gps;
+  const watchId = gps?.watchId;
   if (watchId != null && navigator.geolocation?.clearWatch) {
     navigator.geolocation.clearWatch(watchId);
+    gps.watchId = null;
   }
+}
+
+function stopOutdoorGpsTracking() {
+  pauseOutdoorGpsTracking();
 }
 
 function getCurrentGeoPosition(options) {
@@ -3653,21 +3749,55 @@ async function startOutdoorGpsTracking(sportId) {
     throw new Error(getGeoPositionErrorMessage(error));
   });
 
-  const gps = {
-    source: "gps",
-    status: "GPS 已连接",
-    watchId: null,
-    points: [],
-    totalDistanceMeters: 0,
-    totalElevationGain: 0,
-    lastAccuracy: 0
-  };
+  const gps = createOutdoorGpsState();
 
   appendWorkoutGeoPoint(initialPosition, sportId, gps);
 
   gps.watchId = navigator.geolocation.watchPosition(
     (position) => {
       appendWorkoutGeoPoint(position, sportId);
+    },
+    (error) => {
+      const errorMessage = getGeoPositionErrorMessage(error);
+      gps.status = errorMessage;
+      if (state.workoutSession?.gps) {
+        state.workoutSession.gps.status = errorMessage;
+        renderPage();
+      }
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 20000
+    }
+  );
+
+  return gps;
+}
+
+async function resumeOutdoorGpsTracking(sportId, existingGps = null) {
+  if (!navigator.geolocation) {
+    throw new Error("当前浏览器不支持定位，户外运动暂时无法记录真实轨迹。");
+  }
+
+  const gps = existingGps || createOutdoorGpsState();
+  pauseOutdoorGpsTracking(gps);
+
+  const initialPosition = await getCurrentGeoPosition({
+    enableHighAccuracy: true,
+    timeout: 12000,
+    maximumAge: 0
+  }).catch(() => null);
+
+  if (initialPosition) {
+    appendWorkoutGeoPoint(initialPosition, sportId, gps);
+  } else if (!gps.points.length) {
+    gps.status = "GPS 正在连接";
+  }
+
+  gps.watchId = navigator.geolocation.watchPosition(
+    (position) => {
+      appendWorkoutGeoPoint(position, sportId, gps);
     },
     (error) => {
       const errorMessage = getGeoPositionErrorMessage(error);
@@ -3832,7 +3962,11 @@ function getWorkoutSessionStats(profile) {
   const metrics = getCheckinMetrics(session.sportId);
   const calibration = getWorkoutCalibration(profile, metrics);
   const gps = session.gps || null;
-  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - session.startedAt) / 1000));
+  const pauseAnchor = session.pausedAt || Date.now();
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((pauseAnchor - session.startedAt - Number(session.pausedDurationMs || 0)) / 1000)
+  );
   const elapsedMinutes = Math.max(1, Math.floor(elapsedSeconds / 60));
   const hours = elapsedSeconds / 3600;
   const weightKg = getProfileWeight(profile) || 60;
@@ -4572,8 +4706,8 @@ function renderWorkoutLauncher(profile) {
               </button>
 
               <div class="workout-start-footer">
-                <button class="text-link" data-open-my-feature="health" type="button">${connectedDevices.length ? "管理健康设备" : "连接健康设备"}</button>
-                <span>${escapeHtml(currentSport ? "开始后自动计时，并结合身体数据估算消耗" : "第一次先选项目，避免默认进跑步。")}</span>
+                <button class="text-link" data-open-my-feature="health" type="button">${connectedDevices.length ? "管理设备" : "连接设备"}</button>
+                <span>${escapeHtml(currentSport ? "按下 GO 后会直接进入全屏运动记录。" : "第一次先选项目，避免默认进跑步。")}</span>
               </div>
             </article>
           `
@@ -4585,7 +4719,9 @@ function renderWorkoutLauncher(profile) {
 function renderWorkoutSession(profile) {
   const session = getWorkoutSessionStats(profile);
   if (!session) return "";
+  const favoriteSports = getFavoriteSports(profile);
   const gpsStatus = supportsOutdoorRouteShare(session.sport.id) ? getOutdoorGpsStatus(session) : "";
+  const isPaused = Boolean(state.workoutSession?.pausedAt);
   const estimatedHeartRate = profile.restingHeartRate
     ? `${Math.round(Number(profile.restingHeartRate) + (supportsOutdoorRouteShare(session.sport.id) ? 62 : 48))} bpm`
     : "--";
@@ -4599,42 +4735,64 @@ function renderWorkoutSession(profile) {
   const paceTitle = supportsOutdoorRouteShare(session.sport.id) ? "平均配速" : "BMI";
 
   return `
-    <article class="detail-card workout-session-card workout-session-card--live">
-      <div class="workout-live-top">
-        <span class="workout-live-chip">${escapeHtml(session.sport.label)}</span>
-        <span class="workout-live-chip workout-live-chip--muted">${escapeHtml(gpsStatus || session.sourceLabel)}</span>
+    <section class="workout-live-screen">
+      <div class="workout-live-screen-top">
+        <button class="workout-live-picker" data-edit-common-sports="1" type="button">${escapeHtml(session.sport.label)}</button>
+        <button class="workout-live-side workout-live-side--pause ${isPaused ? "is-active" : ""}" data-pause-workout="1" type="button">${isPaused ? "继续" : "暂停"}</button>
       </div>
 
-      <div class="workout-live-value">
-        <strong>${escapeHtml(String(session.calories))}</strong>
-        <span>总卡路里 / kcal</span>
+      <div class="dashboard-checkin-pills dashboard-checkin-pills--toolbar workout-type-strip workout-type-strip--live">
+        ${favoriteSports
+          .map(
+            (item) => `
+              <button
+                class="workout-type-chip ${item.id === session.sport.id ? "is-active" : ""}"
+                data-select-workout-sport="${item.id}"
+                type="button"
+              >
+                ${escapeHtml(item.label)}
+              </button>
+            `
+          )
+          .join("")}
       </div>
 
-      <div class="workout-live-stat-grid">
-        <div>
-          <span>持续时间</span>
-          <strong>${escapeHtml(session.timerLabel)}</strong>
+      <article class="detail-card workout-session-card workout-session-card--live">
+        <div class="workout-live-top">
+          <span class="workout-live-chip">${escapeHtml(isPaused ? "已暂停" : "正在记录")}</span>
+          <span class="workout-live-chip workout-live-chip--muted">${escapeHtml(gpsStatus || session.sourceLabel)}</span>
         </div>
-        <div>
-          <span>${escapeHtml(metricLabel)}</span>
-          <strong>${escapeHtml(metricValue)}</strong>
-        </div>
-        <div>
-          <span>估算心率</span>
-          <strong>${escapeHtml(estimatedHeartRate)}</strong>
-        </div>
-        <div>
-          <span>${escapeHtml(paceTitle)}</span>
-          <strong>${escapeHtml(paceLabel || "--")}</strong>
-        </div>
-      </div>
 
-      <div class="workout-live-actions">
-        <button class="workout-live-side" data-cancel-workout="1" type="button">放弃</button>
-        <button class="workout-live-finish" data-finish-workout="1" type="button">结束打卡</button>
-        <button class="workout-live-side" data-open-my-feature="health" type="button">健康</button>
-      </div>
-    </article>
+        <div class="workout-live-value">
+          <strong>${escapeHtml(String(session.calories))}</strong>
+          <span>总卡路里 / kcal</span>
+        </div>
+
+        <div class="workout-live-stat-grid">
+          <div>
+            <span>持续时间</span>
+            <strong>${escapeHtml(session.timerLabel)}</strong>
+          </div>
+          <div>
+            <span>${escapeHtml(metricLabel)}</span>
+            <strong>${escapeHtml(metricValue)}</strong>
+          </div>
+          <div>
+            <span>估算心率</span>
+            <strong>${escapeHtml(estimatedHeartRate)}</strong>
+          </div>
+          <div>
+            <span>${escapeHtml(paceTitle)}</span>
+            <strong>${escapeHtml(paceLabel || "--")}</strong>
+          </div>
+        </div>
+
+        <div class="workout-live-actions">
+          <button class="workout-live-side" data-cancel-workout="1" type="button">放弃</button>
+          <button class="workout-live-finish" data-finish-workout="1" type="button">结束打卡</button>
+        </div>
+      </article>
+    </section>
   `;
 }
 
@@ -4879,6 +5037,34 @@ function renderFavoriteProfilesSection() {
 function renderMyFeaturePage(profile, managedProfiles, feature) {
   const bookings = state.bookings || [];
   const emptyBookingMarkup = '<article class="empty-card">你还没有正式预约。去首页、探索或教练/场馆主页完成第一次预约后，这里才会出现记录。</article>';
+  if (feature === "checkin" && state.workoutSession) {
+    return `
+      <section class="page-header page-header--workout-live">
+        <div>
+          <p class="page-label">My</p>
+          <h1>运动中</h1>
+        </div>
+        <button class="mini-button" data-open-my-home="1" type="button">我的</button>
+      </section>
+
+      <section class="managed-strip managed-strip--dashboard">
+        ${managedProfiles
+          .map(
+            (item) => `
+              <button class="managed-chip ${item.id === profile.id ? "is-active" : ""}" data-switch-managed="${item.id}" type="button">
+                ${escapeHtml(getRoleLabel(item.role))}
+              </button>
+            `
+          )
+          .join("")}
+      </section>
+
+      <section class="profile-subpage-stack profile-subpage-stack--live">
+        ${renderWorkoutSession(profile)}
+      </section>
+    `;
+  }
+
   const featureMap = {
     account: {
       title: "账户",
@@ -5690,6 +5876,10 @@ function renderOverlay() {
 function renderPage() {
   resetProfileSwipe();
   routeMapRegistry.clear();
+  document.body.classList.toggle(
+    "is-workout-live",
+    state.activePage === "profile" && state.profileSubpage === "checkin" && Boolean(state.workoutSession)
+  );
   appView.dataset.page = state.activePage;
   if (state.isBootstrapping) {
     appView.innerHTML = `
@@ -5878,7 +6068,7 @@ appView.addEventListener("click", (event) => {
   }
 
   if (target.dataset.selectWorkoutSport) {
-    selectWorkoutSport(target.dataset.selectWorkoutSport);
+    runTask(() => selectWorkoutSport(target.dataset.selectWorkoutSport));
     return;
   }
 
@@ -5894,6 +6084,11 @@ appView.addEventListener("click", (event) => {
 
   if (target.dataset.finishWorkout) {
     runTask(() => finishWorkoutSession());
+    return;
+  }
+
+  if (target.dataset.pauseWorkout) {
+    runTask(() => toggleWorkoutPause());
     return;
   }
 
