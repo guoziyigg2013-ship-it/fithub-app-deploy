@@ -2886,21 +2886,7 @@ function toggleCommonSportSelection(sportId) {
 async function selectWorkoutSport(sportId) {
   if (!sportId) return;
   if (state.workoutSession) {
-    const session = state.workoutSession;
-    const wasOutdoor = supportsOutdoorRouteShare(session.sportId);
-    const willOutdoor = supportsOutdoorRouteShare(sportId);
-
-    if (wasOutdoor && session.gps) {
-      pauseOutdoorGpsTracking(session.gps);
-    }
-
-    session.sportId = sportId;
-
-    if (willOutdoor && !session.pausedAt) {
-      session.gps = await resumeOutdoorGpsTracking(sportId, session.gps);
-    } else if (!willOutdoor) {
-      session.gps = null;
-    }
+    return;
   }
   state.checkinCurrentSportId = sportId;
   renderPage();
@@ -3706,9 +3692,14 @@ function appendWorkoutGeoPoint(position, sportId, gpsState = null) {
   const speedMps = segmentMeters / elapsedSeconds;
   const maxSpeed = getOutdoorSpeedLimit(sportId);
   const accuracyLimit = Math.max(4, Math.min(point.accuracy || 12, 16));
-  const minSegmentMeters = gps.points.length < 2 ? 1.6 : Math.min(accuracyLimit, 5.5);
+  const minSegmentMeters = gps.points.length < 2 ? 0.8 : Math.min(Math.max(1.2, accuracyLimit * 0.35), 3.2);
+  const hasMeaningfulTimeGap = elapsedSeconds >= 12 && segmentMeters >= 0.8;
+  const accuracyImproved =
+    typeof point.accuracy === "number" &&
+    typeof lastPoint.accuracy === "number" &&
+    point.accuracy + 4 < lastPoint.accuracy;
 
-  if (segmentMeters < minSegmentMeters || speedMps > maxSpeed) {
+  if ((segmentMeters < minSegmentMeters && !hasMeaningfulTimeGap && !accuracyImproved) || speedMps > maxSpeed) {
     return;
   }
 
@@ -4265,7 +4256,7 @@ function renderCheckinHistory(profile) {
                 <strong>${escapeHtml(item.sportLabel || "训练打卡")}</strong>
                 <p>${escapeHtml(item.note || "已记录到你的训练档案")}</p>
                 ${
-                  item.route
+                  item.route && supportsOutdoorRouteShare(item.sportId)
                     ? `<button class="mini-button mini-button--accent" data-open-route-share="${item.id}" type="button">查看轨迹</button>`
                     : ""
                 }
@@ -4283,7 +4274,9 @@ function renderCheckinHistory(profile) {
 }
 
 function getOutdoorShareCheckin(profile) {
-  const routeCheckins = getProfileCheckins(profile).filter((item) => item?.route);
+  const routeCheckins = getProfileCheckins(profile).filter(
+    (item) => item?.route && supportsOutdoorRouteShare(item.sportId)
+  );
   if (!routeCheckins.length) return null;
   if (state.outdoorShareCheckinId) {
     return routeCheckins.find((item) => item.id === state.outdoorShareCheckinId) || routeCheckins[0];
@@ -4574,7 +4567,7 @@ function renderOutdoorRouteFeature(profile) {
 
   return `
     <article class="route-share-card">
-      <div class="route-share-map-shell">
+      <article class="route-share-map-shell route-share-map-shell--action" data-open-route-map-detail="${checkin.id}">
         <div class="route-share-map-head">
           <div>
             <strong>${escapeHtml(route.shareTitle || `${route.city || "厦门"} ${checkin.sportLabel}`)}</strong>
@@ -4584,8 +4577,9 @@ function renderOutdoorRouteFeature(profile) {
         </div>
         <div class="route-share-map-canvas">
           ${renderRouteMap(route, checkin.id)}
+          <span class="route-share-map-hint">点开地图，查看更完整的轨迹详情</span>
         </div>
-      </div>
+      </article>
 
       <article class="route-share-stat-board">
         <div class="route-share-topline">
@@ -4621,6 +4615,63 @@ function renderOutdoorRouteFeature(profile) {
         <div class="action-row action-row--checkin">
           <button class="mini-button" data-open-my-feature="checkin" type="button">返回打卡</button>
           <button class="primary-submit" data-open-my-feature="moments" type="button">去看动态</button>
+        </div>
+      </article>
+    </article>
+  `;
+}
+
+function renderOutdoorRouteMapDetail(profile) {
+  const checkin = getOutdoorShareCheckin(profile);
+  if (!checkin?.route) {
+    return '<article class="empty-card">完成一次户外运动后，这里会展示更完整的轨迹地图详情。</article>';
+  }
+
+  const route = checkin.route;
+  const pointCount = Array.isArray(route.geoPoints) ? route.geoPoints.length : 0;
+  const mapId = `${checkin.id}-detail`;
+
+  return `
+    <article class="route-detail-card">
+      <div class="route-share-map-shell route-share-map-shell--detail">
+        <div class="route-share-map-head">
+          <div>
+            <strong>${escapeHtml(route.shareTitle || `${route.city || "厦门"} ${checkin.sportLabel}`)}</strong>
+            <p>${escapeHtml(route.dateLabel || formatShareDateLabel(checkin.createdAt))}</p>
+          </div>
+          <span class="status-pill">${escapeHtml(checkin.sportLabel || "户外运动")}</span>
+        </div>
+        <div class="route-share-map-canvas route-share-map-canvas--detail">
+          ${renderRouteMap(route, mapId)}
+        </div>
+      </div>
+
+      <article class="route-share-stat-board route-share-stat-board--detail">
+        <div class="route-share-topline">
+          <div>
+            <span>距离</span>
+            <strong>${escapeHtml(`${route.distanceKm || checkin.distance || 0} km`)}</strong>
+          </div>
+          <div>
+            <span>定位点</span>
+            <strong>${escapeHtml(`${pointCount} 个`)}</strong>
+          </div>
+        </div>
+
+        <div class="route-share-grid">
+          <div><span>运动时间</span><strong>${escapeHtml(route.durationLabel || formatWorkoutDurationLabel((checkin.duration || 0) * 60))}</strong></div>
+          <div><span>平均配速</span><strong>${escapeHtml(route.avgPaceLabel ? `${route.avgPaceLabel}/km` : "--")}</strong></div>
+          <div><span>最快 1 公里</span><strong>${escapeHtml(route.bestPaceLabel ? `${route.bestPaceLabel}/km` : "--")}</strong></div>
+          <div><span>平均心率</span><strong>${escapeHtml(route.avgHeartRate ? `${route.avgHeartRate} bpm` : "--")}</strong></div>
+          <div><span>累计上升</span><strong>${escapeHtml(route.elevationGain ? `${route.elevationGain} m` : "--")}</strong></div>
+          <div><span>卡路里</span><strong>${escapeHtml(`${route.calories || checkin.calories || 0} kcal`)}</strong></div>
+        </div>
+
+        <p class="result-tip">${escapeHtml(pointCount > 1 ? "这张地图正在直接使用你本次运动采集到的真实定位点。" : "当前只采集到 1 个真实定位点，所以地图会先落在真实位置点上；下次多移动一小段，轨迹线会更完整。")}</p>
+
+        <div class="action-row action-row--checkin">
+          <button class="mini-button" data-open-my-feature="outdoor-share" type="button">返回成绩页</button>
+          <button class="primary-submit" data-open-my-feature="checkin" type="button">返回打卡</button>
         </div>
       </article>
     </article>
@@ -4754,7 +4805,6 @@ function renderWorkoutLauncher(profile) {
 function renderWorkoutSession(profile) {
   const session = getWorkoutSessionStats(profile);
   if (!session) return "";
-  const favoriteSports = getFavoriteSports(profile);
   const gpsStatus = supportsOutdoorRouteShare(session.sport.id) ? getOutdoorGpsStatus(session) : "";
   const isPaused = Boolean(state.workoutSession?.pausedAt);
   const estimatedHeartRate = profile.restingHeartRate
@@ -4772,24 +4822,8 @@ function renderWorkoutSession(profile) {
   return `
     <section class="workout-live-screen">
       <div class="workout-live-screen-top">
-        <button class="workout-live-picker" data-edit-common-sports="1" type="button">${escapeHtml(session.sport.label)}</button>
+        <div class="workout-live-picker workout-live-picker--static">${escapeHtml(session.sport.label)}</div>
         <span class="workout-live-chip workout-live-chip--muted">${escapeHtml(gpsStatus || session.sourceLabel)}</span>
-      </div>
-
-      <div class="dashboard-checkin-pills dashboard-checkin-pills--toolbar workout-type-strip workout-type-strip--live">
-        ${favoriteSports
-          .map(
-            (item) => `
-              <button
-                class="workout-type-chip ${item.id === session.sport.id ? "is-active" : ""}"
-                data-select-workout-sport="${item.id}"
-                type="button"
-              >
-                ${escapeHtml(item.label)}
-              </button>
-            `
-          )
-          .join("")}
       </div>
 
       <article class="detail-card workout-session-card workout-session-card--live">
@@ -5136,6 +5170,11 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
       title: "户外轨迹",
       subtitle: "像 Keep 或咕咚那样，把户外运动沉淀成一张更有成就感的分享页",
       content: renderOutdoorRouteFeature(profile)
+    },
+    "outdoor-map": {
+      title: "轨迹地图",
+      subtitle: "放大查看这次户外运动的真实地图轨迹和定位详情",
+      content: renderOutdoorRouteMapDetail(profile)
     },
     orders: {
       title: "订单",
@@ -5990,6 +6029,19 @@ appView.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.dataset.openRouteMapDetail) {
+    const myProfile = getMyPageProfile();
+    if (!myProfile) return;
+    state.activePage = "profile";
+    state.activeProfileId = myProfile.id;
+    state.profileSubpage = "outdoor-map";
+    state.outdoorShareCheckinId = target.dataset.openRouteMapDetail;
+    syncNavActive();
+    renderPage();
+    appView.scrollTop = 0;
+    return;
+  }
+
   if (target.dataset.backProfile) {
     goBackFromProfile();
     return;
@@ -6069,6 +6121,7 @@ appView.addEventListener("click", (event) => {
   }
 
   if (target.dataset.editCommonSports) {
+    if (state.workoutSession) return;
     openCheckinEditor();
     return;
   }
@@ -6084,6 +6137,7 @@ appView.addEventListener("click", (event) => {
   }
 
   if (target.dataset.selectWorkoutSport) {
+    if (state.workoutSession) return;
     runTask(() => selectWorkoutSport(target.dataset.selectWorkoutSport));
     return;
   }
@@ -6555,7 +6609,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260331-3`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260331-5`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
