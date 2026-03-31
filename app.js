@@ -3002,6 +3002,16 @@ async function finishWorkoutSession() {
   const profile = getMyPageProfile();
   const session = getWorkoutSessionStats(profile);
   if (!profile || !session) return;
+  if (supportsOutdoorRouteShare(session.sport.id) && navigator.geolocation && state.workoutSession?.gps) {
+    const finalPosition = await getCurrentGeoPosition({
+      enableHighAccuracy: true,
+      timeout: 8000,
+      maximumAge: 0
+    }).catch(() => null);
+    if (finalPosition) {
+      appendWorkoutGeoPoint(finalPosition, session.sport.id, state.workoutSession.gps);
+    }
+  }
   stopOutdoorGpsTracking();
   const routePayload = buildOutdoorRoutePayload(profile, session);
   const expectsOutdoorRoute = supportsOutdoorRouteShare(session.sport.id);
@@ -3688,9 +3698,10 @@ function appendWorkoutGeoPoint(position, sportId, gpsState = null) {
   );
   const speedMps = segmentMeters / elapsedSeconds;
   const maxSpeed = getOutdoorSpeedLimit(sportId);
-  const accuracyLimit = Math.max(12, Math.min(point.accuracy || 12, 28));
+  const accuracyLimit = Math.max(4, Math.min(point.accuracy || 12, 16));
+  const minSegmentMeters = gps.points.length < 2 ? 1.6 : Math.min(accuracyLimit, 5.5);
 
-  if (segmentMeters < accuracyLimit || speedMps > maxSpeed) {
+  if (segmentMeters < minSegmentMeters || speedMps > maxSpeed) {
     return;
   }
 
@@ -4738,7 +4749,7 @@ function renderWorkoutSession(profile) {
     <section class="workout-live-screen">
       <div class="workout-live-screen-top">
         <button class="workout-live-picker" data-edit-common-sports="1" type="button">${escapeHtml(session.sport.label)}</button>
-        <button class="workout-live-side workout-live-side--pause ${isPaused ? "is-active" : ""}" data-pause-workout="1" type="button">${isPaused ? "继续" : "暂停"}</button>
+        <span class="workout-live-chip workout-live-chip--muted">${escapeHtml(gpsStatus || session.sourceLabel)}</span>
       </div>
 
       <div class="dashboard-checkin-pills dashboard-checkin-pills--toolbar workout-type-strip workout-type-strip--live">
@@ -4760,7 +4771,7 @@ function renderWorkoutSession(profile) {
       <article class="detail-card workout-session-card workout-session-card--live">
         <div class="workout-live-top">
           <span class="workout-live-chip">${escapeHtml(isPaused ? "已暂停" : "正在记录")}</span>
-          <span class="workout-live-chip workout-live-chip--muted">${escapeHtml(gpsStatus || session.sourceLabel)}</span>
+          <span class="workout-live-chip workout-live-chip--accent">${escapeHtml(session.sport.hint || "运动记录中")}</span>
         </div>
 
         <div class="workout-live-value">
@@ -4790,6 +4801,7 @@ function renderWorkoutSession(profile) {
         <div class="workout-live-actions">
           <button class="workout-live-side" data-cancel-workout="1" type="button">放弃</button>
           <button class="workout-live-finish" data-finish-workout="1" type="button">结束打卡</button>
+          <button class="workout-live-side workout-live-side--pause ${isPaused ? "is-active" : ""}" data-pause-workout="1" type="button">${isPaused ? "继续" : "暂停"}</button>
         </div>
       </article>
     </section>
@@ -5039,26 +5051,6 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
   const emptyBookingMarkup = '<article class="empty-card">你还没有正式预约。去首页、探索或教练/场馆主页完成第一次预约后，这里才会出现记录。</article>';
   if (feature === "checkin" && state.workoutSession) {
     return `
-      <section class="page-header page-header--workout-live">
-        <div>
-          <p class="page-label">My</p>
-          <h1>运动中</h1>
-        </div>
-        <button class="mini-button" data-open-my-home="1" type="button">我的</button>
-      </section>
-
-      <section class="managed-strip managed-strip--dashboard">
-        ${managedProfiles
-          .map(
-            (item) => `
-              <button class="managed-chip ${item.id === profile.id ? "is-active" : ""}" data-switch-managed="${item.id}" type="button">
-                ${escapeHtml(getRoleLabel(item.role))}
-              </button>
-            `
-          )
-          .join("")}
-      </section>
-
       <section class="profile-subpage-stack profile-subpage-stack--live">
         ${renderWorkoutSession(profile)}
       </section>
