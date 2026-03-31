@@ -906,6 +906,7 @@ const SESSION_STORAGE_KEY = "fithub_trial_session_id";
 const SNAPSHOT_STORAGE_KEY = "fithub_trial_snapshot_v2";
 const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
 const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
+const ACTIVE_ACCOUNT_STORAGE_KEY = "fithub_trial_active_account_v1";
 const DEFAULT_RUNTIME_CONFIG = Object.freeze(
   normalizeRuntimeConfig({
     mapProvider: APP_CONFIG.mapProvider || "",
@@ -1251,6 +1252,52 @@ function getStoredAccountForRole(role) {
   return getStoredAccounts().find((item) => item.roles.includes(role)) || null;
 }
 
+function normalizeActiveAccount(item) {
+  return {
+    role: roleConfig[item?.role] ? item.role : "",
+    phone: normalizePhone(item?.phone),
+    accountId: item?.accountId || item?.id || "",
+    restoreToken: item?.restoreToken || ""
+  };
+}
+
+function getStoredActiveAccount() {
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_ACCOUNT_STORAGE_KEY);
+    return raw ? normalizeActiveAccount(JSON.parse(raw)) : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function rememberActiveAccount(role, phone, accountId = "", restoreToken = "") {
+  const normalized = normalizeActiveAccount({
+    role,
+    phone,
+    accountId,
+    restoreToken
+  });
+  if (!normalized.role && !normalized.phone && !normalized.accountId) return;
+  try {
+    window.localStorage.setItem(ACTIVE_ACCOUNT_STORAGE_KEY, JSON.stringify(normalized));
+  } catch (_error) {
+    // Ignore storage quota failures.
+  }
+}
+
+function getPreferredStoredAccount(role = "") {
+  const active = getStoredActiveAccount();
+  if (active?.phone && (!role || active.role === role)) {
+    return {
+      id: active.accountId,
+      restoreToken: active.restoreToken,
+      phone: active.phone,
+      roles: active.role ? [active.role] : []
+    };
+  }
+  return (role ? getStoredAccountForRole(role) : null) || getStoredAccounts()[0] || null;
+}
+
 function clearAuthResolution({ preservePhone = true } = {}) {
   state.authMatches = [];
   state.authAccountId = "";
@@ -1379,9 +1426,62 @@ async function recoverAccountFromSnapshot(role, phone) {
   return true;
 }
 
+function bootstrapRememberedAccountLocally() {
+  const preferred = getStoredActiveAccount();
+  const remembered = getPreferredStoredAccount(preferred?.role || state.selectedRole);
+  if (!remembered) return false;
+
+  const role = preferred?.role || remembered.roles?.[0] || state.selectedRole;
+  const phone = preferred?.phone || remembered.phone;
+  if (!roleConfig[role] || !phone) return false;
+
+  const cachedProfile = findRecoverableSnapshotProfile(role, phone);
+  if (!cachedProfile?.id) return false;
+
+  const snapshot = getStoredSnapshot();
+  const baseProfiles = Array.isArray(snapshot?.profiles) && snapshot.profiles.length
+    ? snapshot.profiles
+    : createInitialProfiles();
+  const mergedProfiles = [...baseProfiles.filter((item) => item?.id !== cachedProfile.id), cachedProfile];
+  const account = normalizeStoredAccount({
+    id: preferred?.accountId || remembered.id || "",
+    restoreToken: preferred?.restoreToken || remembered.restoreToken || "",
+    phone,
+    roles: [role]
+  });
+
+  syncStateFromServer(
+    {
+      config: state.runtimeConfig,
+      session: {
+        id: state.sessionId || getStoredSessionId() || `session-local-${Math.random().toString(16).slice(2, 10)}`,
+        selectedRole: role,
+        managedProfileIds: [cachedProfile.id],
+        managedAccounts: [account],
+        currentActorProfileId: cachedProfile.id,
+        userPosition: snapshot?.session?.userPosition || state.userPosition,
+        locationStatus: "已从这个设备恢复上次登录的账号。"
+      },
+      profiles: mergedProfiles,
+      followSet: snapshot?.followSet || [],
+      bookings: snapshot?.bookings || [],
+      threads: snapshot?.threads || []
+    },
+    { keepOverlay: true }
+  );
+
+  state.locationStatus = "已从这个设备恢复上次登录的账号。";
+  return true;
+}
+
 async function maybeRestoreRememberedAccounts() {
   if (state.managedProfileIds.length) return false;
-  const accounts = getStoredAccounts();
+  const preferred = getStoredActiveAccount();
+  const accounts = getStoredAccounts().sort((left, right) => {
+    const leftScore = preferred && left.phone === preferred.phone ? 1 : 0;
+    const rightScore = preferred && right.phone === preferred.phone ? 1 : 0;
+    return rightScore - leftScore;
+  });
   if (!accounts.length) return false;
   if (restorePromise) return restorePromise;
 
@@ -1453,6 +1553,22 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   state.bookings = payload.bookings || [];
   state.threads = payload.threads || [];
   state.composeProfileId = state.composeProfileId || state.currentActorProfileId || state.managedProfileIds[0] || "";
+
+  const activeProfile = getProfile(state.currentActorProfileId || state.managedProfileIds[0] || "");
+  if (activeProfile) {
+    const matchedAccount =
+      state.managedAccounts.find(
+        (item) =>
+          item.roles.includes(activeProfile.role) &&
+          (!normalizePhone(activeProfile.phone) || item.phone === normalizePhone(activeProfile.phone))
+      ) || state.managedAccounts[0];
+    rememberActiveAccount(
+      activeProfile.role,
+      matchedAccount?.phone || activeProfile.phone || "",
+      matchedAccount?.id || "",
+      matchedAccount?.restoreToken || ""
+    );
+  }
 
   const myProfile = getMyPageProfile();
   const availableSportIds = new Set((myProfile?.favoriteSports || []).map((item) => item));
@@ -1887,7 +2003,7 @@ function openRegister(role = state.selectedRole) {
 }
 
 function openAuth(role = state.selectedRole) {
-  const remembered = getStoredAccountForRole(role) || getStoredAccounts()[0] || null;
+  const remembered = getPreferredStoredAccount(role);
   state.authRole = role;
   state.authPhone = remembered?.phone || "";
   state.authAccountId = remembered?.id || "";
@@ -4361,8 +4477,8 @@ function renderFavoriteSportEditor(profile) {
       <div class="sport-picker-handle"></div>
       <div class="section-title-row section-title-row--sport-picker">
         <div>
-          <h3>选择运动类别</h3>
-          <p class="result-tip">选好后会显示在顶部运动类型栏，之后按 GO 就能直接开始。</p>
+          <h3>选择日常运动</h3>
+          <p class="result-tip">保留你最常用的项目，后面打开就能直接 GO。</p>
         </div>
         <span class="status-pill">${selectedIds.length} 项</span>
       </div>
@@ -4408,22 +4524,24 @@ function renderWorkoutLauncher(profile) {
   const favoriteSports = getFavoriteSports(profile);
   const currentSport = getCurrentWorkoutSport(profile);
   const connectedDevices = getConnectedDevices(profile);
+  const bodySummary = `${profile.gender || "未填"} · ${getProfileWeight(profile) || "--"} kg`;
+  const deviceSummary = connectedDevices.length ? `已连接 ${connectedDevices.length} 台设备` : "未连接设备";
 
   if (!favoriteSports.length || state.checkinEditing) {
     return renderFavoriteSportEditor(profile);
   }
 
   return `
-    <article class="detail-card checkin-feature-card workout-toolbar-card">
-      <div class="section-title-row">
+    <article class="detail-card checkin-feature-card workout-studio-card">
+      <div class="section-title-row workout-studio-head">
         <div>
-          <h3>运动类型</h3>
-          <p class="result-tip">切换顶部运动类型，然后按 GO 直接开始。</p>
+          <span class="dashboard-checkin-kicker">今日运动</span>
+          <h3>选一个常用项目，直接开始</h3>
         </div>
-        <button class="mini-button" data-edit-common-sports="1" type="button">选择运动</button>
+        <button class="mini-button" data-edit-common-sports="1" type="button">切换项目</button>
       </div>
 
-      <div class="dashboard-checkin-pills dashboard-checkin-pills--toolbar">
+      <div class="dashboard-checkin-pills dashboard-checkin-pills--toolbar workout-type-strip">
         ${favoriteSports
           .map(
             (item) => `
@@ -4438,42 +4556,36 @@ function renderWorkoutLauncher(profile) {
           )
           .join("")}
       </div>
-    </article>
 
-    ${
-      state.workoutSession
-        ? renderWorkoutSession(profile)
-        : `
-          <article class="detail-card workout-go-card">
-            <div class="workout-go-copy">
-              <span class="dashboard-checkin-kicker">准备开始</span>
-              <h3>${escapeHtml(currentSport ? currentSport.label : "先选择日常训练")}</h3>
-              <p>${escapeHtml(currentSport ? currentSport.hint : "先在上方选一个你常用的运动项目，再开始计时打卡。")}</p>
-            </div>
-            <div class="workout-device-strip">
-              ${
-                connectedDevices.length
-                  ? connectedDevices.map((item) => `<span class="device-chip is-connected">${escapeHtml(item)}</span>`).join("")
-                  : '<span class="device-chip">未连接设备</span>'
-              }
-            </div>
-            <div class="workout-go-panel">
-              <button class="workout-go-button" ${currentSport ? 'data-go-workout="1"' : 'data-edit-common-sports="1"'} type="button">
-                ${currentSport ? "GO" : "选择"}
-              </button>
-              <div class="workout-go-meta">
-                <strong>${escapeHtml(`${profile.gender || "未填"} · ${getProfileWeight(profile) || "--"} kg`)}</strong>
-                <span>${escapeHtml(currentSport ? "开始后自动计时，并按运动类型与身体数据计算卡路里" : "第一次打卡先完成运动选择，避免默认进入跑步模式")}</span>
+      ${
+        state.workoutSession
+          ? renderWorkoutSession(profile)
+          : `
+            <article class="workout-start-panel">
+              <div class="workout-start-copy">
+                <span class="workout-start-kicker">准备开始</span>
+                <h2>${escapeHtml(currentSport ? currentSport.label : "先选择运动")}</h2>
+                <p>${escapeHtml(currentSport ? currentSport.hint : "先在上方选一个日常运动项目。")}</p>
               </div>
-            </div>
-            <div class="workout-quick-connect">
-              <button class="mini-button" data-sync-health-device="apple-watch" type="button">Apple Watch</button>
-              <button class="mini-button" data-sync-health-device="xiaomi-watch" type="button">小米手表</button>
-              <button class="mini-button" data-sync-health-device="xiaomi-scale" type="button">小米智能秤</button>
-            </div>
-          </article>
-        `
-    }
+
+              <div class="workout-start-meta">
+                <span>${escapeHtml(bodySummary)}</span>
+                <span>${escapeHtml(deviceSummary)}</span>
+              </div>
+
+              <button class="workout-go-orb" ${currentSport ? 'data-go-workout="1"' : 'data-edit-common-sports="1"'} type="button">
+                <small>运动</small>
+                <strong>${currentSport ? "GO" : "选项目"}</strong>
+              </button>
+
+              <div class="workout-start-footer">
+                <button class="text-link" data-open-my-feature="health" type="button">${connectedDevices.length ? "管理健康设备" : "连接健康设备"}</button>
+                <span>${escapeHtml(currentSport ? "开始后自动计时，并结合身体数据估算消耗" : "第一次先选项目，避免默认进跑步。")}</span>
+              </div>
+            </article>
+          `
+      }
+    </article>
   `;
 }
 
@@ -4481,54 +4593,53 @@ function renderWorkoutSession(profile) {
   const session = getWorkoutSessionStats(profile);
   if (!session) return "";
   const gpsStatus = supportsOutdoorRouteShare(session.sport.id) ? getOutdoorGpsStatus(session) : "";
+  const estimatedHeartRate = profile.restingHeartRate
+    ? `${Math.round(Number(profile.restingHeartRate) + (supportsOutdoorRouteShare(session.sport.id) ? 62 : 48))} bpm`
+    : "--";
+  const metricLabel = supportsOutdoorRouteShare(session.sport.id) ? "距离" : "时长";
+  const metricValue = supportsOutdoorRouteShare(session.sport.id)
+    ? (session.distance ? `${session.distance} km` : "0.00 km")
+    : `${session.elapsedMinutes} 分钟`;
+  const paceLabel = supportsOutdoorRouteShare(session.sport.id)
+    ? formatWorkoutPaceLabel(session.elapsedMinutes, session.distance)
+    : getProfileBMI(profile);
+  const paceTitle = supportsOutdoorRouteShare(session.sport.id) ? "平均配速" : "BMI";
 
   return `
-    <article class="detail-card workout-session-card">
-      <div class="section-title-row">
-        <div>
-          <span class="dashboard-checkin-kicker">运动中</span>
-          <h3>${escapeHtml(session.sport.label)}</h3>
-        </div>
-        <button class="text-link" data-cancel-workout="1" type="button">放弃</button>
+    <article class="detail-card workout-session-card workout-session-card--live">
+      <div class="workout-live-top">
+        <span class="workout-live-chip">${escapeHtml(session.sport.label)}</span>
+        <span class="workout-live-chip workout-live-chip--muted">${escapeHtml(gpsStatus || session.sourceLabel)}</span>
       </div>
 
-      <div class="workout-timer">${escapeHtml(session.timerLabel)}</div>
+      <div class="workout-live-value">
+        <strong>${escapeHtml(String(session.calories))}</strong>
+        <span>总卡路里 / kcal</span>
+      </div>
 
-      ${
-        gpsStatus
-          ? `
-            <div class="workout-gps-strip">
-              <span>真实 GPS 轨迹</span>
-              <strong>${escapeHtml(gpsStatus)}</strong>
-            </div>
-          `
-          : ""
-      }
-
-      <div class="workout-stat-grid">
+      <div class="workout-live-stat-grid">
         <div>
-          <span>已运动</span>
-          <strong>${escapeHtml(`${session.elapsedMinutes} 分钟`)}</strong>
+          <span>持续时间</span>
+          <strong>${escapeHtml(session.timerLabel)}</strong>
         </div>
         <div>
-          <span>估算卡路里</span>
-          <strong>${escapeHtml(`${session.calories} kcal`)}</strong>
+          <span>${escapeHtml(metricLabel)}</span>
+          <strong>${escapeHtml(metricValue)}</strong>
         </div>
         <div>
-          <span>BMI</span>
-          <strong>${escapeHtml(String(getProfileBMI(profile)))}</strong>
+          <span>估算心率</span>
+          <strong>${escapeHtml(estimatedHeartRate)}</strong>
         </div>
         <div>
-          <span>${escapeHtml(supportsOutdoorRouteShare(session.sport.id) ? "GPS距离" : "估算距离")}</span>
-          <strong>${session.distance ? escapeHtml(`${session.distance} km`) : "--"}</strong>
+          <span>${escapeHtml(paceTitle)}</span>
+          <strong>${escapeHtml(paceLabel || "--")}</strong>
         </div>
       </div>
 
-      <p class="result-tip">${escapeHtml(`${session.sourceLabel}，并结合体重、BMI${profile.bodyFat ? "、体脂" : ""}和运动强度持续修正热量消耗。`)}</p>
-
-      <div class="action-row action-row--checkin">
-        <button class="mini-button" data-cancel-workout="1" type="button">结束放弃</button>
-        <button class="primary-submit" data-finish-workout="1" type="button">结束并打卡</button>
+      <div class="workout-live-actions">
+        <button class="workout-live-side" data-cancel-workout="1" type="button">放弃</button>
+        <button class="workout-live-finish" data-finish-workout="1" type="button">结束打卡</button>
+        <button class="workout-live-side" data-open-my-feature="health" type="button">健康</button>
       </div>
     </article>
   `;
@@ -6255,6 +6366,10 @@ const cachedSnapshot = getStoredSnapshot();
 if (cachedSnapshot?.session) {
   syncStateFromServer(cachedSnapshot, { keepOverlay: true });
   state.isBootstrapping = false;
+}
+
+if (!state.managedProfileIds.length) {
+  bootstrapRememberedAccountLocally();
 }
 
 renderPage();
