@@ -7,6 +7,12 @@
 - 绑定固定域名
 - 保留多人互动数据
 
+当前已经有一个中国试运行静态入口：
+
+- `https://fithub-cn.pages.dev/`
+
+这个入口由 `Cloudflare Pages` 提供静态页面，避免用户首次打开先撞到 `Render` 黑色唤醒页；数据仍然走当前的 `Render + Supabase` 后端。
+
 ## 本地运行
 
 ```bash
@@ -26,6 +32,20 @@ python3 server.py --port 8010
 
 - 页面入口：`/`
 - API 入口：`/api`
+
+## 中国试运行入口更新
+
+如果你修改了前端并且要重新发布中国站静态入口，在这个目录执行：
+
+```bash
+./deploy-cn-pages.sh
+```
+
+如果你想发布到另一个 Pages 项目名：
+
+```bash
+./deploy-cn-pages.sh your-project-name
+```
 
 ## 部署
 
