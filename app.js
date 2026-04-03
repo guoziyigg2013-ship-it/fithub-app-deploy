@@ -3397,7 +3397,6 @@ function renderHome() {
 function renderDiscover() {
   const recommendedProfiles = getRecommendedProfiles();
   const discoverFeed = getFollowingFeedItems();
-  const managedProfile = getCurrentActor();
 
   appView.innerHTML = `
     <section class="page-header">
@@ -3405,7 +3404,7 @@ function renderDiscover() {
         <p class="page-label">Discover</p>
         <h1>探索</h1>
       </div>
-      <button class="mini-button mini-button--accent" data-open-following="1" type="button">我关注的</button>
+      <button class="mini-button mini-button--accent" data-open-followers="1" type="button">我的粉丝</button>
     </section>
 
     <section class="section-title-row section-title-row--discover-recommended">
@@ -3413,7 +3412,6 @@ function renderDiscover() {
         <h3>推荐关注</h3>
         <p class="result-tip">按可能认识、粉丝较多、评分较高三类推荐，优先展示附近的人</p>
       </div>
-      <button class="text-link" data-open-profile="${managedProfile?.id || ""}" type="button">我的主页</button>
     </section>
 
     <section class="discover-avatar-rail">
@@ -6480,6 +6478,12 @@ appView.addEventListener("click", (event) => {
 
   if (target.dataset.openFollowing) {
     state.socialTab = "following";
+    openOverlay("following");
+    return;
+  }
+
+  if (target.dataset.openFollowers) {
+    state.socialTab = "followers";
     openOverlay("following");
     return;
   }
