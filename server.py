@@ -95,6 +95,11 @@ DEFAULT_LOCATION_STATUS = "默认城市为厦门，你可以点击顶部城市�
 
 STORE_LOCK = threading.Lock()
 STATE_CACHE = None
+STATE_RUNTIME_META = {
+    "loaded_from": "uninitialized",
+    "supabase_writable": True,
+    "last_known_remote_real_profiles": 0,
+}
 MAX_INLINE_AVATAR_CHARS = 120_000
 MAX_INLINE_MEDIA_CHARS = 180_000
 LEGACY_DEMO_ENTHUSIAST_IDS = {"enthusiast-demo-a", "enthusiast-demo-b"}
@@ -335,8 +340,28 @@ def storage_log(message):
     print(f"[FitHub storage] {message}", file=sys.stderr)
 
 
+def set_runtime_storage_state(loaded_from, supabase_writable, state=None):
+    STATE_RUNTIME_META["loaded_from"] = loaded_from
+    STATE_RUNTIME_META["supabase_writable"] = bool(supabase_writable)
+    if isinstance(state, dict):
+        STATE_RUNTIME_META["last_known_remote_real_profiles"] = count_real_profiles(state)
+
+
 def supabase_storage_enabled():
     return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
+
+
+def is_demo_profile_id(profile_id):
+    return (
+        profile_id in LEGACY_DEMO_ENTHUSIAST_IDS
+        or str(profile_id or "").startswith("gym-demo-")
+        or str(profile_id or "").startswith("coach-demo-")
+    )
+
+
+def count_real_profiles(state):
+    profiles = state.get("profiles", {}) if isinstance(state, dict) else {}
+    return sum(1 for profile_id in profiles if not is_demo_profile_id(profile_id))
 
 
 def supabase_rest_url(path):
@@ -395,6 +420,15 @@ def load_state_from_supabase():
     return None
 
 
+def load_state_from_local(create_if_missing=True):
+    if create_if_missing:
+        ensure_data_file()
+    elif not STATE_FILE.exists():
+        return None
+    with STATE_FILE.open("r", encoding="utf-8") as handle:
+        return sanitize_state(json.load(handle))
+
+
 def save_state_to_supabase(state):
     payload = sanitize_state(deepcopy(state))
     saved_at = now_utc()
@@ -420,6 +454,7 @@ def save_state_to_supabase(state):
         ],
         prefer="resolution=merge-duplicates,return=minimal",
     )
+    set_runtime_storage_state("supabase", True, payload)
 
 
 def find_profile_by_role_phone(state, role, phone):
@@ -1383,8 +1418,12 @@ def load_state():
         try:
             state = load_state_from_supabase()
             if state is None:
-                state = initial_state()
+                storage_log("Supabase state row missing, initializing a fresh remote state.")
+                state = load_state_from_local(create_if_missing=False) or initial_state()
+                set_runtime_storage_state("supabase-empty", True, state)
                 save_state_to_supabase(state)
+            else:
+                set_runtime_storage_state("supabase", True, state)
             changed = merge_demo_state(state)
             if reconcile_account_registry(state):
                 changed = True
@@ -1393,10 +1432,15 @@ def load_state():
             return sanitize_state(state)
         except Exception as exc:
             storage_log(f"Supabase load failed, fallback to local file: {exc}")
+            state = load_state_from_local(create_if_missing=False) or initial_state()
+            set_runtime_storage_state("local-fallback", False)
+            changed = merge_demo_state(state)
+            if reconcile_account_registry(state):
+                changed = True
+            return sanitize_state(state)
 
-    ensure_data_file()
-    with STATE_FILE.open("r", encoding="utf-8") as handle:
-        state = sanitize_state(json.load(handle))
+    state = load_state_from_local(create_if_missing=True)
+    set_runtime_storage_state("local-file", True, state)
     changed = merge_demo_state(state)
     if reconcile_account_registry(state):
         changed = True
@@ -1407,15 +1451,55 @@ def load_state():
 
 def save_state(state):
     if supabase_storage_enabled():
+        if not STATE_RUNTIME_META.get("supabase_writable", True):
+            storage_log("Supabase writes skipped because the current state was loaded from local fallback after a remote read failure.")
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            with STATE_FILE.open("w", encoding="utf-8") as handle:
+                json.dump(state, handle, ensure_ascii=False, indent=2)
+            return
+
+        if STATE_RUNTIME_META.get("last_known_remote_real_profiles", 0) > 0 and count_real_profiles(state) == 0:
+            storage_log("Refusing to overwrite Supabase with demo-only state because the last known remote state contained registered users.")
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            with STATE_FILE.open("w", encoding="utf-8") as handle:
+                json.dump(state, handle, ensure_ascii=False, indent=2)
+            return
+
         try:
             save_state_to_supabase(state)
             return
         except Exception as exc:
             storage_log(f"Supabase save failed, fallback to local file: {exc}")
+            STATE_RUNTIME_META["supabase_writable"] = False
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with STATE_FILE.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, ensure_ascii=False, indent=2)
+
+
+def refresh_state_cache_from_supabase():
+    global STATE_CACHE
+    if not supabase_storage_enabled():
+        return False
+    if STATE_RUNTIME_META.get("loaded_from") != "local-fallback":
+        return False
+
+    try:
+        state = load_state_from_supabase()
+        if not state:
+            return False
+        changed = merge_demo_state(state)
+        if reconcile_account_registry(state):
+            changed = True
+        if changed:
+            save_state_to_supabase(state)
+        STATE_CACHE = sanitize_state(state)
+        set_runtime_storage_state("supabase", True, STATE_CACHE)
+        storage_log("Recovered state cache from Supabase after earlier local fallback.")
+        return True
+    except Exception as exc:
+        storage_log(f"Supabase refresh retry failed: {exc}")
+        return False
 
 
 def create_session_record():
@@ -2158,6 +2242,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
         with STORE_LOCK:
             if STATE_CACHE is None:
                 STATE_CACHE = load_state()
+            elif STATE_RUNTIME_META.get("loaded_from") == "local-fallback":
+                refresh_state_cache_from_supabase()
             state = STATE_CACHE
             result = mutator(state)
             save_state(state)
