@@ -89,3 +89,32 @@ python3 server.py --port 8010
 详细初始化 SQL 和步骤见：
 
 - [docs/fithub-supabase-setup.md](./docs/fithub-supabase-setup.md)
+
+## 验证码登录
+
+当前已经支持手机号验证码登录/注册校验。
+
+如果你要在正式环境启用腾讯云短信，请在 Render 环境变量里设置：
+
+- `FITHUB_SMS_PROVIDER=tencent`
+- `FITHUB_TENCENT_SMS_SECRET_ID`
+- `FITHUB_TENCENT_SMS_SECRET_KEY`
+- `FITHUB_TENCENT_SMS_APP_ID`
+- `FITHUB_TENCENT_SMS_SIGN_NAME`
+- `FITHUB_TENCENT_SMS_TEMPLATE_ID`
+
+可选：
+
+- `FITHUB_TENCENT_SMS_REGION=ap-guangzhou`
+- `FITHUB_SMS_CODE_LENGTH=6`
+- `FITHUB_SMS_CODE_TTL_SECONDS=300`
+- `FITHUB_SMS_RESEND_SECONDS=60`
+- `FITHUB_SMS_CODE_SALT`
+
+如果只是先联调流程，也可以先开：
+
+- `FITHUB_SMS_DEV_MODE=true`
+
+详细说明见：
+
+- [docs/fithub-sms-login.md](./docs/fithub-sms-login.md)

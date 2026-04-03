@@ -3351,6 +3351,20 @@ body.is-workout-live .app {
   resize: vertical;
 }
 
+.verification-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.verification-row .mini-button {
+  min-width: 96px;
+  height: 44px;
+  justify-content: center;
+  padding: 0 14px;
+}
+
 .wheel-trigger {
   width: 100%;
   border: 1px solid #e5e5e5;

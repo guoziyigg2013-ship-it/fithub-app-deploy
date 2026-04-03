@@ -1,7 +1,10 @@
 import argparse
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
+import secrets
 import sys
 import threading
 import uuid
@@ -44,6 +47,18 @@ MAP_PROVIDER = (os.getenv("FITHUB_MAP_PROVIDER") or "").strip().lower()
 AMAP_WEB_KEY = (os.getenv("FITHUB_AMAP_WEB_KEY") or "").strip()
 AMAP_SECURITY_CODE = (os.getenv("FITHUB_AMAP_SECURITY_CODE") or "").strip()
 BAIDU_MAP_AK = (os.getenv("FITHUB_BAIDU_MAP_AK") or "").strip()
+SMS_PROVIDER = (os.getenv("FITHUB_SMS_PROVIDER") or "").strip().lower()
+SMS_CODE_LENGTH = int(os.getenv("FITHUB_SMS_CODE_LENGTH") or "6")
+SMS_CODE_TTL_SECONDS = int(os.getenv("FITHUB_SMS_CODE_TTL_SECONDS") or "300")
+SMS_RESEND_SECONDS = int(os.getenv("FITHUB_SMS_RESEND_SECONDS") or "60")
+SMS_HASH_SALT = (os.getenv("FITHUB_SMS_CODE_SALT") or SUPABASE_SERVICE_ROLE_KEY or "fithub-sms").strip()
+SMS_DEV_MODE = str(os.getenv("FITHUB_SMS_DEV_MODE") or "").strip().lower() in {"1", "true", "yes", "on"}
+TENCENT_SMS_SECRET_ID = (os.getenv("FITHUB_TENCENT_SMS_SECRET_ID") or "").strip()
+TENCENT_SMS_SECRET_KEY = (os.getenv("FITHUB_TENCENT_SMS_SECRET_KEY") or "").strip()
+TENCENT_SMS_APP_ID = (os.getenv("FITHUB_TENCENT_SMS_APP_ID") or "").strip()
+TENCENT_SMS_SIGN_NAME = (os.getenv("FITHUB_TENCENT_SMS_SIGN_NAME") or "").strip()
+TENCENT_SMS_TEMPLATE_ID = (os.getenv("FITHUB_TENCENT_SMS_TEMPLATE_ID") or "").strip()
+TENCENT_SMS_REGION = (os.getenv("FITHUB_TENCENT_SMS_REGION") or "ap-guangzhou").strip()
 
 
 def url_with_prefix(path="/"):
@@ -79,6 +94,8 @@ def runtime_config():
         "amapKey": AMAP_WEB_KEY,
         "amapSecurityCode": AMAP_SECURITY_CODE,
         "baiduAk": BAIDU_MAP_AK,
+        "smsEnabled": sms_verification_enabled(),
+        "smsProvider": SMS_PROVIDER if sms_provider_configured() else ("debug" if SMS_DEV_MODE else ""),
     }
 
 DEFAULT_POSITION = {
@@ -338,6 +355,204 @@ def estimate_body_fat(gender, bmi):
 
 def storage_log(message):
     print(f"[FitHub storage] {message}", file=sys.stderr)
+
+
+def sms_provider_configured():
+    if SMS_PROVIDER == "tencent":
+        return all([
+            TENCENT_SMS_SECRET_ID,
+            TENCENT_SMS_SECRET_KEY,
+            TENCENT_SMS_APP_ID,
+            TENCENT_SMS_SIGN_NAME,
+            TENCENT_SMS_TEMPLATE_ID,
+        ])
+    return False
+
+
+def sms_verification_enabled():
+    return SMS_DEV_MODE or sms_provider_configured()
+
+
+def ensure_verification_registry(state):
+    return state.setdefault("otpCodes", {})
+
+
+def cleanup_verification_registry(state):
+    registry = ensure_verification_registry(state)
+    current = now_utc()
+    expired = []
+    for phone, item in registry.items():
+        expires_at = parse_optional_iso_datetime(item.get("expiresAt"))
+        if expires_at and expires_at < current:
+            expired.append(phone)
+    for phone in expired:
+        registry.pop(phone, None)
+
+
+def hash_sms_code(phone, code):
+    return hashlib.sha256(f"{normalize_phone(phone)}:{code}:{SMS_HASH_SALT}".encode("utf-8")).hexdigest()
+
+
+def generate_sms_code():
+    digits = "0123456789"
+    return "".join(secrets.choice(digits) for _ in range(max(4, SMS_CODE_LENGTH)))
+
+
+def mark_session_phone_verified(session, phone):
+    verified = session.setdefault("verifiedPhones", {})
+    verified[normalize_phone(phone)] = iso_at()
+
+
+def is_session_phone_verified(session, phone):
+    phone_key = normalize_phone(phone)
+    if not phone_key:
+        return False
+    verified = session.get("verifiedPhones", {})
+    return bool(verified.get(phone_key))
+
+
+def hmac_sha256(key, msg):
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+
+def sha256_hex(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def send_sms_via_tencent(phone, code):
+    host = "sms.tencentcloudapi.com"
+    endpoint = f"https://{host}/"
+    service = "sms"
+    action = "SendSms"
+    version = "2021-01-11"
+    timestamp = int(now_utc().timestamp())
+    date = now_utc().strftime("%Y-%m-%d")
+    payload = {
+        "SmsSdkAppId": TENCENT_SMS_APP_ID,
+        "SignName": TENCENT_SMS_SIGN_NAME,
+        "TemplateId": TENCENT_SMS_TEMPLATE_ID,
+        "TemplateParamSet": [code, str(max(1, SMS_CODE_TTL_SECONDS // 60))],
+        "PhoneNumberSet": [f"+86{normalize_phone(phone)}"],
+        "SessionContext": "FitHubLogin",
+    }
+    payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    canonical_headers = (
+        "content-type:application/json; charset=utf-8\n"
+        f"host:{host}\n"
+        f"x-tc-action:{action.lower()}\n"
+    )
+    signed_headers = "content-type;host;x-tc-action"
+    canonical_request = "\n".join([
+        "POST",
+        "/",
+        "",
+        canonical_headers,
+        signed_headers,
+        sha256_hex(payload_json),
+    ])
+    credential_scope = f"{date}/{service}/tc3_request"
+    string_to_sign = "\n".join([
+        "TC3-HMAC-SHA256",
+        str(timestamp),
+        credential_scope,
+        sha256_hex(canonical_request),
+    ])
+    secret_date = hmac_sha256(("TC3" + TENCENT_SMS_SECRET_KEY).encode("utf-8"), date)
+    secret_service = hmac.new(secret_date, service.encode("utf-8"), hashlib.sha256).digest()
+    secret_signing = hmac.new(secret_service, b"tc3_request", hashlib.sha256).digest()
+    signature = hmac.new(secret_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    authorization = (
+        f"TC3-HMAC-SHA256 Credential={TENCENT_SMS_SECRET_ID}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
+    request = Request(
+        endpoint,
+        data=payload_json.encode("utf-8"),
+        headers={
+            "Authorization": authorization,
+            "Content-Type": "application/json; charset=utf-8",
+            "Host": host,
+            "X-TC-Action": action,
+            "X-TC-Version": version,
+            "X-TC-Timestamp": str(timestamp),
+            "X-TC-Region": TENCENT_SMS_REGION,
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=12) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    error = (body.get("Response") or {}).get("Error")
+    if error:
+        raise ValueError(error.get("Message") or "短信发送失败，请稍后再试。")
+    status_item = ((body.get("Response") or {}).get("SendStatusSet") or [{}])[0]
+    if status_item.get("Code") != "Ok":
+        raise ValueError(status_item.get("Message") or "短信发送失败，请稍后再试。")
+
+
+def send_sms_code(state, session, phone, purpose="login"):
+    cleanup_verification_registry(state)
+    phone_key = validate_phone_or_raise(phone)
+    registry = ensure_verification_registry(state)
+    current = now_utc()
+    current_item = registry.get(phone_key) or {}
+    last_sent = parse_optional_iso_datetime(current_item.get("lastSentAt"))
+    if last_sent:
+        wait_seconds = SMS_RESEND_SECONDS - int((current - last_sent).total_seconds())
+        if wait_seconds > 0:
+            raise ValueError(f"验证码已发送，请 {wait_seconds} 秒后再试。")
+
+    code = generate_sms_code()
+    if sms_provider_configured():
+        if SMS_PROVIDER == "tencent":
+            send_sms_via_tencent(phone_key, code)
+    elif not SMS_DEV_MODE:
+        raise ValueError("短信验证码服务尚未配置，请先联系管理员开通。")
+
+    registry[phone_key] = {
+        "codeHash": hash_sms_code(phone_key, code),
+        "expiresAt": (current + timedelta(seconds=SMS_CODE_TTL_SECONDS)).isoformat(),
+        "lastSentAt": current.isoformat(),
+        "purpose": purpose,
+        "attempts": 0,
+        "sessionId": session.get("id"),
+    }
+    response = {
+        "phone": phone_key,
+        "cooldownSeconds": SMS_RESEND_SECONDS,
+        "expiresInSeconds": SMS_CODE_TTL_SECONDS,
+    }
+    if SMS_DEV_MODE and not sms_provider_configured():
+        response["debugCode"] = code
+    return response
+
+
+def verify_sms_code(state, session, phone, code):
+    cleanup_verification_registry(state)
+    phone_key = validate_phone_or_raise(phone)
+    raw_code = str(code or "").strip()
+    if len(raw_code) < 4:
+        raise ValueError("请输入短信验证码。")
+
+    registry = ensure_verification_registry(state)
+    item = registry.get(phone_key)
+    if not item:
+        raise ValueError("请先获取短信验证码。")
+
+    expires_at = parse_optional_iso_datetime(item.get("expiresAt"))
+    if not expires_at or expires_at < now_utc():
+        registry.pop(phone_key, None)
+        raise ValueError("验证码已过期，请重新获取。")
+
+    if item.get("codeHash") != hash_sms_code(phone_key, raw_code):
+        item["attempts"] = int(item.get("attempts") or 0) + 1
+        if item["attempts"] >= 8:
+            registry.pop(phone_key, None)
+            raise ValueError("验证码错误次数过多，请重新获取。")
+        raise ValueError("验证码不正确，请重新输入。")
+
+    registry.pop(phone_key, None)
+    mark_session_phone_verified(session, phone_key)
+    return phone_key
 
 
 def set_runtime_storage_state(loaded_from, supabase_writable, state=None):
@@ -1409,6 +1624,7 @@ def initial_state():
         "follows": follows,
         "bookings": bookings,
         "threads": threads,
+        "otpCodes": {},
         "accounts": {},
         "sessions": {},
     }
@@ -1514,6 +1730,7 @@ def create_session_record():
         "id": f"session-{uuid.uuid4().hex[:12]}",
         "selectedRole": "enthusiast",
         "managedProfileIds": [],
+        "verifiedPhones": {},
         "currentActorProfileId": None,
         "userPosition": deepcopy(DEFAULT_POSITION),
         "locationStatus": DEFAULT_LOCATION_STATUS,
@@ -2291,6 +2508,22 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        if parsed.path == f"{API_PREFIX}/auth/send-code":
+            def action(state):
+                session = ensure_session(state, session_id)
+                reconcile_account_registry(state)
+                phone = validate_phone_or_raise(payload.get("phone"))
+                purpose = str(payload.get("purpose") or "login").strip() or "login"
+                response = send_sms_code(state, session, phone, purpose)
+                response["smsEnabled"] = sms_verification_enabled()
+                return response
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if parsed.path == f"{API_PREFIX}/auth/login":
             def action(state):
                 session = ensure_session(state, session_id)
@@ -2303,6 +2536,9 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
                     attach_account_to_session(state, session, account, preferred_role)
                     return bootstrap_response(state, session)
+
+                if sms_verification_enabled():
+                    verify_sms_code(state, session, phone, payload.get("verificationCode"))
 
                 account = resolve_account_by_phone(state, phone)
                 if account:
@@ -2473,6 +2709,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 reconcile_account_registry(state)
                 role = payload["role"]
                 phone = validate_phone_or_raise((payload.get("profile") or {}).get("phone"))
+                if sms_verification_enabled() and not is_session_phone_verified(session, phone):
+                    verify_sms_code(state, session, phone, payload.get("verificationCode"))
                 existing_profile = None
                 for profile_id in session["managedProfileIds"]:
                     profile = state["profiles"].get(profile_id)

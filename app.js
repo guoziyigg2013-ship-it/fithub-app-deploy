@@ -974,6 +974,10 @@ const state = {
   authMatches: [],
   authAccountId: "",
   authRestoreToken: "",
+  authVerificationCode: "",
+  authCodeCooldownUntil: 0,
+  authCodeHint: "",
+  registerCodeCooldownUntil: 0,
   cityInput: "",
   profiles: createInitialProfiles(),
   managedProfileIds: [],
@@ -1150,7 +1154,9 @@ function normalizeRuntimeConfig(config = {}) {
     mapProvider: String(config?.mapProvider || "").trim().toLowerCase(),
     amapKey: String(config?.amapKey || "").trim(),
     amapSecurityCode: String(config?.amapSecurityCode || "").trim(),
-    baiduAk: String(config?.baiduAk || "").trim()
+    baiduAk: String(config?.baiduAk || "").trim(),
+    smsEnabled: Boolean(config?.smsEnabled),
+    smsProvider: String(config?.smsProvider || "").trim().toLowerCase()
   };
 
   if (!normalized.mapProvider) {
@@ -1169,8 +1175,19 @@ function getEffectiveRuntimeConfig() {
     ...(runtimeConfig.mapProvider ? { mapProvider: runtimeConfig.mapProvider } : {}),
     ...(runtimeConfig.amapKey ? { amapKey: runtimeConfig.amapKey } : {}),
     ...(runtimeConfig.amapSecurityCode ? { amapSecurityCode: runtimeConfig.amapSecurityCode } : {}),
-    ...(runtimeConfig.baiduAk ? { baiduAk: runtimeConfig.baiduAk } : {})
+    ...(runtimeConfig.baiduAk ? { baiduAk: runtimeConfig.baiduAk } : {}),
+    ...(runtimeConfig.smsEnabled ? { smsEnabled: runtimeConfig.smsEnabled } : {}),
+    ...(runtimeConfig.smsProvider ? { smsProvider: runtimeConfig.smsProvider } : {})
   });
+}
+
+function isSmsVerificationEnabled() {
+  return Boolean(getEffectiveRuntimeConfig().smsEnabled);
+}
+
+function getSmsSendCooldown(secondsUntil) {
+  if (!secondsUntil || secondsUntil <= 0) return "";
+  return `${secondsUntil}s 后重发`;
 }
 
 function normalizeStoredAccount(item) {
@@ -1321,9 +1338,54 @@ function clearAuthResolution({ preservePhone = true } = {}) {
   state.authMatches = [];
   state.authAccountId = "";
   state.authRestoreToken = "";
+  state.authVerificationCode = "";
+  state.authCodeHint = "";
   if (!preservePhone) {
     state.authPhone = "";
   }
+}
+
+function getRegisterVerificationCode(role = state.registerRole) {
+  return getRegisterDraft(role).verification_code || "";
+}
+
+async function sendAuthVerificationCode() {
+  const phone = normalizePhone(state.authPhone);
+  if (phone.length !== 11) {
+    throw new Error("请输入正确的 11 位手机号。");
+  }
+  const payload = await apiRequest(`${API_BASE}/auth/send-code`, {
+    method: "POST",
+    body: {
+      sessionId: state.sessionId || getStoredSessionId(),
+      phone,
+      purpose: "login"
+    }
+  });
+  state.authCodeCooldownUntil = Date.now() + Number(payload.cooldownSeconds || 60) * 1000;
+  state.authCodeHint = payload.debugCode ? `测试验证码：${payload.debugCode}` : "验证码已发送，请查收短信。";
+  state.authMessage = state.authCodeHint;
+  renderOverlay();
+}
+
+async function sendRegisterVerificationCode(role = state.registerRole) {
+  const phone = normalizePhone(getRegisterDraft(role).phone || "");
+  if (phone.length !== 11) {
+    throw new Error("请先填写正确的 11 位手机号。");
+  }
+  const payload = await apiRequest(`${API_BASE}/auth/send-code`, {
+    method: "POST",
+    body: {
+      sessionId: state.sessionId || getStoredSessionId(),
+      phone,
+      purpose: "register"
+    }
+  });
+  state.registerCodeCooldownUntil = Date.now() + Number(payload.cooldownSeconds || 60) * 1000;
+  setRegisterDraftValue(role, "verification_code", getRegisterDraft(role).verification_code || "");
+  state.authCodeHint = payload.debugCode ? `测试验证码：${payload.debugCode}` : "验证码已发送，请查收短信。";
+  state.registerSuccess = state.authCodeHint;
+  renderOverlay();
 }
 
 async function lookupAuthMatches(phone, { silent = false } = {}) {
@@ -2288,6 +2350,7 @@ function openRegister(role = state.selectedRole) {
   state.overlayReturnMode = null;
   state.registerUploadDrafts = {};
   state.registerFormDrafts = {};
+  state.registerCodeCooldownUntil = 0;
   state.registerWheelField = "";
   seedRegisterDraft(role);
   openOverlay("register");
@@ -2299,6 +2362,9 @@ function openAuth(role = state.selectedRole) {
   state.authPhone = remembered?.phone || "";
   state.authAccountId = remembered?.id || "";
   state.authRestoreToken = remembered?.restoreToken || "";
+  state.authVerificationCode = "";
+  state.authCodeCooldownUntil = 0;
+  state.authCodeHint = "";
   state.authMessage = "";
   state.authMatches = [];
   openOverlay("auth");
@@ -2850,6 +2916,63 @@ function renderField(field, seed) {
   `;
 }
 
+function renderAuthVerificationField() {
+  if (!isSmsVerificationEnabled()) return "";
+  const secondsLeft = Math.max(0, Math.ceil((state.authCodeCooldownUntil - Date.now()) / 1000));
+  return `
+    <div class="form-field">
+      <span>短信验证码 *</span>
+      <div class="verification-row">
+        <input
+          data-auth-code="1"
+          name="verification_code"
+          type="tel"
+          inputmode="numeric"
+          maxlength="6"
+          value="${escapeHtml(state.authVerificationCode)}"
+          placeholder="请输入短信验证码"
+          required
+        >
+        <button
+          class="mini-button ${secondsLeft ? "" : "mini-button--accent"}"
+          data-send-auth-code="1"
+          type="button"
+          ${secondsLeft ? "disabled" : ""}
+        >${secondsLeft ? escapeHtml(getSmsSendCooldown(secondsLeft)) : "发送验证码"}</button>
+      </div>
+      <small class="helper-note">${escapeHtml(state.authCodeHint || "换设备登录时使用短信验证码，同设备已登录会自动恢复。")}</small>
+    </div>
+  `;
+}
+
+function renderRegisterVerificationField() {
+  if (!isSmsVerificationEnabled()) return "";
+  const secondsLeft = Math.max(0, Math.ceil((state.registerCodeCooldownUntil - Date.now()) / 1000));
+  return `
+    <label class="form-field">
+      <span>短信验证码 *</span>
+      <div class="verification-row">
+        <input
+          name="verification_code"
+          type="tel"
+          inputmode="numeric"
+          maxlength="6"
+          value="${escapeHtml(getRegisterVerificationCode())}"
+          placeholder="请输入短信验证码"
+          required
+        >
+        <button
+          class="mini-button ${secondsLeft ? "" : "mini-button--accent"}"
+          data-send-register-code="1"
+          type="button"
+          ${secondsLeft ? "disabled" : ""}
+        >${secondsLeft ? escapeHtml(getSmsSendCooldown(secondsLeft)) : "发送验证码"}</button>
+      </div>
+      <small class="helper-note">新设备注册或绑定手机号时，用验证码确认本人操作。</small>
+    </label>
+  `;
+}
+
 function createProfilePosts(role, name, summary) {
   return [];
 }
@@ -2992,6 +3115,7 @@ async function upsertManagedProfile(role, formData) {
   await postAndSync(`${API_BASE}/register`, {
     role,
     profile: profilePayload,
+    verificationCode: isSmsVerificationEnabled() ? (formData.get("verification_code") || "").toString().trim() : "",
     account: state.managedAccounts[0]
       ? {
           accountId: state.managedAccounts[0].id,
@@ -3046,6 +3170,7 @@ async function submitAuthLogin() {
       await postAndSync(`${API_BASE}/auth/login`, {
         role,
         phone,
+        verificationCode: state.authVerificationCode,
         accountId: state.authAccountId,
         restoreToken: state.authRestoreToken
       }, { keepOverlay: true });
@@ -3061,6 +3186,7 @@ async function submitAuthLogin() {
       await postAndSync(`${API_BASE}/auth/login`, {
         role,
         phone,
+        verificationCode: state.authVerificationCode,
         accountId: "",
         restoreToken: ""
       }, { keepOverlay: true });
@@ -6098,7 +6224,7 @@ function renderWelcomeOverlay() {
           .join("")}
       </div>
       <div class="action-row">
-        <button class="mini-button" ${canLogout ? 'data-logout-account="1"' : 'data-close-overlay="1"'} type="button">${canLogout ? "退出登录" : "先看看"}</button>
+        <button class="mini-button" ${canLogout ? 'data-logout-account="1"' : 'data-close-overlay="1"'} type="button">退出登录</button>
         <button class="mini-button mini-button--accent" data-open-auth="${escapeHtml(state.selectedRole)}" type="button">登录已有账户</button>
       </div>
     </div>
@@ -6174,6 +6300,7 @@ function renderAuthOverlay() {
           <span>手机号 ${state.authAccountId ? "（可选，当前会优先用本机凭证恢复）" : "*"}</span>
           <input data-auth-phone="1" name="phone" type="tel" value="${escapeHtml(state.authPhone)}" placeholder="${escapeHtml(state.authAccountId ? "本机已保存账户凭证，也可以补填手机号" : "请输入注册时填写的手机号")}" ${state.authAccountId ? "" : "required"}>
         </label>
+        ${renderAuthVerificationField()}
         ${
           state.authMatches.length
             ? `
@@ -6198,11 +6325,11 @@ function renderAuthOverlay() {
             `
             : ""
         }
-        <button class="primary-submit" type="submit">登录这个身份</button>
+        <button class="primary-submit" type="submit">${isSmsVerificationEnabled() ? "验证码登录" : "登录这个身份"}</button>
         ${
           state.authMessage
             ? `<p class="helper-note">${escapeHtml(state.authMessage)}</p>`
-            : '<p class="helper-note">如果这个设备注册过账号，后面会优先自动恢复；换设备时，输入手机号后会自动识别可登录的身份。</p>'
+            : `<p class="helper-note">${isSmsVerificationEnabled() ? "同一设备后续会自动恢复；换设备时，请输入手机号并用短信验证码登录。" : "如果这个设备注册过账号，后面会优先自动恢复；换设备时，输入手机号后会自动识别可登录的身份。"}</p>`
         }
         <button class="text-link" data-open-register-from-auth="${escapeHtml(state.authRole)}" type="button">还没有账号？去注册</button>
       </form>
@@ -6282,12 +6409,19 @@ function renderRegisterOverlay() {
       </div>
 
       <form class="register-form" id="registerForm">
-        ${role.fields.map((field) => renderField(field, seed)).join("")}
+        ${role.fields
+          .flatMap((field) => {
+            if (field.name === "phone") {
+              return [renderField(field, seed), renderRegisterVerificationField()];
+            }
+            return [renderField(field, seed)];
+          })
+          .join("")}
         <button class="primary-submit" type="submit">提交${role.label}资料</button>
         ${
           state.registerSuccess
             ? `<p class="success-note">${escapeHtml(state.registerSuccess)}</p>`
-            : '<p class="helper-note">演示版会直接生成主页；正式版可接入验证码、地图选点、图片上传和审核流。</p>'
+            : `<p class="helper-note">${isSmsVerificationEnabled() ? "正式模式下会先校验手机号验证码，再创建或更新你的身份主页。" : "演示版会直接生成主页；正式版可接入验证码、地图选点、图片上传和审核流。"}</p>`
         }
         <button class="text-link" data-open-auth="${escapeHtml(state.registerRole)}" type="button">已有账号？去登录</button>
       </form>
@@ -6872,6 +7006,8 @@ overlay.addEventListener("click", (event) => {
   if (target.dataset.registerRole) {
     state.registerRole = target.dataset.registerRole;
     seedRegisterDraft(state.registerRole);
+    state.registerCodeCooldownUntil = 0;
+    setRegisterDraftValue(state.registerRole, "verification_code", getRegisterDraft(state.registerRole).verification_code || "");
     state.registerWheelField = "";
     renderOverlay();
     return;
@@ -6911,6 +7047,16 @@ overlay.addEventListener("click", (event) => {
     }
     state.authMessage = "";
     renderOverlay();
+    return;
+  }
+
+  if (target.dataset.sendAuthCode) {
+    runTask(() => sendAuthVerificationCode());
+    return;
+  }
+
+  if (target.dataset.sendRegisterCode) {
+    runTask(() => sendRegisterVerificationCode());
     return;
   }
 
@@ -6969,6 +7115,7 @@ overlay.addEventListener("input", (event) => {
     const nextPhone = event.target.value;
     if (normalizePhone(nextPhone) !== normalizePhone(state.authPhone)) {
       clearAuthResolution();
+      state.authCodeCooldownUntil = 0;
       state.authMessage = "";
       if (authLookupTimeout) {
         window.clearTimeout(authLookupTimeout);
@@ -6986,6 +7133,10 @@ overlay.addEventListener("input", (event) => {
         });
       }, 220);
     }
+  }
+
+  if (event.target.dataset.authCode) {
+    state.authVerificationCode = event.target.value;
   }
 
   if (event.target.dataset.composeContent) {
