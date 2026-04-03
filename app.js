@@ -1921,6 +1921,30 @@ function getDiscoverProfiles() {
     .slice(0, 6);
 }
 
+function getLocationDistrictLabel(profile) {
+  const raw = String(profile?.locationLabel || profile?.location || "").trim();
+  if (!raw) return "";
+  const segments = raw.split("·").map((item) => item.trim()).filter(Boolean);
+  return segments[1] || segments[0] || "";
+}
+
+function buildRecommendedCandidate(profile) {
+  const distanceMeters = getDistanceMeters(state.userPosition, {
+    lat: profile.lat,
+    lng: profile.lng
+  });
+  const district = getLocationDistrictLabel(profile);
+  const currentDistrict = String(state.userPosition.district || "").trim();
+  const sameDistrict = Boolean(district && currentDistrict && district.includes(currentDistrict));
+  const sameCity = profile.city === state.userPosition.city;
+  return {
+    ...profile,
+    distanceMeters,
+    sameCity,
+    sameDistrict
+  };
+}
+
 function getRelativeMinutes(label = "") {
   const value = String(label).trim();
   if (!value) return 12 * 60;
@@ -1943,23 +1967,96 @@ function getRelativeMinutes(label = "") {
 
 function getRecommendedProfiles() {
   const actor = getCurrentActor();
-  return state.profiles
+  const candidates = state.profiles
     .filter(
       (profile) =>
         profile.id !== actor?.id &&
         profile.listed &&
         !state.followSet.has(profile.id)
     )
-    .map((profile) => ({
-      ...profile,
-      sameCity: profile.city === state.userPosition.city ? 1 : 0
-    }))
+    .map((profile) => buildRecommendedCandidate(profile));
+
+  if (!candidates.length) return [];
+
+  const used = new Set();
+  const recommendations = [];
+  const targetCount = candidates.length <= 15 ? candidates.length : 12;
+
+  function addFromPool(pool, limit, reasonLabel, detailFormatter) {
+    for (const profile of pool) {
+      if (recommendations.length >= targetCount || limit <= 0) break;
+      if (used.has(profile.id)) continue;
+      used.add(profile.id);
+      recommendations.push({
+        ...profile,
+        recommendReason: reasonLabel,
+        recommendDetail: detailFormatter(profile)
+      });
+      limit -= 1;
+    }
+  }
+
+  const nearbyPool = [...candidates]
+    .filter((profile) => profile.sameCity || profile.distanceMeters <= 12000)
     .sort((left, right) => {
-      if (right.sameCity !== left.sameCity) return right.sameCity - left.sameCity;
+      if (right.sameDistrict !== left.sameDistrict) return Number(right.sameDistrict) - Number(left.sameDistrict);
+      if (right.sameCity !== left.sameCity) return Number(right.sameCity) - Number(left.sameCity);
+      if (left.distanceMeters !== right.distanceMeters) return left.distanceMeters - right.distanceMeters;
+      if (right.followers !== left.followers) return right.followers - left.followers;
+      return right.ratingAvg - left.ratingAvg;
+    });
+
+  const followersPool = [...candidates].sort((left, right) => {
+    if (right.followers !== left.followers) return right.followers - left.followers;
+    if (right.ratingAvg !== left.ratingAvg) return right.ratingAvg - left.ratingAvg;
+    return left.distanceMeters - right.distanceMeters;
+  });
+
+  const ratingPool = [...candidates]
+    .filter((profile) => Number(profile.ratingCount || 0) > 0)
+    .sort((left, right) => {
       if (right.ratingAvg !== left.ratingAvg) return right.ratingAvg - left.ratingAvg;
-      return right.followers - left.followers;
-    })
-    .slice(0, 8);
+      if (right.ratingCount !== left.ratingCount) return right.ratingCount - left.ratingCount;
+      if (right.followers !== left.followers) return right.followers - left.followers;
+      return left.distanceMeters - right.distanceMeters;
+    });
+
+  addFromPool(
+    nearbyPool,
+    Math.min(5, targetCount),
+    "可能认识",
+    (profile) =>
+      `${profile.sameDistrict ? "同片区" : profile.sameCity ? "同城附近" : "附近用户"} · ${formatDistance(profile.distanceMeters)}`
+  );
+  addFromPool(
+    followersPool,
+    Math.min(4, targetCount - recommendations.length),
+    "粉丝较多",
+    (profile) => `${profile.followers || 0} 粉丝`
+  );
+  addFromPool(
+    ratingPool,
+    Math.min(4, targetCount - recommendations.length),
+    "评分较高",
+    (profile) => `${Number(profile.ratingAvg || 0).toFixed(1)} 分 · ${profile.ratingCount || 0} 条评分`
+  );
+
+  const fallbackPool = [...candidates].sort((left, right) => {
+    if (right.sameCity !== left.sameCity) return Number(right.sameCity) - Number(left.sameCity);
+    if (right.followers !== left.followers) return right.followers - left.followers;
+    if (right.ratingAvg !== left.ratingAvg) return right.ratingAvg - left.ratingAvg;
+    return left.distanceMeters - right.distanceMeters;
+  });
+
+  addFromPool(
+    fallbackPool,
+    targetCount - recommendations.length,
+    "值得关注",
+    (profile) =>
+      profile.sameCity ? `${profile.city || "同城"} · ${formatDistance(profile.distanceMeters)}` : `${profile.city || "附近"}`
+  );
+
+  return recommendations;
 }
 
 function getFollowedProfiles() {
@@ -3257,7 +3354,7 @@ function renderDiscover() {
     <section class="section-title-row section-title-row--discover-recommended">
       <div>
         <h3>推荐关注</h3>
-        <p class="result-tip">优先推荐附近的健身房、教练和健身搭子</p>
+        <p class="result-tip">按可能认识、粉丝较多、评分较高三类推荐，优先展示附近的人</p>
       </div>
       <button class="text-link" data-open-profile="${managedProfile?.id || ""}" type="button">我的主页</button>
     </section>
@@ -3271,6 +3368,7 @@ function renderDiscover() {
                 ${renderAvatarMarkup(profile, "avatar avatar--discover")}
                 <strong>${escapeHtml(profile.name)}</strong>
                 <p>${escapeHtml(getRoleLabel(profile.role))}</p>
+                <small class="discover-avatar-reason">${escapeHtml(profile.recommendReason || "推荐关注")} · ${escapeHtml(profile.recommendDetail || "")}</small>
               </button>
               <button class="follow-button" data-toggle-follow="${profile.id}" type="button">关注</button>
             </article>
@@ -6740,7 +6838,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260403-2`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260403-3`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

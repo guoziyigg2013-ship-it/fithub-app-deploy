@@ -887,6 +887,14 @@ body.is-workout-live .app {
   line-height: 1.4;
 }
 
+.discover-avatar-reason {
+  display: block;
+  margin-top: 2px;
+  color: #9a7b5a;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .section-title-row--discover-feed {
   margin-top: 20px;
 }
