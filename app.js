@@ -979,6 +979,7 @@ const state = {
   currentActorProfileId: "",
   activeProfileId: "",
   followSet: new Set(),
+  followerSet: new Set(),
   ratingDrafts: {},
   reviewDrafts: {},
   commentDrafts: {},
@@ -1000,6 +1001,7 @@ const state = {
   outdoorShareCheckinId: "",
   chatTargetProfileId: "",
   chatDraft: "",
+  socialTab: "following",
   sessionId: "",
   runtimeConfig: { ...DEFAULT_RUNTIME_CONFIG },
   isBootstrapping: false
@@ -1271,7 +1273,8 @@ function normalizeActiveAccount(item) {
     role: roleConfig[item?.role] ? item.role : "",
     phone: normalizePhone(item?.phone),
     accountId: item?.accountId || item?.id || "",
-    restoreToken: item?.restoreToken || ""
+    restoreToken: item?.restoreToken || "",
+    profileId: item?.profileId || ""
   };
 }
 
@@ -1284,12 +1287,13 @@ function getStoredActiveAccount() {
   }
 }
 
-function rememberActiveAccount(role, phone, accountId = "", restoreToken = "") {
+function rememberActiveAccount(role, phone, accountId = "", restoreToken = "", profileId = "") {
   const normalized = normalizeActiveAccount({
     role,
     phone,
     accountId,
-    restoreToken
+    restoreToken,
+    profileId
   });
   if (!normalized.role && !normalized.phone && !normalized.accountId) return;
   try {
@@ -1363,11 +1367,15 @@ async function lookupAuthMatches(phone, { silent = false } = {}) {
   return state.authMatches;
 }
 
-function findRecoverableSnapshotProfile(role, phone) {
+function findRecoverableSnapshotProfile(role, phone, profileId = "") {
   const phoneKey = normalizePhone(phone);
   if (!roleConfig[role] || !phoneKey) return null;
 
-  const backup = getStoredProfileBackups().find((item) => {
+  const backups = getStoredProfileBackups();
+  const exactBackup = profileId
+    ? backups.find((item) => item?.profile?.id === profileId)
+    : null;
+  const backup = exactBackup || backups.find((item) => {
     return item?.role === role && normalizePhone(item?.phone) === phoneKey && item?.profile;
   });
   if (backup?.profile) {
@@ -1378,8 +1386,9 @@ function findRecoverableSnapshotProfile(role, phone) {
   const profiles = Array.isArray(snapshot?.profiles) ? snapshot.profiles : [];
   const managedIds = new Set(snapshot?.session?.managedProfileIds || []);
 
+  const exactProfile = profileId ? profiles.find((profile) => profile?.id === profileId) : null;
   return (
-    profiles.find((profile) => {
+    exactProfile || profiles.find((profile) => {
       if (!profile || profile.role !== role) return false;
       if (normalizePhone(profile.phone) !== phoneKey) return false;
       return !managedIds.size || managedIds.has(profile.id);
@@ -1424,7 +1433,7 @@ function buildSnapshotRecoveryProfile(profile) {
 }
 
 async function recoverAccountFromSnapshot(role, phone) {
-  const cachedProfile = findRecoverableSnapshotProfile(role, phone);
+  const cachedProfile = findRecoverableSnapshotProfile(role, phone, preferred?.profileId || "");
   if (!cachedProfile) return false;
 
   await postAndSync(`${API_BASE}/auth/recover-local`, {
@@ -1478,6 +1487,7 @@ function bootstrapRememberedAccountLocally() {
       },
       profiles: mergedProfiles,
       followSet: snapshot?.followSet || [],
+      followerSet: snapshot?.followerSet || [],
       bookings: snapshot?.bookings || [],
       threads: snapshot?.threads || []
     },
@@ -1589,6 +1599,7 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
     ? previousCurrentActorProfileId || previousManagedIds[0] || ""
     : payload.session.currentActorProfileId || state.managedProfileIds[0] || "";
   state.followSet = new Set(payload.followSet || []);
+  state.followerSet = new Set(payload.followerSet || []);
   state.bookings = payload.bookings || [];
   state.threads = payload.threads || [];
   state.composeProfileId = state.composeProfileId || state.currentActorProfileId || state.managedProfileIds[0] || "";
@@ -1605,7 +1616,8 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
       activeProfile.role,
       matchedAccount?.phone || activeProfile.phone || "",
       matchedAccount?.id || "",
-      matchedAccount?.restoreToken || ""
+      matchedAccount?.restoreToken || "",
+      activeProfile.id || ""
     );
   }
 
@@ -2073,6 +2085,51 @@ function getFollowedProfiles() {
       if (right.ratingAvg !== left.ratingAvg) return right.ratingAvg - left.ratingAvg;
       return String(left.name).localeCompare(String(right.name), "zh-Hans-CN");
     });
+}
+
+function getFollowerProfiles() {
+  const actor = getCurrentActor();
+  return state.profiles
+    .filter(
+      (profile) =>
+        profile.listed &&
+        profile.id !== actor?.id &&
+        state.followerSet.has(profile.id)
+    )
+    .sort((left, right) => {
+      if (right.followers !== left.followers) return right.followers - left.followers;
+      if (right.ratingAvg !== left.ratingAvg) return right.ratingAvg - left.ratingAvg;
+      return String(left.name).localeCompare(String(right.name), "zh-Hans-CN");
+    });
+}
+
+function getBookingsForProfile(profile, direction = "") {
+  if (!profile?.id) return [];
+  const items = (state.bookings || []).filter((item) => {
+    const matchesIncoming = item.targetProfileId === profile.id || (item.direction === "incoming" && item.targetProfileId === profile.id);
+    const matchesOutgoing = item.createdByProfileId === profile.id || (item.direction === "outgoing" && item.createdByProfileId === profile.id);
+    if (direction === "incoming") return matchesIncoming;
+    if (direction === "outgoing") return matchesOutgoing;
+    return matchesIncoming || matchesOutgoing;
+  });
+  return [...items].sort(
+    (left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime()
+  );
+}
+
+function getRelevantBookingsForProfile(profile) {
+  if (!profile) return [];
+  return profile.role === "enthusiast"
+    ? getBookingsForProfile(profile, "outgoing")
+    : getBookingsForProfile(profile, "incoming");
+}
+
+function getIncomingBookings(profile) {
+  return getBookingsForProfile(profile, "incoming");
+}
+
+function getOutgoingBookings(profile) {
+  return getBookingsForProfile(profile, "outgoing");
 }
 
 function getFollowingFeedItems() {
@@ -3412,8 +3469,13 @@ function renderDiscover() {
 
 function renderBooking() {
   const myProfile = getMyPageProfile();
-  const bookingList = state.bookings || [];
+  const bookingList = myProfile ? getRelevantBookingsForProfile(myProfile) : [];
   const bookingDashboard = myProfile ? getBookingDashboard(myProfile) : { pendingCount: 0, weeklyCheckins: 0, points: 0 };
+  const emptyText = myProfile?.role === "enthusiast"
+    ? "你还没有正式预约。去首页、探索或教练/场馆主页选择价格方案后，这里才会出现排期和订单。"
+    : myProfile?.role === "coach"
+      ? "现在还没有学员给你发来预约。完善课程价格、动态和主页介绍后，这里会出现新的订单。"
+      : "现在还没有用户预约你的场馆。完善设施、价格和主页后，这里会出现新的订单。";
   appView.innerHTML = `
     <section class="page-header">
       <div>
@@ -3425,7 +3487,7 @@ function renderBooking() {
 
     <article class="summary-card">
       <div>
-        <span>本周待上课</span>
+        <span>${escapeHtml(bookingDashboard.pendingLabel || "本周待上课")}</span>
         <strong>${bookingDashboard.pendingCount}</strong>
       </div>
       <div>
@@ -3439,34 +3501,15 @@ function renderBooking() {
     </article>
 
     <section class="stack-list">
-      ${bookingList.length
-        ? bookingList
-            .map(
-              (card) => `
-                <article class="booking-card">
-                  <div class="booking-top">
-                    <strong>${escapeHtml(card.title)}</strong>
-                    <span class="status-pill">${escapeHtml(card.status)}</span>
-                  </div>
-                  <p>${escapeHtml(card.place)}</p>
-                  <div class="community-meta">
-                    <span>${escapeHtml(card.price || "待确认")}</span>
-                    <span>${escapeHtml(card.time)}</span>
-                  </div>
-                  <div class="booking-bottom">
-                    <span>支持查看订单详情、跳转主页和后续评分。</span>
-                    <button class="cta" type="button" data-open-profile="${card.profileId || card.targetProfileId || ""}">${escapeHtml(card.action)}</button>
-                  </div>
-                </article>
-              `
-            )
-            .join("")
-        : '<article class="empty-card">你还没有正式预约。去首页、探索或教练/场馆主页选择价格方案后，这里才会出现排期和订单。</article>'}
+      ${renderManagedBookingList(myProfile, bookingList, {
+        emptyText,
+        primaryAction: myProfile?.role === "enthusiast" ? "查看主页" : "查看预约"
+      })}
     </section>
 
     <article class="helper-card">
       <strong>预约说明</strong>
-      <p>教练与健身房的定价会同步展示在首页卡片、主页定价模块和探索流里；完成正式预约后，本页才会出现待上课与订单内容。</p>
+      <p>${myProfile?.role === "enthusiast" ? "教练与健身房的定价会同步展示在首页卡片、主页定价模块和探索流里；完成正式预约后，本页才会出现待上课与订单内容。" : "现在这页会优先展示别人给你的订单和预约消息，方便教练与健身房直接管理到店与排期。"}</p>
     </article>
   `;
 }
@@ -4241,6 +4284,30 @@ function getProfilePoints(profile, bookings = []) {
   return weeklyCheckins * 12 + completedBookings * 18;
 }
 
+function getManagedDashboardStats(profile) {
+  if (!profile) return [];
+
+  if (profile.role === "enthusiast") {
+    const stats = getPersonalDashboard(profile);
+    return [
+      { value: stats.trainingScore, label: "练时" },
+      { value: stats.todayTraining, label: "今日训练" },
+      { value: stats.badges, label: "勋章" }
+    ];
+  }
+
+  const incomingBookings = getIncomingBookings(profile);
+  const pendingCount = incomingBookings.filter((item) => ["待上课", "待确认", "已预约"].includes(item.status)).length;
+  const todayOrders = incomingBookings.filter((item) => isSameLocalDay(getSafeDate(item.createdAt), new Date())).length;
+  const ratingValue = profile.ratingCount ? getRatingDisplay(profile) : "新入驻";
+
+  return [
+    { value: String(pendingCount), label: profile.role === "coach" ? "待上课" : "待到店" },
+    { value: String(todayOrders), label: "今日预约" },
+    { value: ratingValue, label: "评分" }
+  ];
+}
+
 function getPersonalDashboard(profile) {
   const checkins = getProfileCheckins(profile);
   const todayCheckins = getTodayCheckins(profile);
@@ -4259,8 +4326,10 @@ function getPersonalDashboard(profile) {
 }
 
 function getBookingDashboard(profile) {
-  const bookings = state.bookings || [];
+  const bookings = getRelevantBookingsForProfile(profile);
+  const pendingLabel = profile?.role === "enthusiast" ? "本周待上课" : profile?.role === "coach" ? "待上课" : "待到店";
   return {
+    pendingLabel,
     pendingCount: bookings.filter((item) => ["待上课", "待确认", "已预约"].includes(item.status)).length,
     weeklyCheckins: getWeeklyCheckins(profile).length,
     points: getProfilePoints(profile, bookings)
@@ -4274,6 +4343,168 @@ function renderPersonalShortcutTile(label, sublabel, icon, attrs = "") {
       <strong>${escapeHtml(label)}</strong>
       <span>${escapeHtml(sublabel)}</span>
     </button>
+  `;
+}
+
+function renderSocialTabs(activeTab) {
+  return `
+    <div class="social-tabs">
+      <button class="social-tab ${activeTab === "following" ? "is-active" : ""}" data-set-social-tab="following" type="button">
+        我关注的
+      </button>
+      <button class="social-tab ${activeTab === "followers" ? "is-active" : ""}" data-set-social-tab="followers" type="button">
+        我的粉丝
+      </button>
+    </div>
+  `;
+}
+
+function renderSocialProfilesSection(mode = "following") {
+  const profiles = mode === "followers" ? getFollowerProfiles() : getFollowedProfiles();
+  const emptyText =
+    mode === "followers"
+      ? "你还没有新的粉丝，继续发布动态、完善主页和接收预约后，这里会慢慢热闹起来。"
+      : "你还没有关注任何对象，先去探索页点几个感兴趣的人或场馆吧。";
+
+  return `
+    ${renderSocialTabs(mode)}
+    <section class="feature-follow-list">
+      ${
+        profiles.length
+          ? profiles
+              .map(
+                (item) => `
+                  <article class="feature-follow-item">
+                    <button class="feature-follow-main" data-open-profile="${item.id}" type="button">
+                      ${renderAvatarMarkup(item, "avatar")}
+                      <div>
+                        <strong>${escapeHtml(item.name)}</strong>
+                        <p>${escapeHtml(getRoleLabel(item.role))} · ${escapeHtml(item.locationLabel || item.city || "未填写位置")}</p>
+                      </div>
+                    </button>
+                    ${
+                      mode === "following"
+                        ? `<button class="follow-button is-active" data-toggle-follow="${item.id}" type="button">已关注</button>`
+                        : `<button class="mini-button" data-open-chat="${item.id}" type="button">回关/私信</button>`
+                    }
+                  </article>
+                `
+              )
+              .join("")
+          : `<article class="empty-card">${emptyText}</article>`
+      }
+    </section>
+  `;
+}
+
+function renderManagedBookingList(profile, bookings, { emptyText = "", primaryAction = "查看主页" } = {}) {
+  const profileRole = profile?.role || "enthusiast";
+  if (!bookings.length) {
+    return `<article class="empty-card">${emptyText}</article>`;
+  }
+
+  return `
+    <section class="stack-list">
+      ${bookings
+        .map((card) => {
+          const counterpartLabel = card.counterpartProfileName || card.targetProfileName || "平台用户";
+          const counterpartRole = getRoleLabel(card.counterpartProfileRole || "");
+          const metaLeft = profileRole === "enthusiast"
+            ? `${counterpartLabel} · ${counterpartRole || "服务方"}`
+            : `${counterpartLabel} · ${counterpartRole || "预约人"}`;
+          return `
+            <article class="booking-card">
+              <div class="booking-top">
+                <strong>${escapeHtml(card.title || `${counterpartLabel} · 预约记录`)}</strong>
+                <span class="status-pill">${escapeHtml(card.status || "待确认")}</span>
+              </div>
+              <p>${escapeHtml(metaLeft)}</p>
+              <div class="community-meta">
+                <span>${escapeHtml(card.price || "待确认")}</span>
+                <span>${escapeHtml(card.time || "待确认")}</span>
+              </div>
+              <div class="booking-bottom">
+                <span>${escapeHtml(card.place || card.counterpartLocationLabel || "位置待确认")}</span>
+                <button class="cta" type="button" data-open-profile="${card.counterpartProfileId || card.targetProfileId || card.createdByProfileId || ""}">
+                  ${escapeHtml(primaryAction)}
+                </button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")}
+    </section>
+  `;
+}
+
+function renderMessagesFeature(profile) {
+  const threads = (state.threads || []).filter(Boolean);
+  if (!threads.length) {
+    return '<article class="empty-card">还没有新的私信咨询。被关注后，用户给你发送的消息会集中显示在这里。</article>';
+  }
+
+  return `
+    <section class="stack-list">
+      ${threads
+        .map(
+          (thread) => `
+            <article class="feature-follow-item">
+              <button class="feature-follow-main" data-open-chat="${thread.withProfileId}" type="button">
+                ${renderAvatarMarkup({ name: thread.withProfileName, avatarImage: thread.withProfileAvatarImage, role: "enthusiast" }, "avatar")}
+                <div>
+                  <strong>${escapeHtml(thread.withProfileName)}</strong>
+                  <p>${escapeHtml(thread.lastMessage?.text || "打开查看最新消息")}</p>
+                </div>
+              </button>
+              <button class="mini-button" data-open-chat="${thread.withProfileId}" type="button">查看</button>
+            </article>
+          `
+        )
+        .join("")}
+    </section>
+  `;
+}
+
+function renderReviewsFeature(profile) {
+  if (profile.role === "enthusiast") {
+    return `
+      <article class="detail-card">
+        <p class="result-tip">当前训练者身份不展示公开评分，继续打卡和互动会沉淀到你的主页与动态。</p>
+      </article>
+    `;
+  }
+
+  const reviews = Array.isArray(profile.reviews) ? profile.reviews : [];
+  return `
+    <article class="detail-card">
+      <div class="section-title-row">
+        <div>
+          <h3>${profile.role === "coach" ? "学员评分" : "场馆评分"}</h3>
+          <p class="result-tip">${profile.ratingCount ? `当前平均 ${getRatingDisplay(profile)} 分，共 ${profile.ratingCount} 条评分。` : "现在还没有用户评分，完成第一笔预约后这里会开始积累评价。"}</p>
+        </div>
+      </div>
+      ${
+        reviews.length
+          ? `
+              <section class="review-list">
+                ${reviews
+                  .map(
+                    (review) => `
+                      <article class="review-card detail-card">
+                        <div class="review-head">
+                          <strong>${escapeHtml(review.author || "平台用户")}</strong>
+                          <span>${escapeHtml(`${review.score} 星 · ${review.time}`)}</span>
+                        </div>
+                        <p>${escapeHtml(review.text || "刚刚完成一次评分。")}</p>
+                      </article>
+                    `
+                  )
+                  .join("")}
+              </section>
+            `
+          : '<article class="empty-card">还没有新的评分，先让用户完成一次预约和训练体验吧。</article>'
+      }
+    </article>
   `;
 }
 
@@ -5224,7 +5455,49 @@ function renderHealthFeature(profile) {
 }
 
 function renderPersonalDashboardPage(profile, managedProfiles) {
-  const stats = getPersonalDashboard(profile);
+  const stats = getManagedDashboardStats(profile);
+  const relatedBookings = getRelevantBookingsForProfile(profile);
+  const shortcutTiles =
+    profile.role === "enthusiast"
+      ? [
+          renderPersonalShortcutTile("账户", "资料与安全", "账", 'data-open-my-feature="account"'),
+          renderPersonalShortcutTile("打卡", "记录运动项目", "卡", 'data-open-my-feature="checkin"'),
+          renderPersonalShortcutTile("订单", "预约记录", "单", 'data-open-my-feature="orders"'),
+          renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
+          renderPersonalShortcutTile("粉丝", `${state.followerSet.size} 位关注你`, "粉", 'data-open-my-feature="followers"'),
+          renderPersonalShortcutTile("积分", `${getProfilePoints(profile, relatedBookings)} 分`, "分", 'data-open-my-feature="points"'),
+          renderPersonalShortcutTile("预约", "查看排期", "约", 'data-open-my-feature="schedule"'),
+          renderPersonalShortcutTile("健康", "BMI 与设备", "健", 'data-open-my-feature="health"'),
+          renderPersonalShortcutTile("动态", `${profile.posts?.length || 0} 条记录`, "圈", 'data-open-my-feature="moments"')
+        ]
+      : [
+          renderPersonalShortcutTile("账户", "资料与主页", "账", 'data-open-my-feature="account"'),
+          renderPersonalShortcutTile("订单", `别人给我的 ${relatedBookings.length} 单`, "单", 'data-open-my-feature="orders"'),
+          renderPersonalShortcutTile("预约", "别人对我的预约", "约", 'data-open-my-feature="schedule"'),
+          renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
+          renderPersonalShortcutTile("粉丝", `${state.followerSet.size} 位关注你`, "粉", 'data-open-my-feature="followers"'),
+          renderPersonalShortcutTile("评分", profile.ratingCount ? `${getRatingDisplay(profile)} 分` : "等待评分", "评", 'data-open-my-feature="reviews"'),
+          renderPersonalShortcutTile("消息", `${state.threads.length} 条咨询`, "信", 'data-open-my-feature="messages"'),
+          renderPersonalShortcutTile("动态", `${profile.posts?.length || 0} 条记录`, "圈", 'data-open-my-feature="moments"')
+        ];
+  const roleSummary =
+    profile.role === "enthusiast"
+      ? renderCheckinEntry(profile)
+      : `
+          <article class="dashboard-summary dashboard-summary--managed">
+            <div class="section-title-row">
+              <div>
+                <h3>${profile.role === "coach" ? "最近收到的预约" : "最近收到的订单"}</h3>
+                <p class="result-tip">${profile.role === "coach" ? "用户预约你的私教课程后，会优先出现在这里。" : "用户预约你的场馆后，会优先出现在这里。"}</p>
+              </div>
+              <button class="mini-button mini-button--accent" data-open-my-feature="schedule" type="button">查看全部</button>
+            </div>
+            ${renderManagedBookingList(profile, relatedBookings.slice(0, 2), {
+              emptyText: profile.role === "coach" ? "暂时还没有人预约你，完善主页和价格后，这里会出现新的预约消息。" : "暂时还没有人预约你的场馆，完善主页和价格后，这里会出现新的到店订单。",
+              primaryAction: "查看预约"
+            })}
+          </article>
+        `;
 
   return `
     <section class="managed-strip managed-strip--dashboard">
@@ -5253,21 +5526,19 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
       </div>
 
       <div class="dashboard-stats">
-        <div>
-          <strong>${escapeHtml(stats.trainingScore)}</strong>
-          <span>练时</span>
-        </div>
-        <div>
-          <strong>${escapeHtml(stats.todayTraining)}</strong>
-          <span>今日训练</span>
-        </div>
-        <div>
-          <strong>${escapeHtml(stats.badges)}</strong>
-          <span>勋章</span>
-        </div>
+        ${stats
+          .map(
+            (item) => `
+              <div>
+                <strong>${escapeHtml(item.value)}</strong>
+                <span>${escapeHtml(item.label)}</span>
+              </div>
+            `
+          )
+          .join("")}
       </div>
 
-      ${renderCheckinEntry(profile)}
+      ${roleSummary}
     </article>
 
     <section class="account-section">
@@ -5276,14 +5547,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
         <button class="text-link" data-open-role-picker="1" type="button">切换身份</button>
       </div>
       <div class="account-grid">
-        ${renderPersonalShortcutTile("账户", "资料与安全", "账", 'data-open-my-feature="account"')}
-        ${renderPersonalShortcutTile("打卡", "记录运动项目", "卡", 'data-open-my-feature="checkin"')}
-        ${renderPersonalShortcutTile("订单", "预约记录", "单", 'data-open-my-feature="orders"')}
-        ${renderPersonalShortcutTile("关注", "收藏与关注", "关", 'data-open-my-feature="favorites"')}
-        ${renderPersonalShortcutTile("积分", `${getProfilePoints(profile, state.bookings || [])} 分`, "分", 'data-open-my-feature="points"')}
-        ${renderPersonalShortcutTile("预约", "查看排期", "约", 'data-open-my-feature="schedule"')}
-        ${renderPersonalShortcutTile("健康", "BMI 与设备", "健", 'data-open-my-feature="health"')}
-        ${renderPersonalShortcutTile("动态", `${profile.posts?.length || 0} 条记录`, "圈", 'data-open-my-feature="moments"')}
+        ${shortcutTiles.join("")}
       </div>
     </section>
 
@@ -5329,8 +5593,11 @@ function renderFavoriteProfilesSection() {
 }
 
 function renderMyFeaturePage(profile, managedProfiles, feature) {
-  const bookings = state.bookings || [];
-  const emptyBookingMarkup = '<article class="empty-card">你还没有正式预约。去首页、探索或教练/场馆主页完成第一次预约后，这里才会出现记录。</article>';
+  const bookings = getRelevantBookingsForProfile(profile);
+  const incomingBookings = getIncomingBookings(profile);
+  const socialTab = feature === "followers" ? "followers" : state.socialTab || "following";
+  const emptyOutgoingBookingMarkup = '<article class="empty-card">你还没有正式预约。去首页、探索或教练/场馆主页完成第一次预约后，这里才会出现记录。</article>';
+  const emptyIncomingBookingMarkup = `<article class="empty-card">${profile.role === "coach" ? "暂时还没有学员预约你，完善主页、价格和动态后，这里会出现新的预约消息。" : "暂时还没有用户预约你的场馆，完善主页、价格和设施信息后，这里会出现新的订单。"}</article>`;
   if (feature === "checkin" && state.workoutSession) {
     return `
       <section class="profile-subpage-stack profile-subpage-stack--live">
@@ -5378,9 +5645,34 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
               <strong>${escapeHtml(profile.gender || "未填写")}</strong>
             </div>
             <div class="detail-item">
-              <span>身高 / 体重</span>
-              <strong>${escapeHtml(`${profile.heightCm || "--"} cm / ${profile.weightKg || "--"} kg`)}</strong>
+              <span>${profile.role === "enthusiast" ? "身高 / 体重" : "所在区域"}</span>
+              <strong>${escapeHtml(profile.role === "enthusiast" ? `${profile.heightCm || "--"} cm / ${profile.weightKg || "--"} kg` : profile.locationLabel || state.userPosition.label)}</strong>
             </div>
+            ${
+              profile.role === "coach"
+                ? `
+                  <div class="detail-item">
+                    <span>课程定价</span>
+                    <strong>${escapeHtml(profile.price || "待设置")}</strong>
+                  </div>
+                  <div class="detail-item">
+                    <span>从业时间</span>
+                    <strong>${escapeHtml(profile.years ? `${profile.years} 年` : "未填写")}</strong>
+                  </div>
+                `
+                : profile.role === "gym"
+                  ? `
+                    <div class="detail-item">
+                      <span>会员定价</span>
+                      <strong>${escapeHtml(profile.price || "待设置")}</strong>
+                    </div>
+                    <div class="detail-item">
+                      <span>营业时间</span>
+                      <strong>${escapeHtml(profile.hours || "未填写")}</strong>
+                    </div>
+                  `
+                  : ""
+            }
           </div>
         </article>
       `
@@ -5402,32 +5694,21 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
     },
     orders: {
       title: "订单",
-      subtitle: "查看最近预约、付款与订单状态",
-      content: `
-        <section class="stack-list">
-          ${bookings.length
-            ? bookings
-                .map(
-                  (card) => `
-                    <article class="booking-card">
-                      <div class="booking-top">
-                        <strong>${escapeHtml(card.title)}</strong>
-                        <span class="status-pill">${escapeHtml(card.status)}</span>
-                      </div>
-                      <p>${escapeHtml(card.place)}</p>
-                      <div class="community-meta"><span>${escapeHtml(card.price || "待确认")}</span><span>${escapeHtml(card.time)}</span></div>
-                    </article>
-                  `
-                )
-                .join("")
-            : emptyBookingMarkup}
-        </section>
-      `
+      subtitle: profile.role === "enthusiast" ? "查看最近预约、付款与订单状态" : "查看别人给我的订单、预约和待服务记录",
+      content: renderManagedBookingList(profile, bookings, {
+        emptyText: profile.role === "enthusiast" ? "你还没有正式预约。去首页、探索或教练/场馆主页完成第一次预约后，这里才会出现记录。" : emptyIncomingBookingMarkup.replace(/<\/?article[^>]*>/g, ""),
+        primaryAction: profile.role === "enthusiast" ? "查看主页" : "联系对方"
+      })
     },
     favorites: {
-      title: "收藏",
-      subtitle: "这里集中展示你已经关注的用户、教练和健身房",
-      content: renderFavoriteProfilesSection()
+      title: "关注",
+      subtitle: "这里集中展示你已经关注的人，以及正在关注你的粉丝",
+      content: renderSocialProfilesSection(socialTab)
+    },
+    followers: {
+      title: "粉丝",
+      subtitle: "查看已经关注你的用户、教练和健身房",
+      content: renderSocialProfilesSection("followers")
     },
     points: {
       title: "积分",
@@ -5458,36 +5739,26 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
     },
     schedule: {
       title: "预约",
-      subtitle: "查看你的课程排期与待上课记录",
-      content: `
-        <section class="stack-list">
-          ${bookings.length
-            ? bookings
-                .map(
-                  (card) => `
-                    <article class="booking-card">
-                      <div class="booking-top">
-                        <strong>${escapeHtml(card.title)}</strong>
-                        <span class="status-pill">${escapeHtml(card.status)}</span>
-                      </div>
-                      <p>${escapeHtml(card.place)}</p>
-                      <div class="community-meta"><span>${escapeHtml(card.time)}</span><span>${escapeHtml(card.price || "待确认")}</span></div>
-                      <div class="booking-bottom">
-                        <span>支持继续测试预约与价格展示</span>
-                        <button class="cta" data-go-booking="1" type="button">去订单页</button>
-                      </div>
-                    </article>
-                  `
-                )
-                .join("")
-            : emptyBookingMarkup}
-        </section>
-      `
+      subtitle: profile.role === "enthusiast" ? "查看你的课程排期与待上课记录" : "查看别人对你的预约、待接待和服务排期",
+      content: renderManagedBookingList(profile, profile.role === "enthusiast" ? bookings : incomingBookings, {
+        emptyText: profile.role === "enthusiast" ? emptyOutgoingBookingMarkup.replace(/<\/?article[^>]*>/g, "") : emptyIncomingBookingMarkup.replace(/<\/?article[^>]*>/g, ""),
+        primaryAction: profile.role === "enthusiast" ? "查看主页" : "查看预约"
+      })
     },
     health: {
       title: "健康",
       subtitle: "查看 BMI、身体数据与外接设备同步状态",
       content: renderHealthFeature(profile)
+    },
+    reviews: {
+      title: "评分",
+      subtitle: profile.role === "enthusiast" ? "训练者当前不展示公开评分" : "查看用户给你的评分与评价",
+      content: renderReviewsFeature(profile)
+    },
+    messages: {
+      title: "消息",
+      subtitle: "查看用户对你的私信、咨询和约课沟通",
+      content: renderMessagesFeature(profile)
     },
     moments: {
       title: "我的动态",
@@ -5553,7 +5824,7 @@ function renderProfilePage(profile) {
   const draftReview = state.reviewDrafts[profile.id] || "";
   const returnLabel = getProfileReturnLabel();
 
-  if (managed && profile.role === "enthusiast" && profile.id === getMyPageProfile()?.id) {
+  if (managed && profile.id === getMyPageProfile()?.id) {
     if (state.profileSubpage) {
       return renderMyFeaturePage(profile, managedProfiles, state.profileSubpage);
     }
@@ -6071,7 +6342,12 @@ function renderChatOverlay() {
 }
 
 function renderFollowingOverlay() {
-  const followedProfiles = getFollowedProfiles();
+  const mode = state.socialTab || "following";
+  const profiles = mode === "followers" ? getFollowerProfiles() : getFollowedProfiles();
+  const heading = mode === "followers" ? "我的粉丝" : "我关注的";
+  const description = mode === "followers"
+    ? "这里会显示当前身份的粉丝，你可以回关或直接发起私信。"
+    : "这里会显示你当前身份已经关注的健身房、教练和训练搭子。";
 
   return `
     <div class="overlay-backdrop" data-close-overlay="1"></div>
@@ -6079,21 +6355,22 @@ function renderFollowingOverlay() {
       <div class="overlay-head overlay-head--following">
         <div>
           <p class="page-label">Following</p>
-          <h2>我关注的</h2>
-          <p>这里会显示你当前设备已经关注的健身房、教练和训练搭子。</p>
+          <h2>${heading}</h2>
+          <p>${description}</p>
         </div>
         <button class="close-button" data-close-overlay="1" type="button">×</button>
       </div>
 
       <div class="following-tabs">
-        <span class="following-tab is-active">已关注</span>
-        <span class="following-count">${followedProfiles.length} 个对象</span>
+        <button class="following-tab ${mode === "following" ? "is-active" : ""}" data-set-social-tab="following" type="button">我关注的</button>
+        <button class="following-tab ${mode === "followers" ? "is-active" : ""}" data-set-social-tab="followers" type="button">我的粉丝</button>
+        <span class="following-count">${profiles.length} 个对象</span>
       </div>
 
       <section class="following-list">
         ${
-          followedProfiles.length
-            ? followedProfiles
+          profiles.length
+            ? profiles
                 .map((profile) => {
                   const metaLine = [profile.city, profile.locationLabel || profile.location, `${profile.followers || 0} 粉丝`]
                     .filter(Boolean)
@@ -6114,14 +6391,18 @@ function renderFollowingOverlay() {
                           <small>${escapeHtml(metaLine)}</small>
                         </div>
                       </div>
-                      <button class="follow-button is-active following-action" data-toggle-follow="${profile.id}" type="button">已关注</button>
+                      ${
+                        mode === "following"
+                          ? `<button class="follow-button is-active following-action" data-toggle-follow="${profile.id}" type="button">已关注</button>`
+                          : `<button class="mini-button following-action" data-open-chat="${profile.id}" type="button">回关/私信</button>`
+                      }
                     </article>
                   `;
                 })
                 .join("")
             : `
               <article class="empty-card">
-                你还没有关注任何对象。先在探索页上方点几个感兴趣的健身房、教练或用户，这里就会立刻显示出来。
+                ${mode === "followers" ? "暂时还没有粉丝，继续完善主页、发布动态和接收预约后，这里会慢慢热闹起来。" : "你还没有关注任何对象。先在探索页上方点几个感兴趣的健身房、教练或用户，这里就会立刻显示出来。"}
               </article>
             `
         }
@@ -6198,6 +6479,7 @@ appView.addEventListener("click", (event) => {
   }
 
   if (target.dataset.openFollowing) {
+    state.socialTab = "following";
     openOverlay("following");
     return;
   }
@@ -6231,6 +6513,12 @@ appView.addEventListener("click", (event) => {
   if (target.dataset.openMyFeature) {
     const myProfile = getMyPageProfile();
     if (!myProfile) return;
+    if (target.dataset.openMyFeature === "favorites") {
+      state.socialTab = "following";
+    }
+    if (target.dataset.openMyFeature === "followers") {
+      state.socialTab = "followers";
+    }
     state.activePage = "profile";
     state.activeProfileId = myProfile.id;
     state.profileSubpage = target.dataset.openMyFeature;
@@ -6281,6 +6569,16 @@ appView.addEventListener("click", (event) => {
 
   if (target.dataset.toggleFollow) {
     runTask(() => toggleFollow(target.dataset.toggleFollow));
+    return;
+  }
+
+  if (target.dataset.setSocialTab) {
+    state.socialTab = target.dataset.setSocialTab === "followers" ? "followers" : "following";
+    if (state.overlayMode === "following") {
+      renderOverlay();
+      return;
+    }
+    renderPage();
     return;
   }
 

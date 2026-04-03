@@ -426,12 +426,12 @@ def find_profile_by_role_phone(state, role, phone):
     phone_key = normalize_phone(phone)
     if not phone_key:
         return None
-    for profile in state.get("profiles", {}).values():
-        if profile.get("role") != role:
-            continue
-        if normalize_phone(profile.get("phone")) == phone_key:
-            return profile
-    return None
+    matches = [
+        profile
+        for profile in state.get("profiles", {}).values()
+        if profile.get("role") == role and normalize_phone(profile.get("phone")) == phone_key
+    ]
+    return pick_preferred_profile(state, matches)
 
 
 def find_profiles_by_phone(state, phone):
@@ -443,8 +443,46 @@ def find_profiles_by_phone(state, phone):
         for profile in state.get("profiles", {}).values()
         if normalize_phone(profile.get("phone")) == phone_key
     ]
-    profiles.sort(key=lambda item: (item.get("createdAt") or "", item.get("id") or ""))
+    profiles.sort(key=lambda item: profile_signal_score(state, item), reverse=True)
     return profiles
+
+
+def profile_signal_score(state, profile):
+    if not profile:
+        return (-1, "", "")
+
+    profile_id = profile.get("id")
+    posts = sum(1 for item in state.get("posts", {}).values() if item.get("authorProfileId") == profile_id)
+    incoming_follows = sum(1 for item in state.get("follows", []) if item.get("targetProfileId") == profile_id)
+    outgoing_follows = sum(1 for item in state.get("follows", []) if item.get("sourceProfileId") == profile_id)
+    incoming_bookings = sum(1 for item in state.get("bookings", []) if item.get("targetProfileId") == profile_id)
+    outgoing_bookings = sum(1 for item in state.get("bookings", []) if item.get("createdByProfileId") == profile_id)
+    reviews = len(profile.get("reviews", []))
+    checkins = len(profile.get("checkins", []))
+    listed_bonus = 6 if profile.get("listed", True) else 0
+    avatar_bonus = 2 if profile.get("avatarImage") else 0
+    bio_bonus = 2 if profile.get("bio") else 0
+
+    total = (
+        posts * 18
+        + incoming_follows * 12
+        + outgoing_follows * 8
+        + incoming_bookings * 16
+        + outgoing_bookings * 10
+        + reviews * 14
+        + checkins * 10
+        + listed_bonus
+        + avatar_bonus
+        + bio_bonus
+    )
+    return (total, profile.get("createdAt") or "", profile_id or "")
+
+
+def pick_preferred_profile(state, profiles):
+    candidates = [profile for profile in profiles if profile]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: profile_signal_score(state, item))
 
 
 def make_profile(**kwargs):
@@ -591,7 +629,10 @@ def resolve_account_by_phone(state, phone):
             continue
         if profile.get("accountId") != account["id"]:
             profile["accountId"] = account["id"]
-        role_map[role] = profile["id"]
+        existing_profile = state["profiles"].get(role_map.get(role, ""))
+        preferred = pick_preferred_profile(state, [existing_profile, profile])
+        if preferred:
+            role_map[role] = preferred["id"]
 
     return account
 
@@ -665,8 +706,11 @@ def reconcile_account_registry(state):
             profile["accountId"] = target["id"]
             changed = True
 
-        if target["profilesByRole"].get(role) != profile["id"]:
-            target["profilesByRole"][role] = profile["id"]
+        current_role_profile = state["profiles"].get(target["profilesByRole"].get(role, ""))
+        preferred_profile = pick_preferred_profile(state, [current_role_profile, profile])
+        preferred_profile_id = preferred_profile["id"] if preferred_profile else profile["id"]
+        if target["profilesByRole"].get(role) != preferred_profile_id:
+            target["profilesByRole"][role] = preferred_profile_id
             changed = True
 
     if rebuilt_accounts != old_accounts:
@@ -1423,6 +1467,16 @@ def get_follow_set(state, current_actor_profile_id):
     }
 
 
+def get_follower_set(state, current_actor_profile_id):
+    if not current_actor_profile_id:
+        return set()
+    return {
+        item["sourceProfileId"]
+        for item in state["follows"]
+        if item["targetProfileId"] == current_actor_profile_id
+    }
+
+
 def follower_count(state, profile_id):
     return sum(1 for item in state["follows"] if item["targetProfileId"] == profile_id)
 
@@ -1513,10 +1567,38 @@ def serialize_bookings(state, session):
     managed = set(session["managedProfileIds"])
     bookings = [
         item for item in state["bookings"]
-        if item["createdByProfileId"] in managed
+        if item["createdByProfileId"] in managed or item["targetProfileId"] in managed
     ]
     bookings.sort(key=lambda item: item["createdAt"], reverse=True)
-    return bookings
+    serialized = []
+    for item in bookings:
+        source_profile = state["profiles"].get(item.get("createdByProfileId"))
+        target_profile = state["profiles"].get(item.get("targetProfileId"))
+        source_id = item.get("createdByProfileId")
+        target_id = item.get("targetProfileId")
+        if source_id in managed and target_id in managed:
+            direction = "internal"
+        elif target_id in managed:
+            direction = "incoming"
+        else:
+            direction = "outgoing"
+
+        counterpart = target_profile if direction == "outgoing" else source_profile
+        serialized.append(
+            {
+                **item,
+                "direction": direction,
+                "createdByProfileName": source_profile.get("name") if source_profile else "平台用户",
+                "createdByProfileRole": source_profile.get("role") if source_profile else "",
+                "targetProfileName": target_profile.get("name") if target_profile else "平台用户",
+                "targetProfileRole": target_profile.get("role") if target_profile else "",
+                "counterpartProfileId": counterpart.get("id") if counterpart else "",
+                "counterpartProfileName": counterpart.get("name") if counterpart else "平台用户",
+                "counterpartProfileRole": counterpart.get("role") if counterpart else "",
+                "counterpartLocationLabel": counterpart.get("locationLabel") if counterpart else "",
+            }
+        )
+    return serialized
 
 
 def get_thread_id(profile_a, profile_b):
@@ -1585,6 +1667,7 @@ def bootstrap_response(state, session):
         },
         "profiles": profiles,
         "followSet": sorted(get_follow_set(state, current_actor_profile_id)),
+        "followerSet": sorted(get_follower_set(state, current_actor_profile_id)),
         "bookings": serialize_bookings(state, session),
         "threads": serialize_threads(state, current_actor_profile_id),
     }

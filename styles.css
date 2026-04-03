@@ -2190,6 +2190,31 @@ body.is-workout-live .app {
   gap: 12px;
 }
 
+.social-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 6px;
+  border-radius: 999px;
+  background: #fbf5ee;
+}
+
+.social-tab {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 10px 14px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+}
+
+.social-tab.is-active {
+  background: rgba(242, 140, 40, 0.16);
+  color: #9d580f;
+}
+
 .feature-follow-item {
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -2200,6 +2225,18 @@ body.is-workout-live .app {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
+}
+
+.dashboard-summary--managed {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fffdfb, #fff8f1);
+  border: 1px solid rgba(242, 140, 40, 0.12);
+}
+
+.dashboard-summary--managed .stack-list {
+  margin-top: 12px;
 }
 
 .feature-follow-main {
@@ -2825,11 +2862,17 @@ body.is-workout-live .app {
 }
 
 .following-tab {
+  border: 0;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(242, 140, 40, 0.12);
+  background: transparent;
   color: #9d580f;
   font-weight: 700;
+  font: inherit;
+}
+
+.following-tab.is-active {
+  background: rgba(242, 140, 40, 0.12);
 }
 
 .following-count {
