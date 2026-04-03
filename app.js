@@ -1159,9 +1159,14 @@ function normalizeRuntimeConfig(config = {}) {
 }
 
 function getEffectiveRuntimeConfig() {
+  const baseConfig = normalizeRuntimeConfig(window.__FITHUB_CONFIG__ || {});
+  const runtimeConfig = normalizeRuntimeConfig(state.runtimeConfig || {});
   return normalizeRuntimeConfig({
-    ...(window.__FITHUB_CONFIG__ || {}),
-    ...(state.runtimeConfig || {})
+    ...baseConfig,
+    ...(runtimeConfig.mapProvider ? { mapProvider: runtimeConfig.mapProvider } : {}),
+    ...(runtimeConfig.amapKey ? { amapKey: runtimeConfig.amapKey } : {}),
+    ...(runtimeConfig.amapSecurityCode ? { amapSecurityCode: runtimeConfig.amapSecurityCode } : {}),
+    ...(runtimeConfig.baiduAk ? { baiduAk: runtimeConfig.baiduAk } : {})
   });
 }
 
@@ -4324,7 +4329,11 @@ function renderPersonalMoments(profile) {
                         <strong>${escapeHtml(post.meta || "训练动态")}</strong>
                         <span>${escapeHtml(post.time)}</span>
                       </div>
-                      <button class="text-link" data-open-profile="${profile.id}" type="button">查看</button>
+                      ${
+                        post.checkin?.route && supportsOutdoorRouteShare(post.checkin?.sportId)
+                          ? `<button class="text-link" data-open-route-map-detail="${post.checkin.id}" type="button">查看轨迹</button>`
+                          : `<button class="text-link" data-open-profile="${profile.id}" type="button">查看</button>`
+                      }
                     </div>
                     <p>${escapeHtml(post.content)}</p>
                     ${renderPostMedia(post)}
@@ -4392,7 +4401,6 @@ function canRenderAmapRoute(route) {
   return (
     config.mapProvider === "amap" &&
     Boolean(config.amapKey) &&
-    route?.source === "gps" &&
     Array.isArray(route?.geoPoints) &&
     route.geoPoints.length >= 1
   );
@@ -4707,17 +4715,16 @@ function renderOutdoorRouteFeature(profile) {
 
         <p class="result-tip">${
           escapeHtml(
-            route.source === "gps" && canRenderAmapRoute(route)
+            canRenderAmapRoute(route)
               ? "这次轨迹已按真实 GPS 点位叠加高德地图底图生成。"
-              : route.source === "gps"
+              : Array.isArray(route.geoPoints) && route.geoPoints.length
                 ? "这次轨迹已按真实 GPS 点位生成；当前点位过少或地图服务暂未就绪时，会先显示简化轨迹图。"
                 : "这是一张适合分享的户外运动成绩页；如果允许定位，后面会优先按真实 GPS 点位生成轨迹。"
           )
         }</p>
 
         <div class="action-row action-row--checkin">
-          <button class="mini-button" data-open-my-feature="checkin" type="button">返回打卡</button>
-          <button class="primary-submit" data-open-my-feature="moments" type="button">去看动态</button>
+          <button class="primary-submit" data-back-profile="1" type="button">返回</button>
         </div>
       </article>
     </article>
@@ -4773,8 +4780,7 @@ function renderOutdoorRouteMapDetail(profile) {
         <p class="result-tip">${escapeHtml(pointCount > 1 ? "这张地图正在直接使用你本次运动采集到的真实定位点。" : "当前只采集到 1 个真实定位点，所以地图会先落在真实位置点上；下次多移动一小段，轨迹线会更完整。")}</p>
 
         <div class="action-row action-row--checkin">
-          <button class="mini-button" data-open-my-feature="outdoor-share" type="button">返回成绩页</button>
-          <button class="primary-submit" data-open-my-feature="checkin" type="button">返回打卡</button>
+          <button class="primary-submit" data-back-profile="1" type="button">返回</button>
         </div>
       </article>
     </article>
@@ -6734,7 +6740,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260331-6`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260403-2`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
