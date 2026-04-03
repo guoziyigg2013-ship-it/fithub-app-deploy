@@ -638,6 +638,13 @@ def find_account_by_phone(state, phone, preferred_role=""):
     return fallback
 
 
+def validate_phone_or_raise(phone):
+    phone_key = normalize_phone(phone)
+    if len(phone_key) != 11:
+        raise ValueError("请输入正确的 11 位手机号。")
+    return phone_key
+
+
 def resolve_account_by_phone(state, phone):
     phone_key = normalize_phone(phone)
     if not phone_key:
@@ -2289,6 +2296,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 session = ensure_session(state, session_id)
                 reconcile_account_registry(state)
                 role = str(payload.get("role") or "").strip()
+                phone = normalize_phone(payload.get("phone"))
                 account = find_account_by_token(state, payload.get("accountId"), payload.get("restoreToken"))
 
                 if account:
@@ -2296,7 +2304,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     attach_account_to_session(state, session, account, preferred_role)
                     return bootstrap_response(state, session)
 
-                account = resolve_account_by_phone(state, payload.get("phone"))
+                account = resolve_account_by_phone(state, phone)
                 if account:
                     preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
                     attach_account_to_session(state, session, account, preferred_role)
@@ -2306,11 +2314,11 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     raise ValueError("请输入手机号后选择要登录的身份。")
 
                 profile = None
-                profile = find_profile_by_role_phone(state, role, payload.get("phone"))
+                profile = find_profile_by_role_phone(state, role, phone)
                 if not profile:
                     raise ValueError("没有找到这个身份，请先注册后再登录。")
 
-                account = ensure_profile_account(state, profile, payload.get("phone"))
+                account = ensure_profile_account(state, profile, phone)
                 attach_account_to_session(state, session, account, role)
                 return bootstrap_response(state, session)
 
@@ -2366,6 +2374,17 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         if first_profile:
                             session["selectedRole"] = first_profile["role"]
 
+                return bootstrap_response(state, session)
+
+            self._write_json(self._with_state(action))
+            return
+
+        if parsed.path == f"{API_PREFIX}/auth/logout":
+            def action(state):
+                session = ensure_session(state, session_id)
+                session["managedProfileIds"] = []
+                session["currentActorProfileId"] = None
+                session["selectedRole"] = "enthusiast"
                 return bootstrap_response(state, session)
 
             self._write_json(self._with_state(action))
@@ -2453,6 +2472,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 session = ensure_session(state, session_id)
                 reconcile_account_registry(state)
                 role = payload["role"]
+                phone = validate_phone_or_raise((payload.get("profile") or {}).get("phone"))
                 existing_profile = None
                 for profile_id in session["managedProfileIds"]:
                     profile = state["profiles"].get(profile_id)
@@ -2460,7 +2480,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         existing_profile = profile
                         break
                 if not existing_profile:
-                    existing_profile = find_profile_by_role_phone(state, role, payload.get("profile", {}).get("phone"))
+                    existing_profile = find_profile_by_role_phone(state, role, phone)
                 account = None
                 account_payload = payload.get("account") or {}
                 account = find_account_by_token(state, account_payload.get("accountId") or account_payload.get("id"), account_payload.get("restoreToken"))
@@ -2472,16 +2492,21 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         account = ensure_profile_account(state, managed_profile)
                         break
                 if not account:
-                    account = find_account_by_phone(state, payload.get("profile", {}).get("phone"), role)
+                    account = resolve_account_by_phone(state, phone)
                 if not account and existing_profile:
-                    account = ensure_profile_account(state, existing_profile, payload.get("profile", {}).get("phone"))
+                    account = ensure_profile_account(state, existing_profile, phone)
                 if not account:
-                    account = create_account_record(payload.get("profile", {}).get("phone"))
+                    account = create_account_record(phone)
                     ensure_account_registry(state)[account["id"]] = account
+                preferred_existing = state["profiles"].get((account.get("profilesByRole") or {}).get(role, ""))
+                if preferred_existing:
+                    existing_profile = preferred_existing
+                payload["profile"]["phone"] = phone
                 profile_data = build_profile_payload(role, payload["profile"], existing_profile, session)
                 profile_data["accountId"] = account["id"]
+                profile_data["phone"] = phone
                 state["profiles"][profile_data["id"]] = profile_data
-                ensure_profile_account(state, profile_data, payload.get("profile", {}).get("phone"))
+                ensure_profile_account(state, profile_data, phone)
                 attach_account_to_session(state, session, account, role)
                 return bootstrap_response(state, session)
             try:

@@ -908,6 +908,7 @@ const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
 const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
 const ACTIVE_ACCOUNT_STORAGE_KEY = "fithub_trial_active_account_v1";
 const DEFAULT_RUNTIME_CONFIG = Object.freeze(normalizeRuntimeConfig(window.__FITHUB_CONFIG__ || {}));
+const DEFAULT_LOCATION_STATUS = "默认城市为厦门，你可以点击顶部城市切换成自己的城市或使用实时定位。";
 const REGISTER_WHEEL_ITEM_HEIGHT = 52;
 const REGISTER_WHEEL_FIELDS = {
   height_cm: {
@@ -1433,6 +1434,7 @@ function buildSnapshotRecoveryProfile(profile) {
 }
 
 async function recoverAccountFromSnapshot(role, phone) {
+  const preferred = getStoredActiveAccount();
   const cachedProfile = findRecoverableSnapshotProfile(role, phone, preferred?.profileId || "");
   if (!cachedProfile) return false;
 
@@ -1458,7 +1460,7 @@ function bootstrapRememberedAccountLocally() {
   const phone = preferred?.phone || remembered.phone;
   if (!roleConfig[role] || !phone) return false;
 
-  const cachedProfile = findRecoverableSnapshotProfile(role, phone);
+  const cachedProfile = findRecoverableSnapshotProfile(role, phone, preferred?.profileId || "");
   if (!cachedProfile?.id) return false;
 
   const snapshot = getStoredSnapshot();
@@ -1498,8 +1500,8 @@ function bootstrapRememberedAccountLocally() {
   return true;
 }
 
-async function maybeRestoreRememberedAccounts() {
-  if (state.managedProfileIds.length) return false;
+async function maybeRestoreRememberedAccounts({ force = false } = {}) {
+  if (state.managedProfileIds.length && !force) return false;
   const preferred = getStoredActiveAccount();
   const accounts = getStoredAccounts().sort((left, right) => {
     const leftScore = preferred && left.phone === preferred.phone ? 1 : 0;
@@ -1537,6 +1539,17 @@ async function maybeRestoreRememberedAccounts() {
     });
 
   return restorePromise;
+}
+
+function shouldRetryAfterRestore(error) {
+  const message = String(error?.message || "");
+  return (
+    message.includes("请先注册后再关注") ||
+    message.includes("请先注册自己的训练者身份") ||
+    message.includes("只能用当前设备已注册的身份") ||
+    message.includes("请先注册后再") ||
+    message.includes("请先用健身爱好者身份注册")
+  );
 }
 
 async function apiRequest(path, { method = "GET", body } = {}) {
@@ -1647,7 +1660,11 @@ async function refreshSharedState({ keepOverlay = false } = {}) {
   refreshPromise = apiRequest(`${API_BASE}/bootstrap${suffix}`)
     .then(async (payload) => {
       syncStateFromServer(payload, { keepOverlay });
-      await maybeRestoreRememberedAccounts();
+      if (!payload?.session?.managedProfileIds?.length && getStoredAccounts().length) {
+        await maybeRestoreRememberedAccounts({ force: true });
+      } else {
+        await maybeRestoreRememberedAccounts();
+      }
       state.isBootstrapping = false;
       lastSuccessfulSyncAt = Date.now();
       renderPage();
@@ -1660,16 +1677,93 @@ async function refreshSharedState({ keepOverlay = false } = {}) {
 }
 
 async function postAndSync(path, body, { keepOverlay = false } = {}) {
-  const payload = await apiRequest(path, {
-    method: "POST",
-    body: {
-      sessionId: state.sessionId || getStoredSessionId(),
-      ...body
+  const requestBody = {
+    sessionId: state.sessionId || getStoredSessionId(),
+    ...body
+  };
+
+  let payload;
+  try {
+    payload = await apiRequest(path, {
+      method: "POST",
+      body: requestBody
+    });
+  } catch (error) {
+    if (getStoredAccounts().length && shouldRetryAfterRestore(error)) {
+      const restored = await maybeRestoreRememberedAccounts({ force: true });
+      if (restored) {
+        payload = await apiRequest(path, {
+          method: "POST",
+          body: {
+            sessionId: state.sessionId || getStoredSessionId(),
+            ...body
+          }
+        });
+      } else {
+        throw error;
+      }
+    } else {
+      throw error;
     }
-  });
+  }
   syncStateFromServer(payload, { keepOverlay });
   state.isBootstrapping = false;
   return payload;
+}
+
+function clearStoredAuthArtifacts() {
+  [
+    SESSION_STORAGE_KEY,
+    SNAPSHOT_STORAGE_KEY,
+    ACCOUNT_STORAGE_KEY,
+    PROFILE_BACKUP_STORAGE_KEY,
+    ACTIVE_ACCOUNT_STORAGE_KEY
+  ].forEach((key) => {
+    try {
+      window.localStorage.removeItem(key);
+    } catch (_error) {
+      // Ignore storage failures.
+    }
+  });
+}
+
+async function logoutCurrentDevice() {
+  try {
+    await apiRequest(`${API_BASE}/auth/logout`, {
+      method: "POST",
+      body: {
+        sessionId: state.sessionId || getStoredSessionId()
+      }
+    });
+  } catch (_error) {
+    // Local cleanup still matters even if the backend session is already gone.
+  }
+
+  clearStoredAuthArtifacts();
+  state.managedAccounts = [];
+  state.managedProfileIds = [];
+  state.currentActorProfileId = "";
+  state.activeProfileId = "";
+  state.composeProfileId = "";
+  state.followSet = new Set();
+  state.followerSet = new Set();
+  state.bookings = [];
+  state.threads = [];
+  state.authPhone = "";
+  state.authMessage = "";
+  state.authMatches = [];
+  state.authAccountId = "";
+  state.authRestoreToken = "";
+  state.selectedRole = "enthusiast";
+  state.registerRole = "enthusiast";
+  state.activePage = "home";
+  state.overlayMode = "welcome";
+  state.profileSubpage = "";
+  state.profileReturnPage = "home";
+  state.locationStatus = DEFAULT_LOCATION_STATUS;
+  state.sessionId = "";
+  renderPage();
+  refreshSharedState({ keepOverlay: false }).catch(() => {});
 }
 
 function readFileAsDataUrl(file) {
@@ -5979,6 +6073,7 @@ function maskPhone(phone = "") {
 }
 
 function renderWelcomeOverlay() {
+  const canLogout = Boolean(state.managedProfileIds.length || getStoredAccounts().length);
   return `
     <div class="overlay-backdrop" data-close-overlay="1"></div>
     <div class="overlay-panel overlay-panel--welcome">
@@ -6003,7 +6098,7 @@ function renderWelcomeOverlay() {
           .join("")}
       </div>
       <div class="action-row">
-        <button class="mini-button" data-close-overlay="1" type="button">先看看</button>
+        <button class="mini-button" ${canLogout ? 'data-logout-account="1"' : 'data-close-overlay="1"'} type="button">${canLogout ? "退出登录" : "先看看"}</button>
         <button class="mini-button mini-button--accent" data-open-auth="${escapeHtml(state.selectedRole)}" type="button">登录已有账户</button>
       </div>
     </div>
@@ -6473,6 +6568,11 @@ appView.addEventListener("click", (event) => {
 
   if (target.dataset.openRolePicker) {
     openOverlay("welcome");
+    return;
+  }
+
+  if (target.dataset.logoutAccount) {
+    runTask(() => logoutCurrentDevice());
     return;
   }
 
