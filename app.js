@@ -908,6 +908,7 @@ const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
 const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
 const FOLLOW_BACKUP_STORAGE_KEY = "fithub_trial_follow_backups_v1";
 const ACTIVE_ACCOUNT_STORAGE_KEY = "fithub_trial_active_account_v1";
+const LOGOUT_MARKER_STORAGE_KEY = "fithub_trial_logged_out_v1";
 const DEFAULT_RUNTIME_CONFIG = Object.freeze(normalizeRuntimeConfig(window.__FITHUB_CONFIG__ || {}));
 const DEFAULT_LOCATION_STATUS = "默认城市为厦门，你可以点击顶部城市切换成自己的城市或使用实时定位。";
 const REGISTER_WHEEL_ITEM_HEIGHT = 52;
@@ -1317,6 +1318,26 @@ function storeAccounts(accounts) {
   }
 }
 
+function hasLogoutMarker() {
+  try {
+    return window.localStorage.getItem(LOGOUT_MARKER_STORAGE_KEY) === "1";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function setLogoutMarker(enabled) {
+  try {
+    if (enabled) {
+      window.localStorage.setItem(LOGOUT_MARKER_STORAGE_KEY, "1");
+    } else {
+      window.localStorage.removeItem(LOGOUT_MARKER_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // Ignore storage failures.
+  }
+}
+
 function getStoredAccountKey(account) {
   if (account.phone) return `phone:${account.phone}`;
   if (account.id) return `id:${account.id}`;
@@ -1666,6 +1687,7 @@ function clearStaleManagedSession({ keepStoredAccounts = true } = {}) {
 }
 
 async function maybeRestoreRememberedAccounts({ force = false } = {}) {
+  if (hasLogoutMarker()) return false;
   if (state.managedProfileIds.length && !force) return false;
   const preferred = getStoredActiveAccount();
   const accounts = getStoredAccounts().sort((left, right) => {
@@ -1900,6 +1922,9 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   if (!preserveManagedSession) {
     storeSnapshot(payload);
   }
+  if (state.managedProfileIds.length) {
+    setLogoutMarker(false);
+  }
 }
 
 async function refreshSharedState({ keepOverlay = false } = {}) {
@@ -1998,6 +2023,7 @@ async function logoutCurrentDevice() {
   }
 
   clearStoredAuthArtifacts();
+  setLogoutMarker(true);
   state.managedAccounts = [];
   state.managedProfileIds = [];
   state.currentActorProfileId = "";
@@ -6005,6 +6031,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
     profile.role === "enthusiast"
       ? [
           renderPersonalShortcutTile("账户", "资料与安全", "账", 'data-open-my-feature="account"'),
+          renderPersonalShortcutTile("商城", "器材与精选商品", "商", 'data-open-my-feature="shop"'),
           renderPersonalShortcutTile("消息", `${getInboxCount()} 条互动`, "信", 'data-open-my-feature="messages"'),
           renderPersonalShortcutTile("订单", "预约记录", "单", 'data-open-my-feature="orders"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
@@ -6014,6 +6041,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
         ]
       : [
           renderPersonalShortcutTile("账户", "资料与主页", "账", 'data-open-my-feature="account"'),
+          renderPersonalShortcutTile("商城", "器材、周边与门店商品", "商", 'data-open-my-feature="shop"'),
           renderPersonalShortcutTile("消息", `${getInboxCount()} 条互动`, "信", 'data-open-my-feature="messages"'),
           renderPersonalShortcutTile("订单", `别人给我的 ${relatedBookings.length} 单`, "单", 'data-open-my-feature="orders"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
@@ -6130,6 +6158,46 @@ function renderFavoriteProfilesSection() {
         )
         .join("")}
     </section>
+  `;
+}
+
+function renderShopFeature(profile) {
+  const roleCopy =
+    profile.role === "enthusiast"
+      ? "后续你可以在这里购买训练器材、运动周边、补剂和平台精选课程包。"
+      : profile.role === "coach"
+        ? "后续你可以在这里上架教练推荐器材、训练周边或平台联名商品。"
+        : "后续你可以在这里上架场馆周边、门店商品、课程包和平台精选器材。";
+
+  return `
+    <article class="detail-card">
+      <div class="section-title-row">
+        <div>
+          <h3>商城</h3>
+          <p class="result-tip">${escapeHtml(roleCopy)}</p>
+        </div>
+        <span class="status-pill">筹备中</span>
+      </div>
+      <div class="detail-grid">
+        <div class="detail-item">
+          <span>平台精选</span>
+          <strong>器材与周边</strong>
+        </div>
+        <div class="detail-item">
+          <span>当前入口</span>
+          <strong>${escapeHtml(profile.role === "enthusiast" ? "购买商品" : "售卖商品")}</strong>
+        </div>
+        <div class="detail-item">
+          <span>后续支持</span>
+          <strong>购物车 / 订单 / 发货</strong>
+        </div>
+        <div class="detail-item">
+          <span>当前状态</span>
+          <strong>等待首批商品</strong>
+        </div>
+      </div>
+      <article class="empty-card">商城入口已经预留好。后续接入真实商品、价格、库存和支付后，这里会直接成为你的商品中心。</article>
+    </article>
   `;
 }
 
@@ -6250,6 +6318,11 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
       title: "收藏",
       subtitle: "把探索和动态里喜欢的视频、图片与训练干货收进这里，方便反复查看",
       content: renderCollectionsFeature()
+    },
+    shop: {
+      title: "商城",
+      subtitle: "购买、售卖或管理运动器材、周边与平台商品",
+      content: renderShopFeature(profile)
     },
     followers: {
       title: "粉丝",
@@ -7543,11 +7616,17 @@ overlay.addEventListener("submit", (event) => {
 
 navLinks.forEach((link) => {
   link.addEventListener("click", () => {
+    state.overlayMode = null;
+    state.overlayReturnMode = null;
+    state.registerWheelField = "";
+    state.chatTargetProfileId = "";
+    state.authMessage = "";
     if (link.dataset.page === "profile") {
       openMyPage();
       return;
     }
     state.profileSubpage = "";
+    state.outdoorShareCheckinId = "";
     state.activePage = link.dataset.page;
     syncNavActive();
     renderPage();
