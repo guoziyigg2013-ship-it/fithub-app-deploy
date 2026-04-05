@@ -1405,6 +1405,7 @@ def make_profile(**kwargs):
         "healthSource": kwargs.get("healthSource", ""),
         "deviceSyncedAt": kwargs.get("deviceSyncedAt", ""),
         "healthSnapshot": kwargs.get("healthSnapshot", {}),
+        "healthHistory": kwargs.get("healthHistory", []),
         "restingHeartRate": kwargs.get("restingHeartRate", None),
         "bodyFat": kwargs.get("bodyFat", None),
         "externalWorkoutIds": kwargs.get("externalWorkoutIds", []),
@@ -1754,6 +1755,7 @@ def merge_duplicate_profile_data(canonical, duplicate):
     canonical["pricingPlans"] = merge_plan_lists(canonical.get("pricingPlans"), duplicate.get("pricingPlans"))
     canonical["reviews"] = merge_profile_records(canonical.get("reviews"), duplicate.get("reviews"))
     canonical["checkins"] = merge_profile_records(canonical.get("checkins"), duplicate.get("checkins"))
+    canonical["healthHistory"] = merge_profile_records(canonical.get("healthHistory"), duplicate.get("healthHistory"))
     canonical["healthSnapshot"] = {
         **(duplicate.get("healthSnapshot") or {}),
         **(canonical.get("healthSnapshot") or {}),
@@ -3155,6 +3157,7 @@ def serialize_favorite_posts(state, current_actor_profile_id):
 
 def serialize_profile(state, profile_id, current_actor_profile_id):
     profile_id = resolve_canonical_profile_id(state, profile_id)
+    current_actor_profile_id = resolve_canonical_profile_id(state, current_actor_profile_id)
     profile = deepcopy(state["profiles"][profile_id])
     reviews = [serialize_review(state, item) for item in sorted(profile.get("reviews", []), key=lambda value: value["createdAt"], reverse=True)]
     rating_count = len(reviews)
@@ -3166,7 +3169,12 @@ def serialize_profile(state, profile_id, current_actor_profile_id):
     profile["reviews"] = reviews
     profile["avatarImage"] = compact_avatar_image(profile.get("avatarImage"), profile["role"])
     profile["posts"] = [serialize_post(state, post, current_actor_profile_id) for post in profile_posts(state, profile_id)[:4]]
-    profile["checkins"] = [serialize_checkin(item) for item in sorted(profile.get("checkins", []), key=lambda value: value["createdAt"], reverse=True)[:12]]
+    checkin_limit = 120 if profile_id == current_actor_profile_id else 12
+    profile["checkins"] = [serialize_checkin(item) for item in sorted(profile.get("checkins", []), key=lambda value: value["createdAt"], reverse=True)[:checkin_limit]]
+    profile["healthHistory"] = [
+        deepcopy(item)
+        for item in sorted(profile.get("healthHistory", []), key=lambda value: value.get("createdAt", ""), reverse=True)[:60]
+    ]
     profile.pop("externalWorkoutIds", None)
     return profile
 
@@ -3332,6 +3340,7 @@ def build_profile_payload(role, payload, existing_profile, session):
             "pricingPlans": payload.get("pricingPlans") or (existing_profile or {}).get("pricingPlans") or [
                 {"title": "会员卡", "detail": "到店训练 / 团课预约", "price": payload.get("price") or "¥99/月起"}
             ],
+            "healthHistory": payload.get("healthHistory") or (existing_profile or {}).get("healthHistory", []),
             "reviews": payload.get("reviews") or (existing_profile or {}).get("reviews", []),
             "checkins": payload.get("checkins") or (existing_profile or {}).get("checkins", []),
             "listed": True,
@@ -3366,6 +3375,7 @@ def build_profile_payload(role, payload, existing_profile, session):
             "pricingPlans": payload.get("pricingPlans") or (existing_profile or {}).get("pricingPlans") or [
                 {"title": "私教课程", "detail": "一对一训练服务", "price": payload.get("price") or "¥220/小时"}
             ],
+            "healthHistory": payload.get("healthHistory") or (existing_profile or {}).get("healthHistory", []),
             "reviews": payload.get("reviews") or (existing_profile or {}).get("reviews", []),
             "checkins": payload.get("checkins") or (existing_profile or {}).get("checkins", []),
             "listed": True,
@@ -3415,6 +3425,7 @@ def build_profile_payload(role, payload, existing_profile, session):
         "healthSource": payload.get("healthSource") or (existing_profile or {}).get("healthSource", ""),
         "deviceSyncedAt": payload.get("deviceSyncedAt") or (existing_profile or {}).get("deviceSyncedAt", ""),
         "healthSnapshot": payload.get("healthSnapshot") or (existing_profile or {}).get("healthSnapshot", {}),
+        "healthHistory": payload.get("healthHistory") or (existing_profile or {}).get("healthHistory", []),
         "restingHeartRate": payload.get("restingHeartRate") or (existing_profile or {}).get("restingHeartRate"),
         "bodyFat": parse_optional_float(payload.get("bodyFat")) or body_fat,
         "externalWorkoutIds": (existing_profile or {}).get("externalWorkoutIds", []),
@@ -3611,6 +3622,149 @@ def build_native_checkin_payload(source, workout):
     }
 
 
+def local_date_key(value=None):
+    parsed = parse_optional_iso_datetime(value) if isinstance(value, str) else value
+    current = parsed or now_utc()
+    return current.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
+
+
+def ensure_health_history_entry(profile, date_key=None):
+    history = profile.setdefault("healthHistory", [])
+    target_date = str(date_key or local_date_key()).strip()
+    target_id = f"health-{target_date}"
+    for item in history:
+        if str(item.get("id") or "") == target_id or str(item.get("date") or "") == target_date:
+            item["id"] = target_id
+            item["date"] = target_date
+            item.setdefault("createdAt", now_utc().isoformat())
+            return item
+
+    entry = {
+        "id": target_id,
+        "date": target_date,
+        "createdAt": now_utc().isoformat(),
+        "updatedAt": now_utc().isoformat(),
+        "totalMinutes": 0,
+        "totalCalories": 0,
+        "totalDistance": 0,
+        "runDistance": 0,
+        "walkDistance": 0,
+        "cyclingDistance": 0,
+        "yogaMinutes": 0,
+        "stepCount": 0,
+        "activeEnergyBurned": 0,
+        "vo2Max": None,
+        "restingHeartRate": None,
+        "bodyFat": None,
+        "bmi": None,
+        "weightKg": None,
+    }
+    history.append(entry)
+    return entry
+
+
+def finalize_health_history(profile):
+    history = profile.setdefault("healthHistory", [])
+    history.sort(key=lambda item: (str(item.get("date") or ""), str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
+    del history[180:]
+
+
+def update_health_history_entry(profile, date_key=None, add=None, set_values=None):
+    entry = ensure_health_history_entry(profile, date_key)
+    add = add or {}
+    set_values = set_values or {}
+
+    for key, value in add.items():
+        numeric = parse_optional_float(value)
+        if numeric is None:
+            continue
+        entry[key] = round(float(entry.get(key) or 0) + numeric, 2)
+
+    for key, value in set_values.items():
+        if value is None:
+            continue
+        entry[key] = value
+
+    bmi = calculate_bmi(profile.get("heightCm"), profile.get("weightKg"))
+    if bmi is not None:
+        entry["bmi"] = bmi
+    if profile.get("weightKg") is not None:
+        entry["weightKg"] = round(float(profile.get("weightKg")), 1)
+    if profile.get("bodyFat") is not None:
+        entry["bodyFat"] = round(float(profile.get("bodyFat")), 1)
+    if profile.get("restingHeartRate") is not None:
+        entry["restingHeartRate"] = int(profile.get("restingHeartRate"))
+
+    entry["updatedAt"] = now_utc().isoformat()
+    finalize_health_history(profile)
+    return entry
+
+
+def merge_snapshot_fields(existing_snapshot, updates):
+    merged = dict(existing_snapshot or {})
+    for key, value in (updates or {}).items():
+        if value is None or value == "":
+            continue
+        merged[key] = value
+    return merged
+
+
+def record_checkin_health_metrics(profile, checkin):
+    created_at = checkin.get("createdAt") or now_utc().isoformat()
+    duration = max(0, parse_optional_int(checkin.get("duration")) or 0)
+    calories = max(0, parse_optional_float(checkin.get("calories")) or 0)
+    distance = max(0, parse_optional_float(checkin.get("distance")) or 0)
+    sport_id = str(checkin.get("sportId") or "").strip()
+
+    additive = {
+        "totalMinutes": duration,
+        "totalCalories": calories,
+        "totalDistance": distance,
+    }
+    if sport_id in {"run", "treadmill", "trail-run", "outdoor-run"}:
+        additive["runDistance"] = distance
+    if sport_id in {"outdoor-walk", "walking", "hiking"}:
+        additive["walkDistance"] = distance
+    if sport_id in {"outdoor-cycling", "cycling", "indoor-cycling"}:
+        additive["cyclingDistance"] = distance
+    if sport_id in {"yoga", "pilates"}:
+        additive["yogaMinutes"] = duration
+
+    update_health_history_entry(profile, local_date_key(created_at), add=additive)
+
+
+def synthesize_device_health_snapshot(profile, source):
+    today_key = local_date_key()
+    today_entry = ensure_health_history_entry(profile, today_key)
+    today_minutes = max(0, parse_optional_int(today_entry.get("totalMinutes")) or 0)
+    today_distance = max(0, parse_optional_float(today_entry.get("totalDistance")) or 0)
+    today_calories = max(0, parse_optional_float(today_entry.get("totalCalories")) or 0)
+    gender = profile.get("gender") or ""
+    bmi = calculate_bmi(profile.get("heightCm"), profile.get("weightKg"))
+
+    if source == "xiaomi-scale":
+        return {
+            "bodyFat": profile.get("bodyFat") or estimate_body_fat(gender, bmi),
+            "weightKg": profile.get("weightKg"),
+            "bmi": bmi,
+        }
+
+    base_steps = int(max(1800, 3200 + today_minutes * 115 + today_distance * 1150))
+    active_energy = round(max(120, today_calories or (today_minutes * 6.2)), 1)
+    resting_heart_rate = profile.get("restingHeartRate") or (58 if gender == "男" else 62)
+    cardio_fitness = round(max(28, min(58, 42 + today_distance * 0.8 + today_minutes * 0.03 - max(0, (bmi or 22) - 23) * 0.6)), 1)
+
+    return {
+        "stepCount": base_steps,
+        "activeEnergyBurned": active_energy,
+        "restingHeartRate": int(resting_heart_rate),
+        "vo2Max": cardio_fitness,
+        "weightKg": profile.get("weightKg"),
+        "bmi": bmi,
+        "bodyFat": profile.get("bodyFat"),
+    }
+
+
 def apply_native_health_sync(state, session, payload):
     profile_id = payload.get("profileId") or session.get("currentActorProfileId")
     allowed, profile_id = session_manages_profile(state, session, profile_id)
@@ -3639,6 +3793,7 @@ def apply_native_health_sync(state, session, payload):
     resting_heart_rate = parse_optional_int(metrics.get("restingHeartRate"))
     step_count = parse_optional_int(metrics.get("stepCount") or metrics.get("steps"))
     active_energy = parse_optional_float(metrics.get("activeEnergyBurned") or metrics.get("activeEnergy"))
+    vo2_max = parse_optional_float(metrics.get("vo2Max") or metrics.get("maxOxygenUptake") or metrics.get("cardioFitness"))
 
     if height_cm and height_cm > 0:
         profile["heightCm"] = height_cm
@@ -3657,19 +3812,31 @@ def apply_native_health_sync(state, session, payload):
     profile["connectedDevices"] = merge_device_labels(profile.get("connectedDevices", []), devices)
     profile["healthSource"] = source_label
     profile["deviceSyncedAt"] = local_time_label()
-    profile["healthSnapshot"] = {
-        **(profile.get("healthSnapshot") or {}),
-        "source": source_label,
-        "deviceName": device_name,
-        "bmi": calculate_bmi(profile.get("heightCm"), profile.get("weightKg")),
-        "heightCm": profile.get("heightCm"),
-        "weightKg": profile.get("weightKg"),
-        "bodyFat": profile.get("bodyFat"),
-        "restingHeartRate": profile.get("restingHeartRate"),
-        "stepCount": step_count,
-        "activeEnergyBurned": round(active_energy, 1) if active_energy is not None else None,
-        "syncedAt": now_utc().isoformat(),
-    }
+    profile["healthSnapshot"] = merge_snapshot_fields(
+        profile.get("healthSnapshot") or {},
+        {
+            "source": source_label,
+            "deviceName": device_name,
+            "bmi": calculate_bmi(profile.get("heightCm"), profile.get("weightKg")),
+            "heightCm": profile.get("heightCm"),
+            "weightKg": profile.get("weightKg"),
+            "bodyFat": profile.get("bodyFat"),
+            "restingHeartRate": profile.get("restingHeartRate"),
+            "stepCount": step_count,
+            "activeEnergyBurned": round(active_energy, 1) if active_energy is not None else None,
+            "vo2Max": round(vo2_max, 1) if vo2_max is not None else None,
+            "syncedAt": now_utc().isoformat(),
+        },
+    )
+    update_health_history_entry(
+        profile,
+        local_date_key(),
+        set_values={
+            "stepCount": step_count,
+            "activeEnergyBurned": round(active_energy, 1) if active_energy is not None else None,
+            "vo2Max": round(vo2_max, 1) if vo2_max is not None else None,
+        },
+    )
 
     imported_workout_ids = set(profile.get("externalWorkoutIds", []))
     imported_count = 0
@@ -3681,6 +3848,7 @@ def apply_native_health_sync(state, session, payload):
 
         imported_workout_ids.add(checkin["externalId"])
         profile.setdefault("checkins", []).insert(0, checkin)
+        record_checkin_health_metrics(profile, checkin)
         post_id = f"post-{uuid.uuid4().hex[:10]}"
         state["posts"][post_id] = {
             "id": post_id,
@@ -4147,6 +4315,31 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 profile["deviceSyncedAt"] = local_time_label()
                 if source == "xiaomi-scale":
                     profile["bodyFat"] = body_fat
+                mock_snapshot = synthesize_device_health_snapshot(profile, source)
+                profile["healthSnapshot"] = merge_snapshot_fields(
+                    profile.get("healthSnapshot") or {},
+                    {
+                        "source": source_label,
+                        "bmi": bmi,
+                        "heightCm": height_cm,
+                        "weightKg": weight_kg,
+                        "bodyFat": profile.get("bodyFat"),
+                        "restingHeartRate": mock_snapshot.get("restingHeartRate"),
+                        "stepCount": mock_snapshot.get("stepCount"),
+                        "activeEnergyBurned": mock_snapshot.get("activeEnergyBurned"),
+                        "vo2Max": mock_snapshot.get("vo2Max"),
+                        "syncedAt": now_utc().isoformat(),
+                    },
+                )
+                update_health_history_entry(
+                    profile,
+                    local_date_key(),
+                    set_values={
+                        "stepCount": mock_snapshot.get("stepCount"),
+                        "activeEnergyBurned": mock_snapshot.get("activeEnergyBurned"),
+                        "vo2Max": mock_snapshot.get("vo2Max"),
+                    },
+                )
                 session["currentActorProfileId"] = profile_id
                 return bootstrap_response(state, session)
 
@@ -4313,6 +4506,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     "createdAt": iso_at(),
                 }
                 profile.setdefault("checkins", []).insert(0, checkin)
+                record_checkin_health_metrics(profile, checkin)
 
                 post_id = f"post-{uuid.uuid4().hex[:10]}"
                 state["posts"][post_id] = {

@@ -220,6 +220,55 @@ const CHECKIN_SPORT_METRICS = {
 
 const OUTDOOR_ROUTE_SPORT_IDS = new Set(["run", "outdoor-walk", "outdoor-cycling", "hiking", "trail-run"]);
 
+const HEALTH_VIEW_MODES = [
+  { id: "overview", label: "概览" },
+  { id: "trends", label: "趋势" },
+  { id: "all", label: "全部" }
+];
+
+const HEALTH_TREND_GROUPS = [
+  {
+    id: "run",
+    label: "跑步",
+    icon: "跑",
+    sportIds: ["run", "treadmill", "trail-run"],
+    metric: "distance",
+    unit: "公里",
+    accent: "#2cc58d",
+    soft: "rgba(44, 197, 141, 0.16)"
+  },
+  {
+    id: "walk",
+    label: "行走",
+    icon: "走",
+    sportIds: ["outdoor-walk", "indoor-walk", "hiking"],
+    metric: "distance",
+    unit: "公里",
+    accent: "#5b8cff",
+    soft: "rgba(91, 140, 255, 0.14)"
+  },
+  {
+    id: "cycling",
+    label: "骑行",
+    icon: "骑",
+    sportIds: ["cycling", "outdoor-cycling"],
+    metric: "distance",
+    unit: "公里",
+    accent: "#8d6dff",
+    soft: "rgba(141, 109, 255, 0.15)"
+  },
+  {
+    id: "yoga",
+    label: "瑜伽",
+    icon: "瑜",
+    sportIds: ["yoga", "pilates"],
+    metric: "duration",
+    unit: "分钟",
+    accent: "#a98af8",
+    soft: "rgba(169, 138, 248, 0.15)"
+  }
+];
+
 const OUTDOOR_ROUTE_TEMPLATES = {
   run: [
     [10, 63], [18, 46], [36, 34], [54, 37], [72, 32], [89, 40], [84, 58], [71, 73], [52, 81], [31, 78], [16, 70], [10, 63]
@@ -1012,6 +1061,7 @@ const state = {
   chatTargetProfileId: "",
   chatDraft: "",
   socialTab: "following",
+  healthViewMode: "overview",
   sessionId: "",
   runtimeConfig: { ...DEFAULT_RUNTIME_CONFIG },
   isBootstrapping: false
@@ -1578,6 +1628,7 @@ function buildSnapshotRecoveryProfile(profile) {
     healthSource: profile.healthSource || "",
     deviceSyncedAt: profile.deviceSyncedAt || "",
     healthSnapshot: profile.healthSnapshot || {},
+    healthHistory: Array.isArray(profile.healthHistory) ? profile.healthHistory : [],
     restingHeartRate: profile.restingHeartRate || "",
     price: profile.price || "",
     hours: profile.hours || "",
@@ -4645,6 +4696,551 @@ function getProfileBMI(profile) {
   return bmi ? bmi.toFixed(1) : "--";
 }
 
+function getHealthSnapshot(profile) {
+  return profile?.healthSnapshot && typeof profile.healthSnapshot === "object"
+    ? profile.healthSnapshot
+    : {};
+}
+
+function getHealthHistory(profile) {
+  return Array.isArray(profile?.healthHistory) ? profile.healthHistory : [];
+}
+
+function createLocalDateKey(dateInput) {
+  const date = getSafeDate(dateInput) || new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getMonthStart(dateInput = new Date()) {
+  const date = getSafeDate(dateInput) || new Date();
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function getMonthEnd(dateInput = new Date()) {
+  const date = getSafeDate(dateInput) || new Date();
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function addDays(dateInput, amount) {
+  const date = getSafeDate(dateInput) || new Date();
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + amount);
+  return copy;
+}
+
+function isDateInRange(dateInput, start, end) {
+  const date = getSafeDate(dateInput);
+  return Boolean(date && start && end && date >= start && date <= end);
+}
+
+function formatHealthNumber(value, digits = 1) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return "0";
+  if (digits <= 0) return String(Math.round(numeric));
+  return numeric.toFixed(digits).replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+}
+
+function formatHealthDistance(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "0.0";
+  return numeric >= 100 ? formatHealthNumber(numeric, 0) : formatHealthNumber(numeric, 1);
+}
+
+function formatHealthMinutes(value) {
+  const numeric = Math.max(0, Math.round(Number(value || 0)));
+  return `${numeric} 分钟`;
+}
+
+function formatMonthLabel(dateInput = new Date()) {
+  const date = getSafeDate(dateInput) || new Date();
+  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月`;
+}
+
+function formatWeekRangeLabel(dateInput = new Date()) {
+  const start = getWeekAnchor(dateInput);
+  const end = addDays(start, 6);
+  return `周报 ${start.getMonth() + 1}.${start.getDate()}-${end.getMonth() + 1}.${end.getDate()}`;
+}
+
+function formatShortMonthDay(dateInput) {
+  const date = getSafeDate(dateInput);
+  if (!date) return "--/--";
+  return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getCalendarIntensity(minutes) {
+  if (minutes >= 60) return "is-strong";
+  if (minutes >= 25) return "is-medium";
+  if (minutes > 0) return "is-light";
+  return "is-empty";
+}
+
+function getCheckinMetricValue(checkin, metric) {
+  if (!checkin) return 0;
+  if (metric === "distance") return Number(checkin.distance || 0);
+  if (metric === "calories") return Number(checkin.calories || 0);
+  return Number(checkin.duration || 0);
+}
+
+function buildCheckinDayMap(checkins) {
+  const daily = new Map();
+  for (const checkin of checkins || []) {
+    const createdAt = getSafeDate(checkin?.createdAt);
+    if (!createdAt) continue;
+    const key = createLocalDateKey(createdAt);
+    const existing = daily.get(key) || {
+      key,
+      date: new Date(createdAt.getFullYear(), createdAt.getMonth(), createdAt.getDate()),
+      minutes: 0,
+      distance: 0,
+      calories: 0,
+      count: 0,
+      sports: new Set()
+    };
+    existing.minutes += Number(checkin.duration || 0);
+    existing.distance += Number(checkin.distance || 0);
+    existing.calories += Number(checkin.calories || 0);
+    existing.count += 1;
+    if (checkin.sportId) existing.sports.add(checkin.sportId);
+    daily.set(key, existing);
+  }
+  return daily;
+}
+
+function getDaySummary(dayMap, dateInput) {
+  const date = getSafeDate(dateInput);
+  if (!date) {
+    return { minutes: 0, distance: 0, calories: 0, count: 0, sports: new Set() };
+  }
+  return dayMap.get(createLocalDateKey(date)) || {
+    minutes: 0,
+    distance: 0,
+    calories: 0,
+    count: 0,
+    sports: new Set()
+  };
+}
+
+function getActiveStreakDays(dayMap, fromDate = new Date()) {
+  let streak = 0;
+  let cursor = new Date(fromDate);
+  cursor.setHours(0, 0, 0, 0);
+  while (getDaySummary(dayMap, cursor).minutes > 0) {
+    streak += 1;
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
+}
+
+function buildHealthCalendar(dayMap, focusDate = new Date()) {
+  const monthStart = getMonthStart(focusDate);
+  const monthEnd = getMonthEnd(focusDate);
+  const totalDays = monthEnd.getDate();
+  const startOffset = monthStart.getDay();
+  const cells = [];
+
+  for (let index = 0; index < startOffset; index += 1) {
+    cells.push({ empty: true, id: `empty-${index}` });
+  }
+
+  for (let day = 1; day <= totalDays; day += 1) {
+    const date = new Date(monthStart.getFullYear(), monthStart.getMonth(), day);
+    const summary = getDaySummary(dayMap, date);
+    cells.push({
+      id: createLocalDateKey(date),
+      label: day,
+      isToday: isSameLocalDay(date, new Date()),
+      minutes: summary.minutes,
+      intensity: getCalendarIntensity(summary.minutes)
+    });
+  }
+
+  return {
+    monthLabel: formatMonthLabel(focusDate),
+    activeDays: cells.filter((item) => !item.empty && item.minutes > 0).length,
+    cells
+  };
+}
+
+function buildTrailingDaySeries(dayMap, days, field, endDate = new Date()) {
+  const series = [];
+  for (let offset = days - 1; offset >= 0; offset -= 1) {
+    const date = addDays(endDate, -offset);
+    const summary = getDaySummary(dayMap, date);
+    series.push({
+      label: ["日", "一", "二", "三", "四", "五", "六"][date.getDay()],
+      value: Number(summary[field] || 0),
+      date
+    });
+  }
+  return series;
+}
+
+function filterCheckinsInRange(checkins, start, end, sportIds = []) {
+  const sportSet = sportIds.length ? new Set(sportIds) : null;
+  return (checkins || []).filter((item) => {
+    const createdAt = getSafeDate(item.createdAt);
+    if (!createdAt || !isDateInRange(createdAt, start, end)) return false;
+    return !sportSet || sportSet.has(item.sportId);
+  });
+}
+
+function buildCumulativeMetricSeries(checkins, sportIds, metric, focusDate = new Date()) {
+  const monthStart = getMonthStart(focusDate);
+  const monthEnd = getMonthEnd(focusDate);
+  const sportSet = new Set(sportIds);
+  let runningTotal = 0;
+  const series = [];
+
+  for (let day = 1; day <= monthEnd.getDate(); day += 1) {
+    const date = new Date(monthStart.getFullYear(), monthStart.getMonth(), day);
+    const total = (checkins || []).reduce((sum, item) => {
+      const createdAt = getSafeDate(item.createdAt);
+      if (!createdAt || !isSameLocalDay(createdAt, date) || !sportSet.has(item.sportId)) {
+        return sum;
+      }
+      return sum + getCheckinMetricValue(item, metric);
+    }, 0);
+    runningTotal += total;
+    series.push({ label: String(day), value: Number(runningTotal.toFixed(metric === "distance" ? 2 : 1)) });
+  }
+
+  return series;
+}
+
+function buildWeeklyMetricSeries(checkins, sportIds, metric, weeks = 12, focusDate = new Date()) {
+  const sportSet = new Set(sportIds);
+  const currentWeekStart = getWeekAnchor(focusDate);
+  const series = [];
+
+  for (let offset = weeks - 1; offset >= 0; offset -= 1) {
+    const weekStart = addDays(currentWeekStart, -offset * 7);
+    const weekEnd = addDays(weekStart, 6);
+    const total = (checkins || []).reduce((sum, item) => {
+      const createdAt = getSafeDate(item.createdAt);
+      if (!createdAt || !sportSet.has(item.sportId) || !isDateInRange(createdAt, weekStart, weekEnd)) {
+        return sum;
+      }
+      return sum + getCheckinMetricValue(item, metric);
+    }, 0);
+
+    series.push({
+      label: `${weekStart.getMonth() + 1}/${weekStart.getDate()}`,
+      value: Number(total.toFixed(metric === "distance" ? 2 : 1))
+    });
+  }
+
+  return series;
+}
+
+function parsePaceSeconds(label) {
+  const raw = String(label || "");
+  const match = raw.match(/(\d+)\s*'\s*(\d{1,2})/);
+  if (!match) return 0;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function formatPaceSeconds(seconds) {
+  const safe = Math.max(0, Math.round(Number(seconds || 0)));
+  const minutes = Math.floor(safe / 60);
+  const remain = String(safe % 60).padStart(2, "0");
+  return `${minutes}'${remain}"`;
+}
+
+function renderHealthViewTabs() {
+  return `
+    <div class="health-view-tabs">
+      ${HEALTH_VIEW_MODES.map((item) => `
+        <button
+          class="health-view-tab ${state.healthViewMode === item.id ? "is-active" : ""}"
+          data-set-health-view="${item.id}"
+          type="button"
+        >
+          ${escapeHtml(item.label)}
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderHealthBarChart(series, options = {}) {
+  const { formatter = (value) => String(Math.round(value || 0)), emptyLabel = "暂无数据" } = options;
+  const safeSeries = Array.isArray(series) ? series : [];
+  const maxValue = Math.max(...safeSeries.map((item) => Number(item.value || 0)), 0);
+
+  if (!safeSeries.length || maxValue <= 0) {
+    return `<div class="health-chart-empty">${escapeHtml(emptyLabel)}</div>`;
+  }
+
+  return `
+    <div class="health-bar-chart">
+      ${safeSeries
+        .map((item) => {
+          const barHeight = Math.max(12, Math.round((Number(item.value || 0) / maxValue) * 100));
+          return `
+            <div class="health-bar-chart__item">
+              <span class="health-bar-chart__value">${escapeHtml(formatter(item.value || 0))}</span>
+              <span class="health-bar-chart__track">
+                <i style="height:${barHeight}%"></i>
+              </span>
+              <span class="health-bar-chart__label">${escapeHtml(item.label || "")}</span>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function buildSparklineGeometry(series, width = 320, height = 136, padding = 14) {
+  const safeSeries = Array.isArray(series) ? series : [];
+  const values = safeSeries.map((item) => Number(item.value || 0));
+  const maxValue = Math.max(...values, 0);
+  if (!safeSeries.length || maxValue <= 0) return null;
+
+  const usableWidth = width - padding * 2;
+  const usableHeight = height - padding * 2;
+  const step = safeSeries.length > 1 ? usableWidth / (safeSeries.length - 1) : 0;
+  const points = safeSeries.map((item, index) => {
+    const x = padding + step * index;
+    const y = padding + usableHeight - (Number(item.value || 0) / maxValue) * usableHeight;
+    return { x, y };
+  });
+
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)
+    .join(" ");
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${(height - padding).toFixed(1)} L ${points[0].x.toFixed(1)} ${(height - padding).toFixed(1)} Z`;
+
+  return { width, height, padding, points, linePath, areaPath };
+}
+
+function renderHealthSparkline(series, options = {}) {
+  const { emptyLabel = "暂无数据" } = options;
+  const geometry = buildSparklineGeometry(series);
+  if (!geometry) {
+    return `<div class="health-chart-empty health-chart-empty--wide">${escapeHtml(emptyLabel)}</div>`;
+  }
+
+  return `
+    <div class="health-sparkline">
+      <svg viewBox="0 0 ${geometry.width} ${geometry.height}" aria-hidden="true" focusable="false">
+        <path class="health-sparkline__area" d="${geometry.areaPath}"></path>
+        <path class="health-sparkline__line" d="${geometry.linePath}"></path>
+        ${geometry.points
+          .map(
+            (point, index) => `
+              <circle
+                class="health-sparkline__dot ${index === geometry.points.length - 1 ? "is-last" : ""}"
+                cx="${point.x.toFixed(1)}"
+                cy="${point.y.toFixed(1)}"
+                r="${index === geometry.points.length - 1 ? 4.5 : 3}"
+              ></circle>
+            `
+          )
+          .join("")}
+      </svg>
+      <div class="health-sparkline__axis">
+        <span>${escapeHtml(series[0]?.label || "")}</span>
+        <span>${escapeHtml(series[Math.floor(series.length / 2)]?.label || "")}</span>
+        <span>${escapeHtml(series[series.length - 1]?.label || "")}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderHealthCalendar(calendar) {
+  return `
+    <div class="health-calendar">
+      <div class="health-calendar__header">
+        <strong>${escapeHtml(calendar.monthLabel)}</strong>
+        <span>${calendar.activeDays} 个活跃日</span>
+      </div>
+      <div class="health-calendar__weekdays">
+        ${["日", "一", "二", "三", "四", "五", "六"].map((label) => `<span>${label}</span>`).join("")}
+      </div>
+      <div class="health-calendar__grid">
+        ${calendar.cells
+          .map((cell) => {
+            if (cell.empty) {
+              return '<span class="health-calendar__cell health-calendar__cell--empty"></span>';
+            }
+            return `
+              <span class="health-calendar__cell ${cell.isToday ? "is-today" : ""}">
+                <span class="health-calendar__day">${cell.label}</span>
+                <i class="health-calendar__dot ${cell.intensity}"></i>
+              </span>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderRunPaceRows(items) {
+  const safeItems = Array.isArray(items) ? items.filter((item) => item.seconds > 0) : [];
+  if (!safeItems.length) {
+    return '<div class="health-chart-empty">最近 5 次跑步的配速会显示在这里</div>';
+  }
+
+  const slowest = Math.max(...safeItems.map((item) => item.seconds));
+  const fastest = Math.min(...safeItems.map((item) => item.seconds));
+  const range = Math.max(1, slowest - fastest);
+
+  return `
+    <div class="health-pace-list">
+      ${safeItems
+        .map((item) => {
+          const width = 42 + ((slowest - item.seconds) / range) * 50;
+          return `
+            <div class="health-pace-row">
+              <span class="health-pace-row__date">${escapeHtml(formatShortMonthDay(item.createdAt))}</span>
+              <span class="health-pace-row__track">
+                <i style="width:${width.toFixed(1)}%"></i>
+              </span>
+              <strong class="${item.isFastest ? "is-highlight" : ""}">${escapeHtml(item.label)}</strong>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function getComparisonLabel(todayValue, yesterdayValue) {
+  const today = Math.round(Number(todayValue || 0));
+  const yesterday = Math.round(Number(yesterdayValue || 0));
+  if (!today && !yesterday) return "今天到目前为止，还没有新的训练记录。";
+  if (today === yesterday) return "今天到目前为止，运动时长和昨天一样。";
+  if (today > yesterday) return `今天到目前为止，比昨天多运动 ${today - yesterday} 分钟。`;
+  return `今天到目前为止，比昨天少运动 ${yesterday - today} 分钟。`;
+}
+
+function buildHealthDashboard(profile) {
+  const checkins = getProfileCheckins(profile);
+  const dayMap = buildCheckinDayMap(checkins);
+  const today = new Date();
+  const monthStart = getMonthStart(today);
+  const monthEnd = getMonthEnd(today);
+  const previousMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const previousMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+  const currentMonthCheckins = filterCheckinsInRange(checkins, monthStart, monthEnd);
+  const previousMonthCheckins = filterCheckinsInRange(checkins, previousMonthStart, previousMonthEnd);
+  const todaySummary = getDaySummary(dayMap, today);
+  const yesterdaySummary = getDaySummary(dayMap, addDays(today, -1));
+  const sevenDaySeries = buildTrailingDaySeries(dayMap, 7, "minutes", today);
+  const sevenDayAverage = sevenDaySeries.reduce((sum, item) => sum + Number(item.value || 0), 0) / 7;
+  const sevenDayTotal = sevenDaySeries.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  const snapshot = getHealthSnapshot(profile);
+  const connectedDevices = getConnectedDevices(profile);
+  const sortedHealthHistory = getHealthHistory(profile)
+    .filter((item) => item && item.date)
+    .slice()
+    .sort((left, right) => new Date(left.date) - new Date(right.date));
+  let stepHistory = sortedHealthHistory.slice(-7).map((item) => ({
+    label: formatShortMonthDay(item.date),
+    value: Number(item.stepCount || 0),
+    date: item.date
+  }));
+  const todayKey = createLocalDateKey(today);
+  const snapshotStepCount = Number(snapshot.stepCount || 0);
+  if (snapshotStepCount > 0) {
+    const todayHistory = stepHistory.find((item) => item.date === todayKey);
+    if (todayHistory) {
+      todayHistory.value = Math.max(todayHistory.value, snapshotStepCount);
+    } else {
+      stepHistory = [...stepHistory, {
+        label: formatShortMonthDay(today),
+        value: snapshotStepCount,
+        date: todayKey
+      }].slice(-7);
+    }
+  }
+  const todaySteps = Number(snapshot.stepCount || stepHistory[stepHistory.length - 1]?.value || 0);
+  const yesterdaySteps = stepHistory.length >= 2 ? Number(stepHistory[stepHistory.length - 2].value || 0) : 0;
+  const recentRuns = checkins
+    .filter((item) => ["run", "treadmill", "trail-run"].includes(item.sportId) && parsePaceSeconds(item.paceLabel) > 0)
+    .slice(0, 5)
+    .map((item) => ({
+      createdAt: item.createdAt,
+      seconds: parsePaceSeconds(item.paceLabel),
+      label: item.paceLabel
+    }));
+  const fastestRun = recentRuns.length ? Math.min(...recentRuns.map((item) => item.seconds)) : 0;
+  const runPaceRows = recentRuns.map((item) => ({
+    ...item,
+    isFastest: item.seconds === fastestRun
+  }));
+
+  const sportCards = HEALTH_TREND_GROUPS.map((group) => {
+    const monthItems = filterCheckinsInRange(checkins, monthStart, monthEnd, group.sportIds);
+    const previousMonthItems = filterCheckinsInRange(checkins, previousMonthStart, previousMonthEnd, group.sportIds);
+    const monthTotal = monthItems.reduce((sum, item) => sum + getCheckinMetricValue(item, group.metric), 0);
+    const previousMonthTotal = previousMonthItems.reduce((sum, item) => sum + getCheckinMetricValue(item, group.metric), 0);
+    const series =
+      group.id === "yoga"
+        ? buildWeeklyMetricSeries(checkins, group.sportIds, group.metric, 12, today)
+        : buildCumulativeMetricSeries(checkins, group.sportIds, group.metric, today);
+
+    return {
+      ...group,
+      monthTotal,
+      previousMonthTotal,
+      totalLabel: `${formatHealthNumber(monthTotal, group.metric === "distance" ? 1 : 0)} ${group.unit}`,
+      compareLabel:
+        previousMonthTotal > 0
+          ? `较上月 ${monthTotal >= previousMonthTotal ? "提升" : "回落"} ${formatHealthNumber(Math.abs(monthTotal - previousMonthTotal), group.metric === "distance" ? 1 : 0)} ${group.unit}`
+          : `本月截至目前，暂未形成完整 ${group.label} 趋势`,
+      series
+    };
+  });
+
+  const vo2Value = Number(snapshot.vo2Max || snapshot.maxOxygenUptake || snapshot.cardioFitness || 0);
+  const activeEnergy = Number(snapshot.activeEnergyBurned || todaySummary.calories || 0);
+
+  return {
+    weekLabel: formatWeekRangeLabel(today),
+    calendar: buildHealthCalendar(dayMap, today),
+    monthActiveDays: currentMonthCheckins.length
+      ? new Set(currentMonthCheckins.map((item) => createLocalDateKey(item.createdAt))).size
+      : 0,
+    streakDays: getActiveStreakDays(dayMap, today),
+    monthMinutes: currentMonthCheckins.reduce((sum, item) => sum + Number(item.duration || 0), 0),
+    monthCalories: currentMonthCheckins.reduce((sum, item) => sum + Number(item.calories || 0), 0),
+    monthDistance: currentMonthCheckins.reduce((sum, item) => sum + Number(item.distance || 0), 0),
+    todayMinutes: todaySummary.minutes,
+    yesterdayMinutes: yesterdaySummary.minutes,
+    comparisonLabel: getComparisonLabel(todaySummary.minutes, yesterdaySummary.minutes),
+    sevenDayTotal,
+    sevenDayAverage,
+    sevenDaySeries,
+    bodyMetrics: [
+      { label: "BMI", value: getProfileBMI(profile), note: "身体质量指数" },
+      { label: "体脂率", value: profile.bodyFat ? `${formatHealthNumber(profile.bodyFat, 1)}%` : "--", note: "最近一次体脂" },
+      { label: "静息心率", value: profile.restingHeartRate ? `${Math.round(Number(profile.restingHeartRate))} bpm` : "--", note: "设备同步更新" },
+      { label: "已连设备", value: connectedDevices.length ? `${connectedDevices.length} 台` : "未连接", note: profile.healthSource || "原生同步" }
+    ],
+    steps: {
+      today: todaySteps,
+      yesterday: yesterdaySteps,
+      average: stepHistory.length
+        ? Math.round(stepHistory.reduce((sum, item) => sum + Number(item.value || 0), 0) / Math.max(1, stepHistory.length))
+        : 0,
+      series: stepHistory,
+      syncedAt: profile.deviceSyncedAt || "",
+      source: profile.healthSource || ""
+    },
+    vo2: {
+      value: vo2Value > 0 ? `${formatHealthNumber(vo2Value, 1)}` : "--",
+      source: profile.healthSource || "",
+      activeEnergy: activeEnergy > 0 ? `${formatHealthNumber(activeEnergy, 0)} kcal` : "--"
+    },
+    sportCards,
+    runPaceRows
+  };
+}
+
 function getWorkoutSessionStats(profile) {
   return getWorkoutSessionStatsForState(profile, state.workoutSession);
 }
@@ -5924,103 +6520,246 @@ function renderCheckinFeature(profile) {
 }
 
 function renderHealthFeature(profile) {
-  const bmi = getProfileBMI(profile);
-  const heightCm = getProfileHeight(profile);
-  const weightKg = getProfileWeight(profile);
-  const bodyFat = profile.bodyFat || "--";
-  const latestSource = profile.healthSource || "未连接设备";
-  const latestSync = profile.deviceSyncedAt || "还没有同步";
+  const dashboard = buildHealthDashboard(profile);
   const connectedSet = new Set(getConnectedDevices(profile));
+  const latestSource = profile.healthSource || "等待同步";
+  const latestSync = profile.deviceSyncedAt || "尚未同步";
+  const showOverview = state.healthViewMode === "overview" || state.healthViewMode === "all";
+  const showTrends = state.healthViewMode === "trends" || state.healthViewMode === "all";
+
+  const renderSportCard = (card) => `
+    <article
+      class="health-sport-card"
+      style="--health-accent:${card.accent}; --health-soft:${card.soft};"
+    >
+      <div class="health-card-head">
+        <div class="health-card-title">
+          <span class="health-icon">${escapeHtml(card.icon)}</span>
+          <div>
+            <strong>${escapeHtml(card.label)}</strong>
+            <p>${escapeHtml(card.compareLabel)}</p>
+          </div>
+        </div>
+        <span class="health-card-value">${escapeHtml(card.totalLabel)}</span>
+      </div>
+      ${renderHealthSparkline(card.series, {
+        emptyLabel: `本月暂无${card.label}记录`
+      })}
+      ${
+        card.id === "run"
+          ? `
+            <div class="health-card-subcopy">
+              最近 ${dashboard.runPaceRows.length || 0} 次跑步，${dashboard.runPaceRows.length ? `最快配速 ${escapeHtml(formatPaceSeconds(Math.min(...dashboard.runPaceRows.map((item) => item.seconds))))}` : "暂时还没有配速记录"}
+            </div>
+            ${renderRunPaceRows(dashboard.runPaceRows)}
+          `
+          : `
+            <div class="health-card-subcopy">
+              ${card.id === "yoga" ? "按近 12 周统计时长变化" : "按本月累计趋势显示"}，数据来自你的真实训练记录。
+            </div>
+          `
+      }
+    </article>
+  `;
 
   return `
-    <article class="detail-card">
-      <div class="section-title-row">
+    <section class="health-center">
+      <article class="health-report-banner">
         <div>
-          <h3>健康概览</h3>
-          <p class="result-tip">这里会作为你自己的身体数据中心。网页端展示已同步结果，真实设备接入将通过原生版完成。</p>
+          <span class="health-report-chip">${escapeHtml(dashboard.weekLabel)}</span>
+          <strong>本周已累计运动 ${escapeHtml(formatHealthMinutes(dashboard.sevenDayTotal))}</strong>
+          <p>把你的训练、步数、身体数据和设备同步统一沉淀成一页数据中心。</p>
         </div>
-      </div>
-      <article class="summary-card summary-card--health">
-        <div>
-          <span>BMI</span>
-          <strong>${escapeHtml(String(bmi))}</strong>
-        </div>
-        <div>
-          <span>身高</span>
-          <strong>${heightCm ? escapeHtml(`${heightCm} cm`) : "--"}</strong>
-        </div>
-        <div>
-          <span>体重</span>
-          <strong>${weightKg ? escapeHtml(`${weightKg} kg`) : "--"}</strong>
-        </div>
+        <button class="mini-button mini-button--accent" data-set-health-view="all" type="button">去查看</button>
       </article>
-      <div class="detail-grid">
-        <div class="detail-item">
-          <span>性别</span>
-          <strong>${escapeHtml(profile.gender || "未填写")}</strong>
-        </div>
-        <div class="detail-item">
-          <span>BMI 参考</span>
-          <strong>18.5 - 23.9</strong>
-        </div>
-        <div class="detail-item">
-          <span>体脂率</span>
-          <strong>${bodyFat === "--" ? "--" : escapeHtml(`${bodyFat}%`)}</strong>
-        </div>
-        <div class="detail-item">
-          <span>数据来源</span>
-          <strong>${escapeHtml(latestSource)}</strong>
-        </div>
-        <div class="detail-item">
-          <span>最近同步</span>
-          <strong>${escapeHtml(latestSync)}</strong>
-        </div>
-      </div>
-    </article>
 
-    <article class="detail-card">
-      <div class="section-title-row">
-        <div>
-          <h3>外接设备</h3>
-          <p class="result-tip">Apple Health / Apple Watch 将通过原生 iOS 版同步。当前网页按钮仅保留演示入口，方便继续走通界面联调。</p>
-        </div>
-      </div>
-      <section class="device-list">
-        <article class="device-row">
-          <div>
-            <strong>Apple Watch</strong>
-            <p>同步运动时长、卡路里、心率与训练状态</p>
-          </div>
-          ${
-            connectedSet.has("Apple Watch")
-              ? '<span class="status-pill">已连接</span>'
-              : '<button class="mini-button mini-button--accent" data-sync-health-device="apple-watch" type="button">演示接入</button>'
-          }
-        </article>
-        <article class="device-row">
-          <div>
-            <strong>小米手表</strong>
-            <p>同步日常活动、训练记录和基础身体数据</p>
-          </div>
-          ${
-            connectedSet.has("小米手表")
-              ? '<span class="status-pill">已连接</span>'
-              : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-watch" type="button">演示接入</button>'
-          }
-        </article>
-        <article class="device-row">
-          <div>
-            <strong>小米智能秤</strong>
-            <p>同步体重、BMI、体脂率与最近一次测量时间</p>
-          </div>
-          ${
-            connectedSet.has("小米智能秤")
-              ? '<span class="status-pill">已连接</span>'
-              : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-scale" type="button">演示接入</button>'
-          }
-        </article>
-      </section>
-    </article>
+      ${renderHealthViewTabs()}
+
+      ${
+        showOverview
+          ? `
+            <article class="health-overview-card">
+              <div class="health-overview-copy">
+                <span class="health-section-kicker">总运动</span>
+                <h3>本月累计运动 ${dashboard.monthActiveDays} 天，最近连续运动 ${dashboard.streakDays} 天</h3>
+                <p>${escapeHtml(dashboard.comparisonLabel)}</p>
+              </div>
+              <div class="health-overview-stats">
+                <div><span>运动时长</span><strong>${escapeHtml(formatHealthMinutes(dashboard.monthMinutes))}</strong></div>
+                <div><span>卡路里</span><strong>${escapeHtml(formatHealthNumber(dashboard.monthCalories, 0))} kcal</strong></div>
+                <div><span>总距离</span><strong>${escapeHtml(formatHealthDistance(dashboard.monthDistance))} km</strong></div>
+                <div><span>已连设备</span><strong>${connectedSet.size ? escapeHtml(`${connectedSet.size} 台`) : "未连接"}</strong></div>
+              </div>
+              ${renderHealthCalendar(dashboard.calendar)}
+              <div class="health-today-compare">
+                <div>
+                  <span>今日</span>
+                  <strong>${escapeHtml(formatHealthMinutes(dashboard.todayMinutes))}</strong>
+                </div>
+                <div>
+                  <span>昨天</span>
+                  <strong>${escapeHtml(formatHealthMinutes(dashboard.yesterdayMinutes))}</strong>
+                </div>
+              </div>
+            </article>
+
+            <section class="health-summary-grid">
+              <article class="health-summary-card summary-card--health">
+                <div class="health-card-head health-card-head--compact">
+                  <div class="health-card-title">
+                    <span class="health-icon">体</span>
+                    <div>
+                      <strong>身体数据</strong>
+                      <p>体型与恢复状态会直接影响训练估算</p>
+                    </div>
+                  </div>
+                  <span class="health-inline-note">来源：${escapeHtml(latestSource)}</span>
+                </div>
+                <div class="health-metrics-grid">
+                  ${dashboard.bodyMetrics
+                    .map(
+                      (item) => `
+                        <div class="health-metric-cell">
+                          <span>${escapeHtml(item.label)}</span>
+                          <strong>${escapeHtml(item.value)}</strong>
+                          <small>${escapeHtml(item.note)}</small>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              </article>
+
+              <article class="health-summary-card">
+                <div class="health-card-head health-card-head--compact">
+                  <div class="health-card-title">
+                    <span class="health-icon">步</span>
+                    <div>
+                      <strong>步数</strong>
+                      <p>${dashboard.steps.source ? `${escapeHtml(dashboard.steps.source)} 已同步` : "连接设备后可同步真实步数"}</p>
+                    </div>
+                  </div>
+                  <span class="health-inline-note">${escapeHtml(dashboard.steps.syncedAt || "未同步")}</span>
+                </div>
+                <div class="health-step-highlight">
+                  <div>
+                    <span>今日</span>
+                    <strong>${dashboard.steps.today ? `${escapeHtml(formatHealthNumber(dashboard.steps.today, 0))} 步` : "--"}</strong>
+                  </div>
+                  <div>
+                    <span>昨天</span>
+                    <strong>${dashboard.steps.yesterday ? `${escapeHtml(formatHealthNumber(dashboard.steps.yesterday, 0))} 步` : "--"}</strong>
+                  </div>
+                  <div>
+                    <span>7 日均值</span>
+                    <strong>${dashboard.steps.average ? `${escapeHtml(formatHealthNumber(dashboard.steps.average, 0))} 步` : "--"}</strong>
+                  </div>
+                </div>
+                ${renderHealthBarChart(dashboard.steps.series, {
+                  formatter: (value) => (value ? formatHealthNumber(value, 0) : ""),
+                  emptyLabel: "最近 7 天步数会在连接设备后自动累计"
+                })}
+              </article>
+
+              <article class="health-summary-card">
+                <div class="health-card-head health-card-head--compact">
+                  <div class="health-card-title">
+                    <span class="health-icon">氧</span>
+                    <div>
+                      <strong>最大摄氧量</strong>
+                      <p>${dashboard.vo2.source ? `${escapeHtml(dashboard.vo2.source)} 同步中` : "等待设备同步 cardio fitness"}</p>
+                    </div>
+                  </div>
+                  <span class="health-inline-note">最近消耗 ${escapeHtml(dashboard.vo2.activeEnergy)}</span>
+                </div>
+                <div class="health-vo2-value">
+                  <strong>${escapeHtml(dashboard.vo2.value)}</strong>
+                  <span>${dashboard.vo2.value !== "--" ? "ml/kg/min" : "暂无设备数据"}</span>
+                </div>
+                <p class="result-tip result-tip--health">
+                  连接 Apple Health、Apple Watch 或小米设备后，这里会自动沉淀更完整的心肺耐力数据。
+                </p>
+              </article>
+            </section>
+
+            <article class="health-device-card">
+              <div class="health-card-head">
+                <div class="health-card-title">
+                  <span class="health-icon">设</span>
+                  <div>
+                    <strong>设备与来源</strong>
+                    <p>同步后会自动更新步数、体脂、心率和近期训练趋势</p>
+                  </div>
+                </div>
+                <span class="health-inline-note">${escapeHtml(latestSync)}</span>
+              </div>
+              <section class="device-list">
+                <article class="device-row">
+                  <div>
+                    <strong>Apple Watch</strong>
+                    <p>同步运动时长、卡路里、心率与训练状态</p>
+                  </div>
+                  ${
+                    connectedSet.has("Apple Watch")
+                      ? '<span class="status-pill">已连接</span>'
+                      : '<button class="mini-button mini-button--accent" data-sync-health-device="apple-watch" type="button">连接设备</button>'
+                  }
+                </article>
+                <article class="device-row">
+                  <div>
+                    <strong>小米手表</strong>
+                    <p>同步日常活动、训练记录和基础身体数据</p>
+                  </div>
+                  ${
+                    connectedSet.has("小米手表")
+                      ? '<span class="status-pill">已连接</span>'
+                      : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-watch" type="button">连接设备</button>'
+                  }
+                </article>
+                <article class="device-row">
+                  <div>
+                    <strong>小米智能秤</strong>
+                    <p>同步体重、BMI、体脂率与最近一次测量时间</p>
+                  </div>
+                  ${
+                    connectedSet.has("小米智能秤")
+                      ? '<span class="status-pill">已连接</span>'
+                      : '<button class="mini-button mini-button--accent" data-sync-health-device="xiaomi-scale" type="button">连接设备</button>'
+                  }
+                </article>
+              </section>
+            </article>
+          `
+          : ""
+      }
+
+      ${
+        showTrends
+          ? `
+            <article class="health-trend-card">
+              <div class="health-card-head">
+                <div class="health-card-title">
+                  <span class="health-icon">势</span>
+                  <div>
+                    <strong>总运动趋势</strong>
+                    <p>过去 7 天平均运动 ${escapeHtml(formatHealthMinutes(dashboard.sevenDayAverage))}</p>
+                  </div>
+                </div>
+                <span class="health-inline-note">${escapeHtml(dashboard.weekLabel)}</span>
+              </div>
+              ${renderHealthBarChart(dashboard.sevenDaySeries, {
+                formatter: (value) => (value ? formatHealthNumber(value, 0) : ""),
+                emptyLabel: "最近 7 天还没有训练数据"
+              })}
+            </article>
+
+            <section class="health-trend-grid">
+              ${dashboard.sportCards.map(renderSportCard).join("")}
+            </section>
+          `
+          : ""
+      }
+    </section>
   `;
 }
 
@@ -6037,7 +6776,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
           renderPersonalShortcutTile("收藏", `${getFavoritedMediaEntries().length} 条媒体`, "藏", 'data-open-my-feature="collections"'),
           renderPersonalShortcutTile("积分", `${getProfilePoints(profile, relatedBookings)} 分`, "分", 'data-open-my-feature="points"'),
-          renderPersonalShortcutTile("健康", "BMI 与设备", "健", 'data-open-my-feature="health"')
+          renderPersonalShortcutTile("健康", "数据中心", "健", 'data-open-my-feature="health"')
         ]
       : [
           renderPersonalShortcutTile("账户", "资料与主页", "账", 'data-open-my-feature="account"'),
@@ -6047,7 +6786,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
           renderPersonalShortcutTile("收藏", `${getFavoritedMediaEntries().length} 条媒体`, "藏", 'data-open-my-feature="collections"'),
           renderPersonalShortcutTile("评分", profile.ratingCount ? `${getRatingDisplay(profile)} 分` : "等待评分", "评", 'data-open-my-feature="reviews"'),
-          renderPersonalShortcutTile("健康", "BMI 与设备", "健", 'data-open-my-feature="health"')
+          renderPersonalShortcutTile("健康", "数据中心", "健", 'data-open-my-feature="health"')
         ];
   const roleSummary =
     profile.role === "enthusiast"
@@ -6366,7 +7105,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
     },
     health: {
       title: "健康",
-      subtitle: "查看 BMI、身体数据与外接设备同步状态",
+      subtitle: "查看数据中心、趋势变化与设备同步状态",
       content: renderHealthFeature(profile)
     },
     reviews: {
@@ -6387,7 +7126,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
   };
 
   const currentFeature = featureMap[feature] || featureMap.account;
-  const showFeatureIntro = !["checkin"].includes(feature);
+  const showFeatureIntro = !["checkin", "health"].includes(feature);
 
   return `
     <section class="page-header">
@@ -7158,6 +7897,9 @@ appView.addEventListener("click", (event) => {
     if (target.dataset.openMyFeature === "followers") {
       state.socialTab = "followers";
     }
+    if (target.dataset.openMyFeature === "health") {
+      state.healthViewMode = "overview";
+    }
     state.activePage = "profile";
     state.activeProfileId = myProfile.id;
     state.profileSubpage = target.dataset.openMyFeature;
@@ -7190,6 +7932,12 @@ appView.addEventListener("click", (event) => {
     syncNavActive();
     renderPage();
     appView.scrollTop = 0;
+    return;
+  }
+
+  if (target.dataset.setHealthView) {
+    state.healthViewMode = target.dataset.setHealthView;
+    renderPage();
     return;
   }
 
