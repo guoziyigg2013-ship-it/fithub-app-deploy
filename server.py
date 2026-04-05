@@ -43,6 +43,7 @@ SUPABASE_STATE_TABLE = (os.getenv("FITHUB_SUPABASE_TABLE") or "fithub_app_state"
 SUPABASE_STATE_ROW_ID = (os.getenv("FITHUB_SUPABASE_ROW_ID") or "primary").strip()
 SUPABASE_TIMEOUT_SECONDS = float(os.getenv("FITHUB_SUPABASE_TIMEOUT") or "12")
 SUPABASE_BACKUP_PREFIX = f"{SUPABASE_STATE_ROW_ID}-backup"
+SUPABASE_PHONE_RECOVERY_PREFIX = f"{SUPABASE_STATE_ROW_ID}-phone"
 MAP_PROVIDER = (os.getenv("FITHUB_MAP_PROVIDER") or "").strip().lower()
 AMAP_WEB_KEY = (os.getenv("FITHUB_AMAP_WEB_KEY") or "").strip()
 AMAP_SECURITY_CODE = (os.getenv("FITHUB_AMAP_SECURITY_CODE") or "").strip()
@@ -554,6 +555,7 @@ def verify_sms_code(state, session, phone, code):
 
     registry.pop(phone_key, None)
     mark_session_phone_verified(session, phone_key)
+    session["lastVerifiedPhone"] = phone_key
     return phone_key
 
 
@@ -786,26 +788,28 @@ def load_state_from_local(create_if_missing=True):
 def save_state_to_supabase(state):
     payload = sanitize_state(deepcopy(state))
     saved_at = now_utc()
+    rows_to_save = [
+        {
+            "id": SUPABASE_STATE_ROW_ID,
+            "payload": payload,
+            "updated_at": saved_at.isoformat(),
+        },
+        {
+            "id": f"{SUPABASE_BACKUP_PREFIX}-latest",
+            "payload": payload,
+            "updated_at": saved_at.isoformat(),
+        },
+        {
+            "id": f"{SUPABASE_BACKUP_PREFIX}-{saved_at.strftime('%Y%m%d%H')}",
+            "payload": payload,
+            "updated_at": saved_at.isoformat(),
+        },
+    ]
+    rows_to_save.extend(build_phone_recovery_rows(payload, saved_at))
     supabase_request(
         "POST",
         f"{SUPABASE_STATE_TABLE}?on_conflict=id",
-        [
-            {
-                "id": SUPABASE_STATE_ROW_ID,
-                "payload": payload,
-                "updated_at": saved_at.isoformat(),
-            },
-            {
-                "id": f"{SUPABASE_BACKUP_PREFIX}-latest",
-                "payload": payload,
-                "updated_at": saved_at.isoformat(),
-            },
-            {
-                "id": f"{SUPABASE_BACKUP_PREFIX}-{saved_at.strftime('%Y%m%d%H')}",
-                "payload": payload,
-                "updated_at": saved_at.isoformat(),
-            },
-        ],
+        rows_to_save,
         prefer="resolution=merge-duplicates,return=minimal",
     )
     set_runtime_storage_state("supabase", True, payload)
@@ -901,6 +905,383 @@ def collect_profile_alias_ids(state, profile_id):
                 queue.append(candidate)
 
     return discovered_ids or {profile_id}
+
+
+def phone_recovery_row_id(phone):
+    phone_key = normalize_phone(phone)
+    return f"{SUPABASE_PHONE_RECOVERY_PREFIX}-{phone_key}" if phone_key else ""
+
+
+def recovery_slice_metrics(payload):
+    if not isinstance(payload, dict):
+        return {"profiles": 0, "follows": 0, "posts": 0, "bookings": 0, "threads": 0, "score": 0}
+    profiles = len(payload.get("profiles") or {})
+    follows = len(payload.get("follows") or [])
+    posts = len(payload.get("posts") or {})
+    bookings = len(payload.get("bookings") or [])
+    threads = len(payload.get("threads") or [])
+    score = profiles * 1000 + follows * 120 + posts * 90 + bookings * 70 + threads * 60
+    return {
+        "profiles": profiles,
+        "follows": follows,
+        "posts": posts,
+        "bookings": bookings,
+        "threads": threads,
+        "score": score,
+    }
+
+
+def build_phone_recovery_slice(state, phone):
+    phone_key = normalize_phone(phone)
+    if len(phone_key) != 11:
+        return None
+
+    account = resolve_account_by_phone(state, phone_key)
+    matched_profiles = find_profiles_by_phone(state, phone_key)
+    if not account and not matched_profiles:
+        return None
+
+    canonical_profile_ids = []
+    alias_profile_ids = set()
+
+    if account:
+        for profile_id in (account.get("profilesByRole") or {}).values():
+            canonical_profile_id = resolve_canonical_profile_id(state, profile_id)
+            if canonical_profile_id and canonical_profile_id not in canonical_profile_ids:
+                canonical_profile_ids.append(canonical_profile_id)
+    for profile in matched_profiles:
+        canonical_profile_id = resolve_canonical_profile_id(state, profile.get("id"))
+        if canonical_profile_id and canonical_profile_id not in canonical_profile_ids:
+            canonical_profile_ids.append(canonical_profile_id)
+
+    for profile_id in canonical_profile_ids:
+        alias_profile_ids.update(collect_profile_alias_ids(state, profile_id))
+
+    if not alias_profile_ids:
+        alias_profile_ids = {profile.get("id") for profile in matched_profiles if profile.get("id")}
+
+    alias_profile_ids = {
+        profile_id
+        for profile_id in alias_profile_ids
+        if profile_id in (state.get("profiles") or {})
+    }
+    if not alias_profile_ids:
+        return None
+
+    account_ids = set()
+    if account and account.get("id"):
+        account_ids.add(account["id"])
+    for profile_id in alias_profile_ids:
+        profile = (state.get("profiles") or {}).get(profile_id)
+        account_id = str((profile or {}).get("accountId") or "").strip()
+        if account_id:
+            account_ids.add(account_id)
+
+    related_profiles = {
+        profile_id: deepcopy((state.get("profiles") or {}).get(profile_id))
+        for profile_id in alias_profile_ids
+        if (state.get("profiles") or {}).get(profile_id)
+    }
+    related_accounts = {
+        account_id: deepcopy((state.get("accounts") or {}).get(account_id))
+        for account_id in account_ids
+        if (state.get("accounts") or {}).get(account_id)
+    }
+    related_follows = [
+        deepcopy(item)
+        for item in (state.get("follows") or [])
+        if item.get("sourceProfileId") in alias_profile_ids or item.get("targetProfileId") in alias_profile_ids
+    ]
+    related_posts = {
+        post_id: deepcopy(post)
+        for post_id, post in (state.get("posts") or {}).items()
+        if post.get("authorProfileId") in alias_profile_ids
+    }
+    related_bookings = [
+        deepcopy(item)
+        for item in (state.get("bookings") or [])
+        if item.get("createdByProfileId") in alias_profile_ids or item.get("targetProfileId") in alias_profile_ids
+    ]
+    related_threads = [
+        deepcopy(item)
+        for item in (state.get("threads") or [])
+        if any(participant in alias_profile_ids for participant in (item.get("participants") or []))
+    ]
+    related_favorites = [
+        deepcopy(item)
+        for item in (state.get("postFavorites") or [])
+        if item.get("sourceProfileId") in alias_profile_ids
+    ]
+    related_aliases = {
+        source: target
+        for source, target in (state.get("profileAliases") or {}).items()
+        if source in alias_profile_ids or target in alias_profile_ids
+    }
+
+    return {
+        "phone": phone_key,
+        "accountId": account.get("id") if account else "",
+        "profiles": related_profiles,
+        "accounts": related_accounts,
+        "follows": related_follows,
+        "posts": related_posts,
+        "bookings": related_bookings,
+        "threads": related_threads,
+        "postFavorites": related_favorites,
+        "profileAliases": related_aliases,
+        "updatedAt": iso_at(),
+    }
+
+
+def build_phone_recovery_rows(state, saved_at):
+    profiles = state.get("profiles", {}) if isinstance(state, dict) else {}
+    phones = sorted(
+        {
+            normalize_phone(profile.get("phone"))
+            for profile_id, profile in profiles.items()
+            if not is_demo_profile_id(profile_id) and normalize_phone(profile.get("phone"))
+        }
+    )
+    rows = []
+    for phone in phones:
+        payload = build_phone_recovery_slice(state, phone)
+        if not payload:
+            continue
+        rows.append(
+            {
+                "id": phone_recovery_row_id(phone),
+                "payload": payload,
+                "updated_at": saved_at.isoformat(),
+            }
+        )
+    return rows
+
+
+def merge_phone_recovery_slice(state, payload):
+    if not isinstance(payload, dict):
+        return False
+
+    changed = False
+    accounts = state.setdefault("accounts", {})
+    profiles = state.setdefault("profiles", {})
+
+    for account_id, account in (payload.get("accounts") or {}).items():
+        if not account_id or not isinstance(account, dict):
+            continue
+        existing = accounts.get(account_id)
+        if not existing:
+            accounts[account_id] = deepcopy(account)
+            changed = True
+            continue
+        merged_roles = {**(existing.get("profilesByRole") or {}), **(account.get("profilesByRole") or {})}
+        if existing.get("phone") != account.get("phone") and account.get("phone"):
+            existing["phone"] = account.get("phone")
+            changed = True
+        if existing.get("restoreToken") != account.get("restoreToken") and account.get("restoreToken"):
+            existing["restoreToken"] = account.get("restoreToken")
+            changed = True
+        if existing.get("profilesByRole") != merged_roles:
+            existing["profilesByRole"] = merged_roles
+            changed = True
+
+    for profile_id, profile in (payload.get("profiles") or {}).items():
+        if not profile_id or not isinstance(profile, dict):
+            continue
+        existing = profiles.get(profile_id)
+        if not existing:
+            profiles[profile_id] = deepcopy(profile)
+            changed = True
+            continue
+        before = json.dumps(existing, ensure_ascii=False, sort_keys=True)
+        merge_duplicate_profile_data(existing, profile)
+        if existing.get("accountId") in (None, "") and profile.get("accountId"):
+            existing["accountId"] = profile.get("accountId")
+        after = json.dumps(existing, ensure_ascii=False, sort_keys=True)
+        if before != after:
+            changed = True
+
+    alias_registry = state.setdefault("profileAliases", {})
+    for source, target in (payload.get("profileAliases") or {}).items():
+        if not source or not target:
+            continue
+        if alias_registry.get(source) != target:
+            alias_registry[source] = target
+            changed = True
+
+    existing_follows = {
+        (item.get("sourceProfileId"), item.get("targetProfileId"))
+        for item in (state.get("follows") or [])
+    }
+    for item in payload.get("follows") or []:
+        key = (item.get("sourceProfileId"), item.get("targetProfileId"))
+        if not all(key) or key in existing_follows:
+            continue
+        state.setdefault("follows", []).append(deepcopy(item))
+        existing_follows.add(key)
+        changed = True
+
+    existing_posts = state.setdefault("posts", {})
+    for post_id, post in (payload.get("posts") or {}).items():
+        if not post_id or not isinstance(post, dict):
+            continue
+        if post_id not in existing_posts:
+            existing_posts[post_id] = deepcopy(post)
+            changed = True
+
+    existing_booking_ids = {
+        item.get("id")
+        for item in (state.get("bookings") or [])
+        if item.get("id")
+    }
+    for item in payload.get("bookings") or []:
+        item_id = item.get("id")
+        if not item_id or item_id in existing_booking_ids:
+            continue
+        state.setdefault("bookings", []).append(deepcopy(item))
+        existing_booking_ids.add(item_id)
+        changed = True
+
+    existing_thread_ids = {
+        item.get("id")
+        for item in (state.get("threads") or [])
+        if item.get("id")
+    }
+    for item in payload.get("threads") or []:
+        item_id = item.get("id")
+        if not item_id or item_id in existing_thread_ids:
+            continue
+        state.setdefault("threads", []).append(deepcopy(item))
+        existing_thread_ids.add(item_id)
+        changed = True
+
+    favorite_pairs = {
+        (item.get("sourceProfileId"), item.get("postId"))
+        for item in (state.get("postFavorites") or [])
+    }
+    for item in payload.get("postFavorites") or []:
+        key = (item.get("sourceProfileId"), item.get("postId"))
+        if not all(key) or key in favorite_pairs:
+            continue
+        state.setdefault("postFavorites", []).append(deepcopy(item))
+        favorite_pairs.add(key)
+        changed = True
+
+    if changed:
+        normalize_follows(state)
+        normalize_threads(state)
+        reconcile_account_registry(state)
+    return changed
+
+
+def load_phone_recovery_from_supabase(phone):
+    if not supabase_storage_enabled():
+        return None
+    phone_key = normalize_phone(phone)
+    if len(phone_key) != 11:
+        return None
+
+    best_payload = None
+    best_metrics = recovery_slice_metrics(None)
+
+    direct_row_id = phone_recovery_row_id(phone_key)
+    if direct_row_id:
+        rows = supabase_request(
+            "GET",
+            f"{SUPABASE_STATE_TABLE}?id=eq.{quote(direct_row_id, safe='')}&select=payload",
+        ) or []
+        if rows and isinstance(rows[0].get("payload"), dict):
+            candidate_payload = rows[0].get("payload")
+            candidate_metrics = recovery_slice_metrics(candidate_payload)
+            if is_materially_richer_state(candidate_metrics, best_metrics):
+                best_payload = candidate_payload
+                best_metrics = candidate_metrics
+
+    backup_rows = supabase_request(
+        "GET",
+        f"{SUPABASE_STATE_TABLE}?select=id,payload,updated_at&order=updated_at.desc&limit=20",
+    ) or []
+    for row in backup_rows:
+        row_id = str(row.get("id") or "")
+        payload = row.get("payload")
+        if not row_id.startswith(SUPABASE_BACKUP_PREFIX) or not isinstance(payload, dict):
+            continue
+        candidate_payload = build_phone_recovery_slice(payload, phone_key)
+        candidate_metrics = recovery_slice_metrics(candidate_payload)
+        if is_materially_richer_state(candidate_metrics, best_metrics):
+            best_payload = candidate_payload
+            best_metrics = candidate_metrics
+
+    return best_payload
+
+
+def restore_phone_identity_from_supabase(state, phone):
+    payload = load_phone_recovery_from_supabase(phone)
+    if not payload:
+        return False
+    changed = merge_phone_recovery_slice(state, payload)
+    return bool(resolve_account_by_phone(state, phone)) or changed
+
+
+def session_phone_candidates(state, session):
+    candidates = []
+
+    def add(phone):
+        phone_key = normalize_phone(phone)
+        if len(phone_key) == 11 and phone_key not in candidates:
+            candidates.append(phone_key)
+
+    add(session.get("lastVerifiedPhone"))
+    for phone in (session.get("verifiedPhones") or {}).keys():
+        add(phone)
+    for account_id in session.get("managedAccountIds", []):
+        account = ensure_account_registry(state).get(str(account_id or "").strip())
+        add((account or {}).get("phone"))
+    for profile_id in session.get("managedProfileIds", []):
+        profile = (state.get("profiles") or {}).get(resolve_canonical_profile_id(state, profile_id))
+        add((profile or {}).get("phone"))
+    current_profile = (state.get("profiles") or {}).get(resolve_canonical_profile_id(state, session.get("currentActorProfileId")))
+    add((current_profile or {}).get("phone"))
+    return candidates
+
+
+def ensure_session_identity(state, session, preferred_role="", requested_profile_id=""):
+    requested_profile_id = resolve_canonical_profile_id(state, requested_profile_id)
+    if requested_profile_id:
+        allowed, canonical_profile_id = session_manages_profile(state, session, requested_profile_id)
+        if allowed:
+            return True, canonical_profile_id
+        requested_profile = (state.get("profiles") or {}).get(requested_profile_id)
+        if requested_profile:
+            account = ensure_profile_account(state, requested_profile, requested_profile.get("phone"))
+            attach_account_to_session(state, session, account, preferred_role or requested_profile.get("role") or session.get("selectedRole"))
+            allowed, canonical_profile_id = session_manages_profile(state, session, requested_profile_id)
+            if allowed:
+                return True, canonical_profile_id
+
+    current_actor_profile_id = resolve_canonical_profile_id(state, session.get("currentActorProfileId"))
+    if current_actor_profile_id:
+        allowed, canonical_profile_id = session_manages_profile(state, session, current_actor_profile_id)
+        if allowed:
+            return True, canonical_profile_id
+
+    fallback_role = preferred_role if preferred_role in {"enthusiast", "gym", "coach"} else str(session.get("selectedRole") or "").strip()
+    for phone in session_phone_candidates(state, session):
+        account = resolve_account_by_phone(state, phone)
+        if not account:
+            restore_phone_identity_from_supabase(state, phone)
+            account = resolve_account_by_phone(state, phone)
+        if not account:
+            continue
+        attach_account_to_session(state, session, account, fallback_role)
+        if requested_profile_id:
+            allowed, canonical_profile_id = session_manages_profile(state, session, requested_profile_id)
+            if allowed:
+                return True, canonical_profile_id
+        current_actor_profile_id = resolve_canonical_profile_id(state, session.get("currentActorProfileId"))
+        if current_actor_profile_id:
+            return True, current_actor_profile_id
+
+    return False, requested_profile_id or ""
 
 
 def resolve_canonical_profile_id(state, profile_id):
@@ -1548,6 +1929,9 @@ def attach_account_to_session(state, session, account, preferred_role=""):
     account_id = str(account.get("id") or "").strip()
     if account_id and account_id not in session["managedAccountIds"]:
         session["managedAccountIds"].append(account_id)
+    phone_key = normalize_phone(account.get("phone"))
+    if phone_key:
+        session["lastVerifiedPhone"] = phone_key
     role_profiles = account.setdefault("profilesByRole", {})
     for role in {"enthusiast", "gym", "coach"}:
         canonical = pick_preferred_profile(
@@ -2346,6 +2730,7 @@ def create_session_record():
         "managedProfileIds": [],
         "managedAccountIds": [],
         "verifiedPhones": {},
+        "lastVerifiedPhone": "",
         "currentActorProfileId": None,
         "userPosition": deepcopy(DEFAULT_POSITION),
         "locationStatus": DEFAULT_LOCATION_STATUS,
@@ -2469,6 +2854,7 @@ def ensure_session(state, session_id=None):
         session.setdefault("managedProfileIds", [])
         session.setdefault("managedAccountIds", [])
         session.setdefault("verifiedPhones", {})
+        session.setdefault("lastVerifiedPhone", "")
         normalize_session_profiles(state, session)
         return session
     session = create_session_record()
@@ -3405,9 +3791,12 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 phone = normalize_phone(payload.get("phone"))
                 if not phone:
                     raise ValueError("请输入注册时填写的手机号。")
+                matches = serialize_phone_matches(state, phone)
+                if not matches and restore_phone_identity_from_supabase(state, phone):
+                    matches = serialize_phone_matches(state, phone)
                 return {
                     "phone": phone,
-                    "matches": serialize_phone_matches(state, phone),
+                    "matches": matches,
                 }
 
             try:
@@ -3449,6 +3838,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     verify_sms_code(state, session, phone, payload.get("verificationCode"))
 
                 account = resolve_account_by_phone(state, phone)
+                if not account and restore_phone_identity_from_supabase(state, phone):
+                    account = resolve_account_by_phone(state, phone)
                 if account:
                     preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
                     attach_account_to_session(state, session, account, preferred_role)
@@ -3486,6 +3877,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     role = str(item.get("role") or "").strip()
                     phone = item.get("phone")
                     matched_account = resolve_account_by_phone(state, phone)
+                    if not matched_account and restore_phone_identity_from_supabase(state, phone):
+                        matched_account = resolve_account_by_phone(state, phone)
                     if matched_account:
                         preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
                         attach_account_to_session(state, session, matched_account, preferred_role)
@@ -3752,9 +4145,13 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/follow/toggle":
             def action(state):
                 session = ensure_session(state, session_id)
-                source_profile_id = resolve_canonical_profile_id(state, session.get("currentActorProfileId"))
+                allowed, source_profile_id = ensure_session_identity(
+                    state,
+                    session,
+                    preferred_role=str(session.get("selectedRole") or "").strip(),
+                )
                 target_profile_id = resolve_canonical_profile_id(state, payload["targetProfileId"])
-                if not source_profile_id:
+                if not allowed or not source_profile_id:
                     raise ValueError("请先注册后再关注。")
                 if not target_profile_id or target_profile_id not in state.get("profiles", {}):
                     raise ValueError("没有找到要关注的对象。")
@@ -3782,7 +4179,12 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 session = ensure_session(state, session_id)
                 profile_id = payload.get("profileId") or session.get("currentActorProfileId")
-                allowed, profile_id = session_manages_profile(state, session, profile_id)
+                allowed, profile_id = ensure_session_identity(
+                    state,
+                    session,
+                    preferred_role="enthusiast",
+                    requested_profile_id=profile_id,
+                )
                 if not allowed:
                     raise ValueError("请先登录原来的账号后再恢复关注。")
 
@@ -3823,7 +4225,12 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/post/create":
             def action(state):
                 session = ensure_session(state, session_id)
-                allowed, profile_id = session_manages_profile(state, session, payload["profileId"])
+                allowed, profile_id = ensure_session_identity(
+                    state,
+                    session,
+                    preferred_role=str(session.get("selectedRole") or "").strip(),
+                    requested_profile_id=payload["profileId"],
+                )
                 if not allowed:
                     raise ValueError("只能用当前设备已注册的身份发布动态。")
                 post_id = f"post-{uuid.uuid4().hex[:10]}"
@@ -3849,7 +4256,12 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 session = ensure_session(state, session_id)
                 profile_id = payload.get("profileId") or session.get("currentActorProfileId")
-                allowed, profile_id = session_manages_profile(state, session, profile_id)
+                allowed, profile_id = ensure_session_identity(
+                    state,
+                    session,
+                    preferred_role="enthusiast",
+                    requested_profile_id=profile_id,
+                )
                 if not allowed:
                     raise ValueError("请先注册后再打卡。")
                 profile = state["profiles"][profile_id]
@@ -4041,8 +4453,12 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/booking/create":
             def action(state):
                 session = ensure_session(state, session_id)
-                actor = session.get("currentActorProfileId")
-                if not actor:
+                allowed, actor = ensure_session_identity(
+                    state,
+                    session,
+                    preferred_role=str(session.get("selectedRole") or "").strip(),
+                )
+                if not allowed or not actor:
                     raise ValueError("请先注册后再预约。")
                 target_profile = state["profiles"][payload["targetProfileId"]]
                 plan = payload.get("plan") or (target_profile.get("pricingPlans") or [{}])[0]

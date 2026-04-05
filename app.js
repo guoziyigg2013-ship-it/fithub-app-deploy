@@ -1587,6 +1587,8 @@ async function recoverAccountFromSnapshot(role, phone) {
     checkins: Array.isArray(cachedProfile.checkins) ? cachedProfile.checkins : []
   }, { keepOverlay: true });
 
+  await maybeRestoreFollowState({ force: true }).catch(() => false);
+
   state.authMessage = "线上没找到这个身份，已从这台设备的本地缓存恢复到线上。";
   return true;
 }
@@ -1671,7 +1673,8 @@ async function maybeRestoreRememberedAccounts({ force = false } = {}) {
     const rightScore = preferred && right.phone === preferred.phone ? 1 : 0;
     return rightScore - leftScore;
   });
-  if (!accounts.length) return false;
+  const storedProfileBackups = getStoredProfileBackups();
+  if (!accounts.length && !storedProfileBackups.length) return false;
   if (restorePromise) return restorePromise;
 
   restorePromise = apiRequest(`${API_BASE}/auth/restore`, {
@@ -1703,6 +1706,9 @@ async function maybeRestoreRememberedAccounts({ force = false } = {}) {
           recoveryCandidates.push({ role, phone: item.phone });
         });
       });
+      storedProfileBackups.forEach((item) => {
+        recoveryCandidates.push({ role: item?.role || "", phone: item?.phone || "" });
+      });
       for (const candidate of recoveryCandidates) {
         if (!roleConfig[candidate.role] || !normalizePhone(candidate.phone)) continue;
         if (await recoverAccountFromSnapshot(candidate.role, candidate.phone)) {
@@ -1720,6 +1726,9 @@ async function maybeRestoreRememberedAccounts({ force = false } = {}) {
         (item.roles || []).forEach((role) => {
           recoveryCandidates.push({ role, phone: item.phone });
         });
+      });
+      storedProfileBackups.forEach((item) => {
+        recoveryCandidates.push({ role: item?.role || "", phone: item?.phone || "" });
       });
       for (const candidate of recoveryCandidates) {
         if (!roleConfig[candidate.role] || !normalizePhone(candidate.phone)) continue;
@@ -1937,7 +1946,7 @@ async function postAndSync(path, body, { keepOverlay = false } = {}) {
       body: requestBody
     });
   } catch (error) {
-    if (getStoredAccounts().length && shouldRetryAfterRestore(error)) {
+    if ((getStoredAccounts().length || getStoredProfileBackups().length) && shouldRetryAfterRestore(error)) {
       const restored = await maybeRestoreRememberedAccounts({ force: true });
       if (restored) {
         payload = await apiRequest(path, {
@@ -3370,6 +3379,19 @@ async function submitAuthLogin() {
     const selectedMatch = matches.find((item) => item.role === role);
 
     if (!matches.length) {
+      const recovered = await recoverAccountFromSnapshot(role, phone);
+      if (recovered) {
+        state.selectedRole = role;
+        state.activePage = "home";
+        state.activeProfileId = state.currentActorProfileId;
+        state.composeProfileId = state.currentActorProfileId;
+        state.locationStatus = `${getRoleLabel(role)}已从本机缓存恢复并登录成功。`;
+        state.authMatches = [];
+        closeOverlay();
+        syncNavActive();
+        renderPage();
+        return;
+      }
       throw new Error("没有找到这个手机号下的已注册身份，请先注册后再登录。");
     }
 
