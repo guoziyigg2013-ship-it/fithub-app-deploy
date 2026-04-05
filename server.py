@@ -119,6 +119,7 @@ STATE_RUNTIME_META = {
     "last_known_remote_real_profiles": 0,
     "last_known_remote_signal_score": 0,
     "remote_repair_required": False,
+    "supabase_config_valid": True,
 }
 MAX_INLINE_AVATAR_CHARS = 120_000
 MAX_INLINE_MEDIA_CHARS = 180_000
@@ -569,7 +570,14 @@ def set_runtime_storage_state(loaded_from, supabase_writable, state=None):
 
 
 def supabase_storage_enabled():
-    return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
+    return bool(supabase_config_valid() and SUPABASE_SERVICE_ROLE_KEY)
+
+
+def supabase_config_valid():
+    parsed = urlparse(SUPABASE_URL or "")
+    valid = bool(parsed.scheme in {"http", "https"} and parsed.netloc)
+    STATE_RUNTIME_META["supabase_config_valid"] = valid
+    return valid
 
 
 def is_demo_profile_id(profile_id):
