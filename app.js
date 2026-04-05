@@ -460,6 +460,276 @@ function enhanceProfiles(profiles = []) {
   return profiles.map((profile) => applyDemoProfilePatch(profile));
 }
 
+function createShopArtwork({
+  sticker = "FIT",
+  title = "训练好物",
+  subtitle = "FITHUB SELECT",
+  bgA = "#fff1df",
+  bgB = "#f2b067",
+  accent = "#f28c28",
+  panel = "#1e2530"
+}) {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+      <defs>
+        <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="${bgA}"/>
+          <stop offset="100%" stop-color="${bgB}"/>
+        </linearGradient>
+        <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="${panel}"/>
+          <stop offset="100%" stop-color="#0f141c"/>
+        </linearGradient>
+      </defs>
+      <rect width="640" height="480" rx="40" fill="url(#bg)"/>
+      <circle cx="548" cy="92" r="62" fill="rgba(255,255,255,0.16)"/>
+      <circle cx="96" cy="404" r="88" fill="rgba(255,255,255,0.10)"/>
+      <rect x="54" y="54" width="532" height="372" rx="34" fill="url(#panel)" opacity="0.92"/>
+      <rect x="88" y="92" width="122" height="44" rx="22" fill="${accent}"/>
+      <text x="149" y="121" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#fff">${sticker}</text>
+      <rect x="88" y="188" width="176" height="30" rx="15" fill="rgba(255,255,255,0.12)"/>
+      <rect x="88" y="236" width="236" height="22" rx="11" fill="rgba(255,255,255,0.12)"/>
+      <rect x="88" y="272" width="202" height="22" rx="11" fill="rgba(255,255,255,0.08)"/>
+      <circle cx="462" cy="218" r="74" fill="rgba(242,140,40,0.18)"/>
+      <circle cx="462" cy="218" r="50" fill="rgba(255,255,255,0.16)"/>
+      <path d="M418 218h88" stroke="${accent}" stroke-width="12" stroke-linecap="round"/>
+      <circle cx="436" cy="218" r="18" fill="${accent}"/>
+      <circle cx="488" cy="218" r="18" fill="${accent}"/>
+      <text x="88" y="356" font-family="Arial, sans-serif" font-size="38" font-weight="700" fill="#fff">${title}</text>
+      <text x="88" y="392" font-family="Arial, sans-serif" font-size="18" letter-spacing="2" fill="rgba(255,255,255,0.68)">${subtitle}</text>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+const SHOP_CATEGORY_OPTIONS = [
+  { id: "all", label: "全部" },
+  { id: "strength", label: "力量器械" },
+  { id: "recovery", label: "恢复放松" },
+  { id: "wearable", label: "智能穿戴" },
+  { id: "nutrition", label: "补给营养" },
+  { id: "merch", label: "门店周边" }
+];
+
+const SHOP_PRODUCTS = [
+  {
+    id: "shop-dumbbell-pro",
+    category: "strength",
+    title: "燃炼六角哑铃 10kg",
+    subtitle: "包胶静音，适合家庭训练与门店补货",
+    price: "¥189",
+    originalPrice: "¥229",
+    badge: "同城热卖",
+    sellerProfileId: "gym-demo-a",
+    sellerType: "gym",
+    city: "厦门 · 思明区",
+    rating: "4.9",
+    sold: "已售 83",
+    stock: "剩余 18 件",
+    tags: ["力量训练", "门店自提", "团课同款"],
+    image: createShopArtwork({
+      sticker: "10KG",
+      title: "六角哑铃",
+      subtitle: "DUMBBELL SET",
+      bgA: "#fff4e5",
+      bgB: "#e8b175",
+      accent: "#f28c28"
+    })
+  },
+  {
+    id: "shop-band-set",
+    category: "strength",
+    title: "弹力带训练组合",
+    subtitle: "教练推荐的居家激活与热身套装",
+    price: "¥128",
+    originalPrice: "¥159",
+    badge: "教练推荐",
+    sellerProfileId: "coach-demo-a",
+    sellerType: "coach",
+    city: "厦门 · 思明区",
+    rating: "4.8",
+    sold: "已售 47",
+    stock: "剩余 26 件",
+    tags: ["动作激活", "热身", "新手友好"],
+    image: createShopArtwork({
+      sticker: "BAND",
+      title: "弹力带组合",
+      subtitle: "ACTIVATION KIT",
+      bgA: "#fff1e8",
+      bgB: "#d79a71",
+      accent: "#f28c28"
+    })
+  },
+  {
+    id: "shop-foam-roller",
+    category: "recovery",
+    title: "深层筋膜泡沫轴",
+    subtitle: "适合拉伸、恢复与训练后放松",
+    price: "¥99",
+    originalPrice: "¥129",
+    badge: "恢复专区",
+    sellerProfileId: "gym-demo-b",
+    sellerType: "gym",
+    city: "厦门 · 湖里区",
+    rating: "4.7",
+    sold: "已售 61",
+    stock: "剩余 35 件",
+    tags: ["恢复放松", "核心训练", "团课常备"],
+    image: createShopArtwork({
+      sticker: "ROLL",
+      title: "筋膜泡沫轴",
+      subtitle: "RECOVERY",
+      bgA: "#f7f1ff",
+      bgB: "#c8b7ff",
+      accent: "#8b6bff"
+    })
+  },
+  {
+    id: "shop-massage-gun",
+    category: "recovery",
+    title: "便携筋膜枪",
+    subtitle: "训练后 10 分钟快速放松与激活",
+    price: "¥299",
+    originalPrice: "¥369",
+    badge: "人气恢复",
+    sellerProfileId: "coach-demo-b",
+    sellerType: "coach",
+    city: "厦门 · 湖里区",
+    rating: "4.9",
+    sold: "已售 29",
+    stock: "剩余 12 件",
+    tags: ["恢复", "体态改善", "便携"],
+    image: createShopArtwork({
+      sticker: "GUN",
+      title: "便携筋膜枪",
+      subtitle: "RECOVER FAST",
+      bgA: "#f7f3ed",
+      bgB: "#d0b494",
+      accent: "#7f5c41"
+    })
+  },
+  {
+    id: "shop-smart-scale",
+    category: "wearable",
+    title: "智能体脂秤",
+    subtitle: "支持体重、BMI 与体脂同步记录",
+    price: "¥249",
+    originalPrice: "¥299",
+    badge: "数据追踪",
+    sellerProfileId: "gym-demo-c",
+    sellerType: "gym",
+    city: "厦门 · 海沧区",
+    rating: "4.8",
+    sold: "已售 42",
+    stock: "剩余 21 件",
+    tags: ["体脂监测", "健康管理", "训练伴侣"],
+    image: createShopArtwork({
+      sticker: "BODY",
+      title: "智能体脂秤",
+      subtitle: "SMART SCALE",
+      bgA: "#edf7ff",
+      bgB: "#9bc7f5",
+      accent: "#4f8edb"
+    })
+  },
+  {
+    id: "shop-watch-strap",
+    category: "wearable",
+    title: "训练表带快拆款",
+    subtitle: "适配运动手表与高频训练场景",
+    price: "¥79",
+    originalPrice: "¥99",
+    badge: "配件热卖",
+    sellerProfileId: "coach-demo-d",
+    sellerType: "coach",
+    city: "厦门 · 集美区",
+    rating: "4.6",
+    sold: "已售 57",
+    stock: "剩余 33 件",
+    tags: ["穿戴配件", "透气", "耐汗"],
+    image: createShopArtwork({
+      sticker: "WATCH",
+      title: "训练表带",
+      subtitle: "SPORT STRAP",
+      bgA: "#f0f5ff",
+      bgB: "#94aee9",
+      accent: "#5670d6"
+    })
+  },
+  {
+    id: "shop-whey-protein",
+    category: "nutrition",
+    title: "分离乳清蛋白 900g",
+    subtitle: "适合减脂增肌周期的训练补给",
+    price: "¥268",
+    originalPrice: "¥328",
+    badge: "平台精选",
+    sellerProfileId: "gym-demo-d",
+    sellerType: "gym",
+    city: "厦门 · 集美区",
+    rating: "4.9",
+    sold: "已售 103",
+    stock: "剩余 16 件",
+    tags: ["训练补给", "高蛋白", "平台精选"],
+    image: createShopArtwork({
+      sticker: "PRO",
+      title: "乳清蛋白",
+      subtitle: "WHEY PROTEIN",
+      bgA: "#fff6e9",
+      bgB: "#f1c06b",
+      accent: "#f28c28"
+    })
+  },
+  {
+    id: "shop-shaker-bottle",
+    category: "merch",
+    title: "FitHub 联名摇摇杯",
+    subtitle: "通勤训练两用，适合教练与会员随身携带",
+    price: "¥59",
+    originalPrice: "¥79",
+    badge: "联名周边",
+    sellerProfileId: "gym-demo-a",
+    sellerType: "gym",
+    city: "厦门 · 思明区",
+    rating: "4.8",
+    sold: "已售 90",
+    stock: "剩余 40 件",
+    tags: ["门店周边", "联名", "轻量"],
+    image: createShopArtwork({
+      sticker: "SHAKE",
+      title: "联名摇摇杯",
+      subtitle: "FITHUB MERCH",
+      bgA: "#fff0ec",
+      bgB: "#ef9d8f",
+      accent: "#dd6b50"
+    })
+  },
+  {
+    id: "shop-grip-gloves",
+    category: "merch",
+    title: "力量训练防滑手套",
+    subtitle: "深蹲硬拉与推举都更稳的基础装备",
+    price: "¥88",
+    originalPrice: "¥108",
+    badge: "门店同款",
+    sellerProfileId: "gym-demo-c",
+    sellerType: "gym",
+    city: "厦门 · 海沧区",
+    rating: "4.7",
+    sold: "已售 38",
+    stock: "剩余 19 件",
+    tags: ["防滑", "力量训练", "高频复购"],
+    image: createShopArtwork({
+      sticker: "GRIP",
+      title: "训练手套",
+      subtitle: "LIFT GLOVES",
+      bgA: "#f5f0ff",
+      bgB: "#c6b4f4",
+      accent: "#8d68db"
+    })
+  }
+];
+
 function createSupplementalDemoProfiles() {
   return enhanceProfiles([
     {
@@ -1062,6 +1332,7 @@ const state = {
   chatDraft: "",
   socialTab: "following",
   healthViewMode: "overview",
+  shopCategory: "all",
   sessionId: "",
   runtimeConfig: { ...DEFAULT_RUNTIME_CONFIG },
   isBootstrapping: false
@@ -6900,43 +7171,340 @@ function renderFavoriteProfilesSection() {
   `;
 }
 
-function renderShopFeature(profile) {
-  const roleCopy =
-    profile.role === "enthusiast"
-      ? "后续你可以在这里购买训练器材、运动周边、补剂和平台精选课程包。"
-      : profile.role === "coach"
-        ? "后续你可以在这里上架教练推荐器材、训练周边或平台联名商品。"
-        : "后续你可以在这里上架场馆周边、门店商品、课程包和平台精选器材。";
+function extractPriceNumber(price = "") {
+  const matched = String(price).match(/(\d+(?:\.\d+)?)/);
+  return matched ? Number(matched[1]) : 0;
+}
+
+function buildGeneratedShelfItems(profile) {
+  if (!profile || profile.role === "enthusiast") return [];
+
+  if (profile.role === "coach") {
+    return [
+      {
+        id: `shop-own-${profile.id}-band`,
+        category: "strength",
+        title: `${profile.name} 推荐弹力带套装`,
+        subtitle: "用于热身、激活与纠正动作模式的基础装备",
+        price: "¥139",
+        originalPrice: "¥169",
+        badge: "你的货架",
+        sellerProfileId: profile.id,
+        sellerType: profile.role,
+        city: profile.locationLabel || profile.city || "厦门",
+        rating: profile.ratingAvg ? getRatingDisplay(profile) : "新上架",
+        sold: "待售",
+        stock: "可售 24 套",
+        tags: ["私教推荐", "动作激活", "新客常购"],
+        image: createShopArtwork({
+          sticker: "COACH",
+          title: "弹力带套装",
+          subtitle: "TRAINING KIT",
+          bgA: "#fff0e6",
+          bgB: "#efb586",
+          accent: "#f28c28"
+        })
+      },
+      {
+        id: `shop-own-${profile.id}-recovery`,
+        category: "recovery",
+        title: `${profile.name} 训练恢复组合`,
+        subtitle: "拉伸带、筋膜球与恢复滚轴打包售卖",
+        price: "¥229",
+        originalPrice: "¥269",
+        badge: "你的货架",
+        sellerProfileId: profile.id,
+        sellerType: profile.role,
+        city: profile.locationLabel || profile.city || "厦门",
+        rating: profile.ratingAvg ? getRatingDisplay(profile) : "新上架",
+        sold: "待售",
+        stock: "可售 12 套",
+        tags: ["恢复", "体态改善", "课后推荐"],
+        image: createShopArtwork({
+          sticker: "REC",
+          title: "恢复组合",
+          subtitle: "RECOVERY PACK",
+          bgA: "#f8f1ff",
+          bgB: "#c8b2f8",
+          accent: "#9062ea"
+        })
+      }
+    ];
+  }
+
+  return [
+    {
+      id: `shop-own-${profile.id}-bottle`,
+      category: "merch",
+      title: `${profile.name} 联名摇摇杯`,
+      subtitle: "门店会员和团课学员都能顺手带走的基础周边",
+      price: "¥69",
+      originalPrice: "¥89",
+      badge: "你的货架",
+      sellerProfileId: profile.id,
+      sellerType: profile.role,
+      city: profile.locationLabel || profile.city || "厦门",
+      rating: profile.ratingAvg ? getRatingDisplay(profile) : "新上架",
+      sold: "待售",
+      stock: "可售 36 件",
+      tags: ["门店周边", "会员复购", "联名"],
+      image: createShopArtwork({
+        sticker: "GYM",
+        title: "联名摇摇杯",
+        subtitle: "STORE MERCH",
+        bgA: "#fff3ea",
+        bgB: "#f4b78d",
+        accent: "#e2703a"
+      })
+    },
+    {
+      id: `shop-own-${profile.id}-roller`,
+      category: "recovery",
+      title: `${profile.name} 训练恢复滚轴`,
+      subtitle: "门店热卖的训练后放松单品，也适合线上售卖",
+      price: "¥119",
+      originalPrice: "¥149",
+      badge: "你的货架",
+      sellerProfileId: profile.id,
+      sellerType: profile.role,
+      city: profile.locationLabel || profile.city || "厦门",
+      rating: profile.ratingAvg ? getRatingDisplay(profile) : "新上架",
+      sold: "待售",
+      stock: "可售 20 件",
+      tags: ["恢复", "高频复购", "门店同款"],
+      image: createShopArtwork({
+        sticker: "ROLL",
+        title: "恢复滚轴",
+        subtitle: "GYM RECOVERY",
+        bgA: "#eff7ff",
+        bgB: "#accdf5",
+        accent: "#5b92d6"
+      })
+    }
+  ];
+}
+
+function getShopCatalog(profile) {
+  const ownShelf = getManagedProfiles().some((item) => item.id === profile.id)
+    ? SHOP_PRODUCTS.filter((item) => item.sellerProfileId === profile.id)
+    : [];
+  const ownedProducts = ownShelf.length ? ownShelf : buildGeneratedShelfItems(profile);
+  const marketplaceProducts = SHOP_PRODUCTS.filter((item) => item.sellerProfileId !== profile.id);
+  return {
+    ownedProducts,
+    marketplaceProducts,
+    allProducts: [...ownedProducts, ...marketplaceProducts]
+  };
+}
+
+function getShopCategoryCount(items, categoryId) {
+  if (categoryId === "all") return items.length;
+  return items.filter((item) => item.category === categoryId).length;
+}
+
+function renderShopCategoryChips(items) {
+  return `
+    <div class="shop-category-row">
+      ${SHOP_CATEGORY_OPTIONS.map((item) => {
+        const isActive = (state.shopCategory || "all") === item.id;
+        const count = getShopCategoryCount(items, item.id);
+        return `
+          <button
+            class="shop-category-chip ${isActive ? "is-active" : ""}"
+            data-shop-category="${item.id}"
+            type="button"
+          >
+            <span>${escapeHtml(item.label)}</span>
+            <small>${count}</small>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function getShopSellerMeta(product) {
+  const sellerProfile = product.sellerProfileId ? getProfile(product.sellerProfileId) : null;
+  if (sellerProfile) {
+    return {
+      profile: sellerProfile,
+      name: sellerProfile.name,
+      roleLabel: getRoleLabel(sellerProfile.role),
+      location: sellerProfile.locationLabel || sellerProfile.city || product.city || "厦门"
+    };
+  }
+
+  return {
+    profile: {
+      name: "FitHub 官方精选",
+      avatar: "F"
+    },
+    name: "FitHub 官方精选",
+    roleLabel: "平台自营",
+    location: product.city || "厦门"
+  };
+}
+
+function filterShopProducts(items) {
+  if (!Array.isArray(items)) return [];
+  if (!state.shopCategory || state.shopCategory === "all") return items;
+  return items.filter((item) => item.category === state.shopCategory);
+}
+
+function renderShopProductCard(product, viewerProfile, { owned = false } = {}) {
+  const seller = getShopSellerMeta(product);
+  const isSelfOwned = Boolean(product.sellerProfileId && product.sellerProfileId === viewerProfile.id);
+  const primaryAction = isSelfOwned
+    ? `<button class="mini-button mini-button--accent" data-open-my-feature="orders" type="button">管理订单</button>`
+    : product.sellerProfileId
+      ? `<button class="mini-button mini-button--accent" data-open-chat="${product.sellerProfileId}" type="button">咨询购买</button>`
+      : `<button class="mini-button mini-button--accent" data-open-my-feature="messages" type="button">联系平台</button>`;
+  const secondaryAction = isSelfOwned
+    ? `<button class="mini-button" data-open-profile="${viewerProfile.id}" type="button">查看主页</button>`
+    : product.sellerProfileId
+      ? `<button class="mini-button" data-open-profile="${product.sellerProfileId}" type="button">查看店铺</button>`
+      : `<button class="mini-button" data-open-my-feature="orders" type="button">查看订单</button>`;
 
   return `
-    <article class="detail-card">
-      <div class="section-title-row">
-        <div>
-          <h3>商城</h3>
-          <p class="result-tip">${escapeHtml(roleCopy)}</p>
+    <article class="shop-product-card ${owned ? "shop-product-card--owned" : ""}">
+      <img class="shop-product-cover" src="${escapeHtml(product.image)}" alt="${escapeHtml(product.title)}" decoding="async">
+      <div class="shop-product-body">
+        <div class="shop-product-topline">
+          <span class="status-pill">${escapeHtml(product.badge)}</span>
+          <small>${escapeHtml(product.stock)}</small>
         </div>
-        <span class="status-pill">筹备中</span>
+        <h4>${escapeHtml(product.title)}</h4>
+        <p>${escapeHtml(product.subtitle)}</p>
+        <div class="shop-seller-row">
+          <button class="shop-seller-button" ${product.sellerProfileId ? `data-open-profile="${product.sellerProfileId}"` : 'data-open-my-feature="messages"'} type="button">
+            ${renderAvatarMarkup(seller.profile, "avatar shop-seller-avatar")}
+            <div>
+              <strong>${escapeHtml(seller.name)}</strong>
+              <small>${escapeHtml(seller.roleLabel)} · ${escapeHtml(seller.location)}</small>
+            </div>
+          </button>
+          <span class="shop-seller-score">★ ${escapeHtml(product.rating)}</span>
+        </div>
+        <div class="shop-tag-row">
+          ${product.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}
+        </div>
+        <div class="shop-product-bottom">
+          <div class="shop-price-block">
+            <strong>${escapeHtml(product.price)}</strong>
+            <small>${escapeHtml(product.originalPrice)}</small>
+            <span>${escapeHtml(product.sold)}</span>
+          </div>
+          <div class="shop-product-actions">
+            ${secondaryAction}
+            ${primaryAction}
+          </div>
+        </div>
       </div>
-      <div class="detail-grid">
-        <div class="detail-item">
-          <span>平台精选</span>
-          <strong>器材与周边</strong>
-        </div>
-        <div class="detail-item">
-          <span>当前入口</span>
-          <strong>${escapeHtml(profile.role === "enthusiast" ? "购买商品" : "售卖商品")}</strong>
-        </div>
-        <div class="detail-item">
-          <span>后续支持</span>
-          <strong>购物车 / 订单 / 发货</strong>
-        </div>
-        <div class="detail-item">
-          <span>当前状态</span>
-          <strong>等待首批商品</strong>
-        </div>
-      </div>
-      <article class="empty-card">商城入口已经预留好。后续接入真实商品、价格、库存和支付后，这里会直接成为你的商品中心。</article>
     </article>
+  `;
+}
+
+function renderShopFeature(profile) {
+  const { ownedProducts, marketplaceProducts, allProducts } = getShopCatalog(profile);
+  const filteredOwned = filterShopProducts(ownedProducts);
+  const filteredMarketplace = filterShopProducts(marketplaceProducts);
+  const sameCityCount = allProducts.filter((item) => String(item.city || "").includes(profile.city || state.userPosition.city)).length;
+  const sellerCount = new Set(allProducts.map((item) => item.sellerProfileId || item.id)).size;
+  const discountedCount = allProducts.filter((item) => extractPriceNumber(item.originalPrice) > extractPriceNumber(item.price)).length;
+  const showOwnedSection = profile.role !== "enthusiast";
+  const heroCopy =
+    profile.role === "enthusiast"
+      ? "把教练推荐器材、场馆同款装备和平台精选补给整合到一页，方便你从训练直接延伸到购买。"
+      : profile.role === "coach"
+        ? "你可以把教练推荐装备、恢复组合和训练周边放进货架，同时也能浏览平台热卖选品。"
+        : "场馆可以把门店同款器材、周边和会员复购单品集中展示，方便用户直接从主页跳转咨询。";
+  const summaryItems =
+    profile.role === "enthusiast"
+      ? [
+          { label: "在售商品", value: `${allProducts.length}` },
+          { label: "同城可购", value: `${sameCityCount}` },
+          { label: "限时优惠", value: `${discountedCount}` }
+        ]
+      : [
+          { label: "我的货架", value: `${ownedProducts.length}` },
+          { label: "同城热卖", value: `${sameCityCount}` },
+          { label: "可选品类", value: `${SHOP_CATEGORY_OPTIONS.length - 1}` }
+        ];
+
+  return `
+    <section class="shop-feature">
+      <article class="detail-card shop-hero-card">
+        <div class="shop-hero-copy">
+          <div>
+            <p class="page-label">FitHub Market</p>
+            <h3>商城</h3>
+          </div>
+          <span class="status-pill">正式试运行</span>
+        </div>
+        <p class="result-tip">${escapeHtml(heroCopy)}</p>
+        <div class="shop-summary-grid">
+          ${summaryItems
+            .map(
+              (item) => `
+                <div class="shop-summary-item">
+                  <span>${escapeHtml(item.label)}</span>
+                  <strong>${escapeHtml(item.value)}</strong>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      </article>
+
+      <article class="detail-card shop-filter-card">
+        <div class="section-title-row">
+          <div>
+            <h3>分类筛选</h3>
+            <p class="result-tip">先按品类看，再决定是打开卖家主页还是直接发消息咨询。</p>
+          </div>
+          <span class="shop-filter-meta">${escapeHtml(String(filterShopProducts(allProducts).length))} 件</span>
+        </div>
+        ${renderShopCategoryChips(allProducts)}
+      </article>
+
+      ${
+        showOwnedSection
+          ? `
+            <article class="detail-card">
+              <div class="section-title-row">
+                <div>
+                  <h3>我的货架</h3>
+                  <p class="result-tip">${ownedProducts.length ? "这里放你当前身份最适合售卖的训练器材、周边和门店商品。" : "你现在还没有上架商品，先看下面的平台选品和同城热卖，后面我们可以继续接上架能力。"}</p>
+                </div>
+                <span class="shop-filter-meta">${escapeHtml(String(filteredOwned.length))} 件</span>
+              </div>
+              ${
+                filteredOwned.length
+                  ? `
+                    <div class="shop-product-list">
+                      ${filteredOwned.map((item) => renderShopProductCard(item, profile, { owned: true })).join("")}
+                    </div>
+                  `
+                  : '<article class="empty-card">当前筛选下你的货架还没有商品。你可以切换分类看看，或者继续浏览下面的平台精选。</article>'
+              }
+            </article>
+          `
+          : ""
+      }
+
+      <article class="detail-card">
+        <div class="section-title-row">
+          <div>
+            <h3>${profile.role === "enthusiast" ? "同城热卖" : "平台与同城精选"}</h3>
+            <p class="result-tip">${profile.role === "enthusiast" ? "优先展示附近健身房、教练和平台当前适合试运行的商品。" : "你可以先看平台精选和其他卖家的热卖商品，后面再决定自己的货架怎么铺。"}</p>
+          </div>
+          <span class="shop-filter-meta">${escapeHtml(String(filteredMarketplace.length))} 件</span>
+        </div>
+        <div class="shop-product-list">
+          ${filteredMarketplace.map((item) => renderShopProductCard(item, profile)).join("")}
+        </div>
+      </article>
+    </section>
   `;
 }
 
@@ -7900,6 +8468,9 @@ appView.addEventListener("click", (event) => {
     if (target.dataset.openMyFeature === "health") {
       state.healthViewMode = "overview";
     }
+    if (target.dataset.openMyFeature === "shop") {
+      state.shopCategory = "all";
+    }
     state.activePage = "profile";
     state.activeProfileId = myProfile.id;
     state.profileSubpage = target.dataset.openMyFeature;
@@ -7937,6 +8508,12 @@ appView.addEventListener("click", (event) => {
 
   if (target.dataset.setHealthView) {
     state.healthViewMode = target.dataset.setHealthView;
+    renderPage();
+    return;
+  }
+
+  if (target.dataset.shopCategory) {
+    state.shopCategory = target.dataset.shopCategory;
     renderPage();
     return;
   }
