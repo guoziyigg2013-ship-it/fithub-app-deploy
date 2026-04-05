@@ -116,6 +116,8 @@ STATE_RUNTIME_META = {
     "loaded_from": "uninitialized",
     "supabase_writable": True,
     "last_known_remote_real_profiles": 0,
+    "last_known_remote_signal_score": 0,
+    "remote_repair_required": False,
 }
 MAX_INLINE_AVATAR_CHARS = 120_000
 MAX_INLINE_MEDIA_CHARS = 180_000
@@ -559,7 +561,9 @@ def set_runtime_storage_state(loaded_from, supabase_writable, state=None):
     STATE_RUNTIME_META["loaded_from"] = loaded_from
     STATE_RUNTIME_META["supabase_writable"] = bool(supabase_writable)
     if isinstance(state, dict):
-        STATE_RUNTIME_META["last_known_remote_real_profiles"] = count_real_profiles(state)
+        metrics = state_integrity_metrics(state)
+        STATE_RUNTIME_META["last_known_remote_real_profiles"] = metrics["real_profiles"]
+        STATE_RUNTIME_META["last_known_remote_signal_score"] = metrics["score"]
 
 
 def supabase_storage_enabled():
@@ -577,6 +581,115 @@ def is_demo_profile_id(profile_id):
 def count_real_profiles(state):
     profiles = state.get("profiles", {}) if isinstance(state, dict) else {}
     return sum(1 for profile_id in profiles if not is_demo_profile_id(profile_id))
+
+
+def state_integrity_metrics(state):
+    if not isinstance(state, dict):
+        return {
+            "real_profiles": 0,
+            "phone_profiles": 0,
+            "accounts": 0,
+            "real_follows": 0,
+            "real_posts": 0,
+            "real_bookings": 0,
+            "real_threads": 0,
+            "real_checkins": 0,
+            "score": 0,
+        }
+
+    profiles = state.get("profiles", {}) or {}
+    real_profile_ids = {
+        profile_id
+        for profile_id in profiles.keys()
+        if not is_demo_profile_id(profile_id)
+    }
+    phone_profiles = sum(
+        1
+        for profile_id, profile in profiles.items()
+        if profile_id in real_profile_ids and normalize_phone(profile.get("phone"))
+    )
+    accounts = sum(
+        1
+        for account in (state.get("accounts", {}) or {}).values()
+        if normalize_phone(account.get("phone"))
+        or any(str(profile_id or "").strip() for profile_id in (account.get("profilesByRole") or {}).values())
+    )
+    real_follows = sum(
+        1
+        for item in state.get("follows", []) or []
+        if item.get("sourceProfileId") in real_profile_ids
+        or item.get("targetProfileId") in real_profile_ids
+    )
+    real_posts = sum(
+        1
+        for post in (state.get("posts", {}) or {}).values()
+        if post.get("authorProfileId") in real_profile_ids
+    )
+    real_bookings = sum(
+        1
+        for booking in state.get("bookings", []) or []
+        if booking.get("createdByProfileId") in real_profile_ids
+        or booking.get("targetProfileId") in real_profile_ids
+    )
+    real_threads = sum(
+        1
+        for thread in state.get("threads", []) or []
+        if any(participant in real_profile_ids for participant in thread.get("participants", []) or [])
+    )
+    real_checkins = sum(
+        len((profile.get("checkins") or []))
+        for profile_id, profile in profiles.items()
+        if profile_id in real_profile_ids
+    )
+    score = (
+        len(real_profile_ids) * 1000
+        + phone_profiles * 500
+        + accounts * 400
+        + real_follows * 40
+        + real_posts * 25
+        + real_bookings * 25
+        + real_threads * 15
+        + real_checkins * 8
+    )
+    return {
+        "real_profiles": len(real_profile_ids),
+        "phone_profiles": phone_profiles,
+        "accounts": accounts,
+        "real_follows": real_follows,
+        "real_posts": real_posts,
+        "real_bookings": real_bookings,
+        "real_threads": real_threads,
+        "real_checkins": real_checkins,
+        "score": score,
+    }
+
+
+def is_materially_richer_state(candidate_metrics, baseline_metrics):
+    candidate_score = int((candidate_metrics or {}).get("score") or 0)
+    baseline_score = int((baseline_metrics or {}).get("score") or 0)
+    if candidate_score <= baseline_score:
+        return False
+
+    candidate_real_profiles = int((candidate_metrics or {}).get("real_profiles") or 0)
+    baseline_real_profiles = int((baseline_metrics or {}).get("real_profiles") or 0)
+    candidate_phone_profiles = int((candidate_metrics or {}).get("phone_profiles") or 0)
+    baseline_phone_profiles = int((baseline_metrics or {}).get("phone_profiles") or 0)
+    candidate_accounts = int((candidate_metrics or {}).get("accounts") or 0)
+    baseline_accounts = int((baseline_metrics or {}).get("accounts") or 0)
+    candidate_follows = int((candidate_metrics or {}).get("real_follows") or 0)
+    baseline_follows = int((baseline_metrics or {}).get("real_follows") or 0)
+
+    if baseline_score == 0 and candidate_score > 0:
+        return True
+    if candidate_real_profiles > baseline_real_profiles:
+        return True
+    if candidate_phone_profiles > baseline_phone_profiles:
+        return True
+    if candidate_accounts > baseline_accounts + 1:
+        return True
+    if candidate_follows > baseline_follows + 2:
+        return True
+    return candidate_score >= max(baseline_score + 120, int(max(1, baseline_score) * 1.35))
 
 
 def supabase_rest_url(path):
@@ -613,26 +726,52 @@ def supabase_request(method, path, payload=None, prefer=None):
 
 
 def load_state_from_supabase():
+    STATE_RUNTIME_META["remote_repair_required"] = False
     rows = supabase_request(
         "GET",
         f"{SUPABASE_STATE_TABLE}?id=eq.{quote(SUPABASE_STATE_ROW_ID, safe='')}&select=payload",
     )
+    primary_state = None
+    primary_metrics = state_integrity_metrics(None)
     if rows:
         payload = rows[0].get("payload")
         if isinstance(payload, dict):
-            return sanitize_state(payload)
+            primary_state = sanitize_state(payload)
+            primary_metrics = state_integrity_metrics(primary_state)
 
     backup_rows = supabase_request(
         "GET",
         f"{SUPABASE_STATE_TABLE}?select=id,payload,updated_at&order=updated_at.desc&limit=20",
     ) or []
+    best_backup_state = None
+    best_backup_metrics = state_integrity_metrics(None)
+    best_backup_row_id = ""
     for row in backup_rows:
         row_id = str(row.get("id") or "")
         payload = row.get("payload")
-        if row_id.startswith(SUPABASE_BACKUP_PREFIX) and isinstance(payload, dict):
-            storage_log(f"Supabase primary row missing, restored from backup row: {row_id}")
-            return sanitize_state(payload)
-    return None
+        if not row_id.startswith(SUPABASE_BACKUP_PREFIX) or not isinstance(payload, dict):
+            continue
+        candidate_state = sanitize_state(payload)
+        candidate_metrics = state_integrity_metrics(candidate_state)
+        if is_materially_richer_state(candidate_metrics, best_backup_metrics):
+            best_backup_state = candidate_state
+            best_backup_metrics = candidate_metrics
+            best_backup_row_id = row_id
+
+    if primary_state is None and best_backup_state is not None:
+        storage_log(f"Supabase primary row missing, restored from backup row: {best_backup_row_id}")
+        STATE_RUNTIME_META["remote_repair_required"] = True
+        return best_backup_state
+
+    if primary_state is not None and best_backup_state is not None and is_materially_richer_state(best_backup_metrics, primary_metrics):
+        storage_log(
+            "Supabase primary row looked less complete than backup; "
+            f"using backup row {best_backup_row_id} instead."
+        )
+        STATE_RUNTIME_META["remote_repair_required"] = True
+        return best_backup_state
+
+    return primary_state
 
 
 def load_state_from_local(create_if_missing=True):
@@ -2104,7 +2243,8 @@ def load_state():
                 save_state_to_supabase(state)
             else:
                 set_runtime_storage_state("supabase", True, state)
-            changed = merge_demo_state(state)
+            changed = bool(STATE_RUNTIME_META.pop("remote_repair_required", False))
+            changed = merge_demo_state(state) or changed
             if reconcile_account_registry(state):
                 changed = True
             if changed:
@@ -2138,8 +2278,24 @@ def save_state(state):
                 json.dump(state, handle, ensure_ascii=False, indent=2)
             return
 
-        if STATE_RUNTIME_META.get("last_known_remote_real_profiles", 0) > 0 and count_real_profiles(state) == 0:
+        current_metrics = state_integrity_metrics(state)
+
+        if STATE_RUNTIME_META.get("last_known_remote_real_profiles", 0) > 0 and current_metrics["real_profiles"] == 0:
             storage_log("Refusing to overwrite Supabase with demo-only state because the last known remote state contained registered users.")
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            with STATE_FILE.open("w", encoding="utf-8") as handle:
+                json.dump(state, handle, ensure_ascii=False, indent=2)
+            return
+
+        previous_metrics = {
+            "real_profiles": STATE_RUNTIME_META.get("last_known_remote_real_profiles", 0),
+            "score": STATE_RUNTIME_META.get("last_known_remote_signal_score", 0),
+        }
+        if is_materially_richer_state(previous_metrics, current_metrics):
+            storage_log(
+                "Refusing to overwrite Supabase with a materially less complete state; "
+                "keeping the current payload in local fallback storage only."
+            )
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             with STATE_FILE.open("w", encoding="utf-8") as handle:
                 json.dump(state, handle, ensure_ascii=False, indent=2)
@@ -2168,7 +2324,8 @@ def refresh_state_cache_from_supabase():
         state = load_state_from_supabase()
         if not state:
             return False
-        changed = merge_demo_state(state)
+        changed = bool(STATE_RUNTIME_META.pop("remote_repair_required", False))
+        changed = merge_demo_state(state) or changed
         if reconcile_account_registry(state):
             changed = True
         if changed:
