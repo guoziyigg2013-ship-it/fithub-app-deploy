@@ -697,6 +697,19 @@ def find_profiles_by_phone(state, phone):
     return profiles
 
 
+def find_profiles_by_account_role(state, account_id, role):
+    account_key = str(account_id or "").strip()
+    if not account_key or role not in {"enthusiast", "gym", "coach"}:
+        return []
+    profiles = [
+        profile
+        for profile in state.get("profiles", {}).values()
+        if profile.get("accountId") == account_key and profile.get("role") == role
+    ]
+    profiles.sort(key=lambda item: profile_signal_score(state, item), reverse=True)
+    return profiles
+
+
 def profile_signal_score(state, profile):
     if not profile:
         return (-1, "", "")
@@ -880,14 +893,29 @@ def resolve_account_by_phone(state, phone):
     account["phone"] = phone_key
     role_map = account.setdefault("profilesByRole", {})
 
-    for profile in matched_profiles:
-        role = str(profile.get("role") or "").strip()
-        if role not in {"enthusiast", "gym", "coach"}:
-            continue
-        if profile.get("accountId") != account["id"]:
-            profile["accountId"] = account["id"]
+    roles_to_reconcile = set(role_map.keys())
+    roles_to_reconcile.update(
+        str(profile.get("role") or "").strip()
+        for profile in matched_profiles
+        if str(profile.get("role") or "").strip() in {"enthusiast", "gym", "coach"}
+    )
+
+    for role in sorted(roles_to_reconcile):
+        candidates = []
         existing_profile = state["profiles"].get(role_map.get(role, ""))
-        preferred = pick_preferred_profile(state, [existing_profile, profile])
+        if existing_profile:
+            candidates.append(existing_profile)
+        for profile in find_profiles_by_account_role(state, account["id"], role):
+            if profile not in candidates:
+                candidates.append(profile)
+        for profile in matched_profiles:
+            if str(profile.get("role") or "").strip() != role:
+                continue
+            if profile.get("accountId") != account["id"]:
+                profile["accountId"] = account["id"]
+            if profile not in candidates:
+                candidates.append(profile)
+        preferred = pick_preferred_profile(state, candidates)
         if preferred:
             role_map[role] = preferred["id"]
 
@@ -918,6 +946,8 @@ def serialize_phone_matches(state, phone):
 
 def reconcile_account_registry(state):
     changed = deduplicate_profiles_by_phone_role(state)
+    if deduplicate_profiles_by_account_role(state):
+        changed = True
     old_accounts = ensure_account_registry(state)
     rebuilt_accounts = {}
     phone_index = {}
@@ -1190,8 +1220,53 @@ def deduplicate_profiles_by_phone_role(state):
     return changed
 
 
+def deduplicate_profiles_by_account_role(state):
+    profiles_by_key = {}
+    changed = False
+
+    for profile in list(state.get("profiles", {}).values()):
+        role = str(profile.get("role") or "").strip()
+        account_id = str(profile.get("accountId") or "").strip()
+        if role not in {"enthusiast", "gym", "coach"} or not account_id:
+            continue
+        profiles_by_key.setdefault((account_id, role), []).append(profile)
+
+    for (_account_id, _role), profiles in profiles_by_key.items():
+        if len(profiles) < 2:
+            continue
+        canonical = pick_preferred_profile(state, profiles)
+        duplicates = [profile for profile in profiles if profile.get("id") != canonical.get("id")]
+        if not duplicates:
+            continue
+
+        for duplicate in duplicates:
+            merge_duplicate_profile_data(canonical, duplicate)
+            replace_profile_references(state, duplicate["id"], canonical["id"])
+            state["profiles"].pop(duplicate["id"], None)
+            changed = True
+
+    if changed:
+        normalize_follows(state)
+        normalize_threads(state)
+
+    return changed
+
+
 def attach_account_to_session(state, session, account, preferred_role=""):
-    role_profiles = account.get("profilesByRole", {})
+    role_profiles = account.setdefault("profilesByRole", {})
+    for role in {"enthusiast", "gym", "coach"}:
+        canonical = pick_preferred_profile(
+            state,
+            [
+                state.get("profiles", {}).get(role_profiles.get(role, "")),
+                *find_profiles_by_account_role(state, account.get("id"), role),
+            ],
+        )
+        if canonical:
+            role_profiles[role] = canonical["id"]
+        else:
+            role_profiles.pop(role, None)
+
     for profile_id in role_profiles.values():
         if profile_id in state.get("profiles", {}) and profile_id not in session["managedProfileIds"]:
             session["managedProfileIds"].append(profile_id)
