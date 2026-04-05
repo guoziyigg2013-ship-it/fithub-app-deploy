@@ -710,6 +710,74 @@ def find_profiles_by_account_role(state, account_id, role):
     return profiles
 
 
+def collect_profile_alias_ids(state, profile_id):
+    profiles = state.get("profiles", {})
+    start = profiles.get(profile_id)
+    if not start:
+        return {profile_id} if profile_id else set()
+
+    role = str(start.get("role") or "").strip()
+    if role not in {"enthusiast", "gym", "coach"}:
+        return {profile_id}
+
+    discovered_ids = set()
+    queue = [start]
+    known_account_ids = set()
+    known_phones = set()
+
+    while queue:
+        current = queue.pop()
+        current_id = current.get("id")
+        if not current_id or current_id in discovered_ids:
+            continue
+        discovered_ids.add(current_id)
+
+        account_id = str(current.get("accountId") or "").strip()
+        phone = normalize_phone(current.get("phone"))
+        if account_id:
+            known_account_ids.add(account_id)
+        if phone:
+            known_phones.add(phone)
+
+        for candidate in profiles.values():
+            if candidate.get("id") in discovered_ids:
+                continue
+            if str(candidate.get("role") or "").strip() != role:
+                continue
+            candidate_account_id = str(candidate.get("accountId") or "").strip()
+            candidate_phone = normalize_phone(candidate.get("phone"))
+            if (
+                candidate_account_id
+                and candidate_account_id in known_account_ids
+            ) or (
+                candidate_phone
+                and candidate_phone in known_phones
+            ):
+                queue.append(candidate)
+
+    return discovered_ids or {profile_id}
+
+
+def resolve_canonical_profile_id(state, profile_id):
+    if not profile_id:
+        return ""
+    alias_ids = collect_profile_alias_ids(state, profile_id)
+    profiles = [state.get("profiles", {}).get(item_id) for item_id in alias_ids]
+    preferred = pick_preferred_profile(state, profiles)
+    return preferred.get("id") if preferred else profile_id
+
+
+def canonicalize_profile_ids(state, profile_ids):
+    canonical_ids = []
+    seen = set()
+    for profile_id in profile_ids or []:
+        canonical_profile_id = resolve_canonical_profile_id(state, profile_id)
+        if canonical_profile_id and canonical_profile_id not in seen and canonical_profile_id in state.get("profiles", {}):
+            seen.add(canonical_profile_id)
+            canonical_ids.append(canonical_profile_id)
+    return canonical_ids
+
+
 def profile_signal_score(state, profile):
     if not profile:
         return (-1, "", "")
@@ -928,14 +996,19 @@ def serialize_phone_matches(state, phone):
         return []
 
     items = []
+    seen_profiles = set()
     for role, profile_id in sorted(account.get("profilesByRole", {}).items()):
-        profile = state.get("profiles", {}).get(profile_id)
+        canonical_profile_id = resolve_canonical_profile_id(state, profile_id)
+        if canonical_profile_id in seen_profiles:
+            continue
+        seen_profiles.add(canonical_profile_id)
+        profile = state.get("profiles", {}).get(canonical_profile_id)
         if not profile:
             continue
         items.append(
             {
                 "role": role,
-                "profileId": profile_id,
+                "profileId": canonical_profile_id,
                 "name": profile.get("name") or "平台用户",
                 "phone": account.get("phone", ""),
                 "avatarImage": compact_avatar_image(profile.get("avatarImage"), role),
@@ -1008,6 +1081,13 @@ def reconcile_account_registry(state):
     if rebuilt_accounts != old_accounts:
         state["accounts"] = rebuilt_accounts
         changed = True
+
+    for session in state.get("sessions", {}).values():
+        session.setdefault("managedProfileIds", [])
+        session.setdefault("managedAccountIds", [])
+        session.setdefault("verifiedPhones", {})
+        if normalize_session_profiles(state, session):
+            changed = True
 
     return changed
 
@@ -1287,12 +1367,15 @@ def deduplicate_profiles_by_account_role(state):
 
 
 def attach_account_to_session(state, session, account, preferred_role=""):
+    account_id = str(account.get("id") or "").strip()
+    if account_id and account_id not in session["managedAccountIds"]:
+        session["managedAccountIds"].append(account_id)
     role_profiles = account.setdefault("profilesByRole", {})
     for role in {"enthusiast", "gym", "coach"}:
         canonical = pick_preferred_profile(
             state,
             [
-                state.get("profiles", {}).get(role_profiles.get(role, "")),
+                state.get("profiles", {}).get(resolve_canonical_profile_id(state, role_profiles.get(role, ""))),
                 *find_profiles_by_account_role(state, account.get("id"), role),
             ],
         )
@@ -1317,17 +1400,28 @@ def attach_account_to_session(state, session, account, preferred_role=""):
         session["selectedRole"] = desired_role
     if desired_profile_id:
         session["currentActorProfileId"] = desired_profile_id
+    normalize_session_profiles(state, session)
 
 
 def serialize_managed_accounts(state, session):
     items = []
     seen = set()
 
+    account_ids = []
+    for account_id in session.get("managedAccountIds", []):
+        account_key = str(account_id or "").strip()
+        if account_key and account_key not in account_ids:
+            account_ids.append(account_key)
     for profile_id in session.get("managedProfileIds", []):
         profile = state.get("profiles", {}).get(profile_id)
-        if not profile:
+        account_id = str((profile or {}).get("accountId") or "").strip()
+        if account_id and account_id not in account_ids:
+            account_ids.append(account_id)
+
+    for account_id in account_ids:
+        account = ensure_account_registry(state).get(account_id)
+        if not account:
             continue
-        account = ensure_profile_account(state, profile)
         if account["id"] in seen:
             continue
         seen.add(account["id"])
@@ -2053,6 +2147,7 @@ def create_session_record():
         "id": f"session-{uuid.uuid4().hex[:12]}",
         "selectedRole": "enthusiast",
         "managedProfileIds": [],
+        "managedAccountIds": [],
         "verifiedPhones": {},
         "currentActorProfileId": None,
         "userPosition": deepcopy(DEFAULT_POSITION),
@@ -2065,55 +2160,156 @@ def attach_profile_to_session(session, profile):
     profile_id = profile["id"]
     if profile_id not in session["managedProfileIds"]:
         session["managedProfileIds"].append(profile_id)
+    account_id = str(profile.get("accountId") or "").strip()
+    if account_id and account_id not in session["managedAccountIds"]:
+        session["managedAccountIds"].append(account_id)
     session["selectedRole"] = profile["role"]
     session["currentActorProfileId"] = profile_id
+
+
+def normalize_session_profiles(state, session):
+    profiles = state.get("profiles", {})
+    accounts = ensure_account_registry(state)
+    changed = False
+
+    managed_profile_ids = canonicalize_profile_ids(state, session.get("managedProfileIds", []))
+    current_actor_profile_id = resolve_canonical_profile_id(state, session.get("currentActorProfileId"))
+
+    managed_account_ids = []
+    for account_id in session.get("managedAccountIds", []):
+        account_key = str(account_id or "").strip()
+        if account_key and account_key in accounts and account_key not in managed_account_ids:
+            managed_account_ids.append(account_key)
+
+    for profile_id in list(managed_profile_ids) + ([current_actor_profile_id] if current_actor_profile_id else []):
+        profile = profiles.get(profile_id)
+        account_id = str((profile or {}).get("accountId") or "").strip()
+        if account_id and account_id in accounts and account_id not in managed_account_ids:
+            managed_account_ids.append(account_id)
+
+    for account_id in managed_account_ids:
+        account = accounts.get(account_id)
+        if not account:
+            continue
+        role_map = account.setdefault("profilesByRole", {})
+        for role, profile_id in list(role_map.items()):
+            canonical_profile_id = resolve_canonical_profile_id(state, profile_id)
+            if canonical_profile_id and canonical_profile_id in profiles:
+                if role_map.get(role) != canonical_profile_id:
+                    role_map[role] = canonical_profile_id
+                    changed = True
+                if canonical_profile_id not in managed_profile_ids:
+                    managed_profile_ids.append(canonical_profile_id)
+            else:
+                role_map.pop(role, None)
+                changed = True
+
+    if current_actor_profile_id and current_actor_profile_id not in managed_profile_ids:
+        managed_profile_ids.append(current_actor_profile_id)
+
+    selected_role = str(session.get("selectedRole") or "enthusiast").strip()
+    if selected_role not in {"enthusiast", "gym", "coach"}:
+        selected_role = "enthusiast"
+        changed = True
+
+    if current_actor_profile_id not in profiles or current_actor_profile_id not in managed_profile_ids:
+        current_actor_profile_id = ""
+
+    if not current_actor_profile_id:
+        for profile_id in managed_profile_ids:
+            profile = profiles.get(profile_id)
+            if profile and profile.get("role") == selected_role:
+                current_actor_profile_id = profile_id
+                break
+
+    if not current_actor_profile_id and managed_profile_ids:
+        current_actor_profile_id = managed_profile_ids[0]
+
+    if current_actor_profile_id:
+        current_profile = profiles.get(current_actor_profile_id)
+        if current_profile and selected_role != current_profile.get("role"):
+            selected_role = current_profile.get("role") or selected_role
+            changed = True
+
+    deduped_managed_profiles = []
+    for profile_id in managed_profile_ids:
+        if profile_id in profiles and profile_id not in deduped_managed_profiles:
+            deduped_managed_profiles.append(profile_id)
+
+    deduped_managed_accounts = []
+    for account_id in managed_account_ids:
+        if account_id in accounts and account_id not in deduped_managed_accounts:
+            deduped_managed_accounts.append(account_id)
+
+    if session.get("managedProfileIds") != deduped_managed_profiles:
+        session["managedProfileIds"] = deduped_managed_profiles
+        changed = True
+    if session.get("managedAccountIds") != deduped_managed_accounts:
+        session["managedAccountIds"] = deduped_managed_accounts
+        changed = True
+    if session.get("currentActorProfileId") != (current_actor_profile_id or None):
+        session["currentActorProfileId"] = current_actor_profile_id or None
+        changed = True
+    if session.get("selectedRole") != selected_role:
+        session["selectedRole"] = selected_role
+        changed = True
+
+    return changed
 
 
 def ensure_session(state, session_id=None):
     sessions = state.setdefault("sessions", {})
     if session_id and session_id in sessions:
-        return sessions[session_id]
+        session = sessions[session_id]
+        session.setdefault("managedProfileIds", [])
+        session.setdefault("managedAccountIds", [])
+        session.setdefault("verifiedPhones", {})
+        normalize_session_profiles(state, session)
+        return session
     session = create_session_record()
     sessions[session["id"]] = session
     return session
 
 
 def author_name(state, profile_id):
-    profile = state["profiles"].get(profile_id)
+    profile = state["profiles"].get(resolve_canonical_profile_id(state, profile_id))
     return profile["name"] if profile else "平台用户"
 
 
 def profile_posts(state, profile_id):
-    posts = [post for post in state["posts"].values() if post["authorProfileId"] == profile_id]
+    alias_ids = collect_profile_alias_ids(state, profile_id)
+    posts = [post for post in state["posts"].values() if post["authorProfileId"] in alias_ids]
     return sorted(posts, key=lambda item: item["createdAt"], reverse=True)
 
 
 def get_follow_set(state, current_actor_profile_id):
     if not current_actor_profile_id:
         return set()
+    source_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
     return {
-        item["targetProfileId"]
+        resolve_canonical_profile_id(state, item["targetProfileId"])
         for item in state["follows"]
-        if item["sourceProfileId"] == current_actor_profile_id
+        if item["sourceProfileId"] in source_alias_ids and resolve_canonical_profile_id(state, item["targetProfileId"])
     }
 
 
 def get_follower_set(state, current_actor_profile_id):
     if not current_actor_profile_id:
         return set()
+    target_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
     return {
-        item["sourceProfileId"]
+        resolve_canonical_profile_id(state, item["sourceProfileId"])
         for item in state["follows"]
-        if item["targetProfileId"] == current_actor_profile_id
+        if item["targetProfileId"] in target_alias_ids and resolve_canonical_profile_id(state, item["sourceProfileId"])
     }
 
 
 def follower_count(state, profile_id):
-    return sum(1 for item in state["follows"] if item["targetProfileId"] == profile_id)
+    return len(get_follower_set(state, profile_id))
 
 
 def following_count(state, profile_id):
-    return sum(1 for item in state["follows"] if item["sourceProfileId"] == profile_id)
+    return len(get_follow_set(state, profile_id))
 
 
 def serialize_review(state, review):
@@ -2142,6 +2338,7 @@ def serialize_comment(state, comment):
 
 
 def serialize_profile_brief(state, profile_id):
+    profile_id = resolve_canonical_profile_id(state, profile_id)
     profile = state.get("profiles", {}).get(profile_id)
     if not profile:
         return {
@@ -2199,16 +2396,18 @@ def serialize_checkin(checkin):
 
 
 def serialize_post(state, post, current_actor_profile_id):
+    current_actor_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
+    canonical_author_id = resolve_canonical_profile_id(state, post["authorProfileId"])
     return {
         "id": post["id"],
-        "authorProfileId": post["authorProfileId"],
+        "authorProfileId": canonical_author_id or post["authorProfileId"],
         "createdAt": post["createdAt"],
         "time": relative_time_label(post["createdAt"]),
         "content": post["content"],
         "meta": post["meta"],
         "media": [compact_media_item(item) for item in post.get("media", [])],
         "likeCount": len(post.get("likes", [])),
-        "likedByCurrentActor": current_actor_profile_id in post.get("likes", []),
+        "likedByCurrentActor": any(item in current_actor_alias_ids for item in post.get("likes", [])),
         "comments": [serialize_comment(state, item) for item in sorted(post.get("comments", []), key=lambda value: value["createdAt"])],
         "checkin": serialize_checkin(post["checkin"]) if post.get("checkin") else None,
     }
@@ -2316,10 +2515,11 @@ def serialize_notifications(state, current_actor_profile_id):
 def serialize_favorite_posts(state, current_actor_profile_id):
     if not current_actor_profile_id:
         return []
+    source_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
     favorites = [
         item
         for item in state.get("postFavorites", [])
-        if item.get("sourceProfileId") == current_actor_profile_id
+        if item.get("sourceProfileId") in source_alias_ids
     ]
     favorites.sort(key=lambda item: item.get("createdAt") or "", reverse=True)
     serialized = []
@@ -2338,6 +2538,7 @@ def serialize_favorite_posts(state, current_actor_profile_id):
 
 
 def serialize_profile(state, profile_id, current_actor_profile_id):
+    profile_id = resolve_canonical_profile_id(state, profile_id)
     profile = deepcopy(state["profiles"][profile_id])
     reviews = [serialize_review(state, item) for item in sorted(profile.get("reviews", []), key=lambda value: value["createdAt"], reverse=True)]
     rating_count = len(reviews)
@@ -2356,20 +2557,23 @@ def serialize_profile(state, profile_id, current_actor_profile_id):
 
 def serialize_bookings(state, session):
     managed = set(session["managedProfileIds"])
+    managed_alias_ids = set()
+    for profile_id in managed:
+        managed_alias_ids.update(collect_profile_alias_ids(state, profile_id))
     bookings = [
         item for item in state["bookings"]
-        if item["createdByProfileId"] in managed or item["targetProfileId"] in managed
+        if item["createdByProfileId"] in managed_alias_ids or item["targetProfileId"] in managed_alias_ids
     ]
     bookings.sort(key=lambda item: item["createdAt"], reverse=True)
     serialized = []
     for item in bookings:
-        source_profile = state["profiles"].get(item.get("createdByProfileId"))
-        target_profile = state["profiles"].get(item.get("targetProfileId"))
-        source_id = item.get("createdByProfileId")
-        target_id = item.get("targetProfileId")
-        if source_id in managed and target_id in managed:
+        source_id = resolve_canonical_profile_id(state, item.get("createdByProfileId"))
+        target_id = resolve_canonical_profile_id(state, item.get("targetProfileId"))
+        source_profile = state["profiles"].get(source_id)
+        target_profile = state["profiles"].get(target_id)
+        if item.get("createdByProfileId") in managed_alias_ids and item.get("targetProfileId") in managed_alias_ids:
             direction = "internal"
-        elif target_id in managed:
+        elif item.get("targetProfileId") in managed_alias_ids:
             direction = "incoming"
         else:
             direction = "outgoing"
@@ -2383,7 +2587,7 @@ def serialize_bookings(state, session):
                 "createdByProfileRole": source_profile.get("role") if source_profile else "",
                 "targetProfileName": target_profile.get("name") if target_profile else "平台用户",
                 "targetProfileRole": target_profile.get("role") if target_profile else "",
-                "counterpartProfileId": counterpart.get("id") if counterpart else "",
+                "counterpartProfileId": resolve_canonical_profile_id(state, counterpart.get("id")) if counterpart else "",
                 "counterpartProfileName": counterpart.get("name") if counterpart else "平台用户",
                 "counterpartProfileRole": counterpart.get("role") if counterpart else "",
                 "counterpartLocationLabel": counterpart.get("locationLabel") if counterpart else "",
@@ -2410,16 +2614,18 @@ def find_or_create_thread(state, profile_a, profile_b):
 def serialize_threads(state, current_actor_profile_id):
     if not current_actor_profile_id:
         return []
+    current_actor_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
     threads = []
     for thread in state["threads"]:
-        if current_actor_profile_id not in thread["participants"]:
+        if not any(item in current_actor_alias_ids for item in thread["participants"]):
             continue
-        other_profile_id = next((item for item in thread["participants"] if item != current_actor_profile_id), None)
+        other_profile_id = next((item for item in thread["participants"] if item not in current_actor_alias_ids), None)
+        other_profile_id = resolve_canonical_profile_id(state, other_profile_id)
         other_profile = state["profiles"].get(other_profile_id)
         messages = [
             {
                 "id": message["id"],
-                "senderProfileId": message["senderProfileId"],
+                "senderProfileId": resolve_canonical_profile_id(state, message["senderProfileId"]) or message["senderProfileId"],
                 "senderName": author_name(state, message["senderProfileId"]),
                 "text": message["text"],
                 "time": relative_time_label(message["createdAt"]),
@@ -2443,14 +2649,18 @@ def serialize_threads(state, current_actor_profile_id):
 
 
 def bootstrap_response(state, session):
+    normalize_session_profiles(state, session)
     current_actor_profile_id = session.get("currentActorProfileId")
-    profiles = [serialize_profile(state, profile_id, current_actor_profile_id) for profile_id in state["profiles"]]
+    canonical_profile_ids = canonicalize_profile_ids(state, state.get("profiles", {}).keys())
+    profiles = [serialize_profile(state, profile_id, current_actor_profile_id) for profile_id in canonical_profile_ids]
+    current_actor_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
     return {
         "config": runtime_config(),
         "session": {
             "id": session["id"],
             "selectedRole": session["selectedRole"],
             "managedProfileIds": session["managedProfileIds"],
+            "managedAccountIds": session["managedAccountIds"],
             "managedAccounts": serialize_managed_accounts(state, session),
             "currentActorProfileId": current_actor_profile_id,
             "userPosition": session["userPosition"],
@@ -2460,9 +2670,9 @@ def bootstrap_response(state, session):
         "followSet": sorted(get_follow_set(state, current_actor_profile_id)),
         "followerSet": sorted(get_follower_set(state, current_actor_profile_id)),
         "favoritePostIds": sorted(
-            item.get("postId")
+            str(item.get("postId") or "")
             for item in state.get("postFavorites", [])
-            if item.get("sourceProfileId") == current_actor_profile_id and item.get("postId")
+            if item.get("sourceProfileId") in current_actor_alias_ids and item.get("postId")
         ),
         "favoritePosts": serialize_favorite_posts(state, current_actor_profile_id),
         "notifications": serialize_notifications(state, current_actor_profile_id),
@@ -2970,6 +3180,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
 
             def action(state):
                 session = ensure_session(state, session_id)
+                reconcile_account_registry(state)
+                normalize_session_profiles(state, session)
                 return bootstrap_response(state, session)
 
             self._write_json(self._with_state(action))
@@ -3085,8 +3297,9 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     session["selectedRole"] = selected_role
 
                 requested_profile_id = payload.get("currentActorProfileId")
-                if requested_profile_id in session["managedProfileIds"]:
-                    session["currentActorProfileId"] = requested_profile_id
+                canonical_requested_profile_id = resolve_canonical_profile_id(state, requested_profile_id)
+                if canonical_requested_profile_id in session["managedProfileIds"]:
+                    session["currentActorProfileId"] = canonical_requested_profile_id
                 else:
                     session["currentActorProfileId"] = None
                     for profile_id in session["managedProfileIds"]:
@@ -3109,6 +3322,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 session = ensure_session(state, session_id)
                 session["managedProfileIds"] = []
+                session["managedAccountIds"] = []
                 session["currentActorProfileId"] = None
                 session["selectedRole"] = "enthusiast"
                 return bootstrap_response(state, session)
@@ -3172,8 +3386,9 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 session = ensure_session(state, session_id)
                 session["selectedRole"] = payload.get("selectedRole", session["selectedRole"])
                 requested_profile_id = payload.get("currentActorProfileId")
-                if requested_profile_id in session["managedProfileIds"]:
-                    session["currentActorProfileId"] = requested_profile_id
+                canonical_requested_profile_id = resolve_canonical_profile_id(state, requested_profile_id)
+                if canonical_requested_profile_id in session["managedProfileIds"]:
+                    session["currentActorProfileId"] = canonical_requested_profile_id
                 else:
                     for profile_id in session["managedProfileIds"]:
                         profile = state["profiles"].get(profile_id)
@@ -3329,14 +3544,23 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/follow/toggle":
             def action(state):
                 session = ensure_session(state, session_id)
-                source_profile_id = session.get("currentActorProfileId")
-                target_profile_id = payload["targetProfileId"]
+                source_profile_id = resolve_canonical_profile_id(state, session.get("currentActorProfileId"))
+                target_profile_id = resolve_canonical_profile_id(state, payload["targetProfileId"])
                 if not source_profile_id:
                     raise ValueError("请先注册后再关注。")
+                if not target_profile_id or target_profile_id not in state.get("profiles", {}):
+                    raise ValueError("没有找到要关注的对象。")
+                source_alias_ids = collect_profile_alias_ids(state, source_profile_id)
+                target_alias_ids = collect_profile_alias_ids(state, target_profile_id)
                 follows = state["follows"]
-                existing = next((item for item in follows if item["sourceProfileId"] == source_profile_id and item["targetProfileId"] == target_profile_id), None)
+                existing = [
+                    item
+                    for item in follows
+                    if item["sourceProfileId"] in source_alias_ids and item["targetProfileId"] in target_alias_ids
+                ]
                 if existing:
-                    follows.remove(existing)
+                    for item in existing:
+                        follows.remove(item)
                 else:
                     follows.append({"sourceProfileId": source_profile_id, "targetProfileId": target_profile_id, "createdAt": iso_at()})
                 return bootstrap_response(state, session)
