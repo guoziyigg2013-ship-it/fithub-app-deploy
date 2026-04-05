@@ -5679,24 +5679,17 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
     profile.role === "enthusiast"
       ? [
           renderPersonalShortcutTile("账户", "资料与安全", "账", 'data-open-my-feature="account"'),
-          renderPersonalShortcutTile("打卡", "记录运动项目", "卡", 'data-open-my-feature="checkin"'),
           renderPersonalShortcutTile("订单", "预约记录", "单", 'data-open-my-feature="orders"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
-          renderPersonalShortcutTile("粉丝", `${state.followerSet.size} 位关注你`, "粉", 'data-open-my-feature="followers"'),
           renderPersonalShortcutTile("积分", `${getProfilePoints(profile, relatedBookings)} 分`, "分", 'data-open-my-feature="points"'),
-          renderPersonalShortcutTile("预约", "查看排期", "约", 'data-open-my-feature="schedule"'),
-          renderPersonalShortcutTile("健康", "BMI 与设备", "健", 'data-open-my-feature="health"'),
-          renderPersonalShortcutTile("动态", `${profile.posts?.length || 0} 条记录`, "圈", 'data-open-my-feature="moments"')
+          renderPersonalShortcutTile("健康", "BMI 与设备", "健", 'data-open-my-feature="health"')
         ]
       : [
           renderPersonalShortcutTile("账户", "资料与主页", "账", 'data-open-my-feature="account"'),
           renderPersonalShortcutTile("订单", `别人给我的 ${relatedBookings.length} 单`, "单", 'data-open-my-feature="orders"'),
-          renderPersonalShortcutTile("预约", "别人对我的预约", "约", 'data-open-my-feature="schedule"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
-          renderPersonalShortcutTile("粉丝", `${state.followerSet.size} 位关注你`, "粉", 'data-open-my-feature="followers"'),
           renderPersonalShortcutTile("评分", profile.ratingCount ? `${getRatingDisplay(profile)} 分` : "等待评分", "评", 'data-open-my-feature="reviews"'),
-          renderPersonalShortcutTile("消息", `${state.threads.length} 条咨询`, "信", 'data-open-my-feature="messages"'),
-          renderPersonalShortcutTile("动态", `${profile.posts?.length || 0} 条记录`, "圈", 'data-open-my-feature="moments"')
+          renderPersonalShortcutTile("消息", `${state.threads.length} 条咨询`, "信", 'data-open-my-feature="messages"')
         ];
   const roleSummary =
     profile.role === "enthusiast"
