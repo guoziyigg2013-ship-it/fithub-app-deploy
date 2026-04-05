@@ -948,6 +948,11 @@ def reconcile_account_registry(state):
     changed = deduplicate_profiles_by_phone_role(state)
     if deduplicate_profiles_by_account_role(state):
         changed = True
+    before_favorites = json.dumps(state.get("postFavorites", []), ensure_ascii=False, sort_keys=True)
+    normalize_post_favorites(state)
+    after_favorites = json.dumps(state.get("postFavorites", []), ensure_ascii=False, sort_keys=True)
+    if before_favorites != after_favorites:
+        changed = True
     old_accounts = ensure_account_registry(state)
     rebuilt_accounts = {}
     phone_index = {}
@@ -1108,6 +1113,10 @@ def replace_profile_references(state, source_profile_id, target_profile_id):
         if booking.get("targetProfileId") == source_profile_id:
             booking["targetProfileId"] = target_profile_id
 
+    for favorite in state.get("postFavorites", []):
+        if favorite.get("sourceProfileId") == source_profile_id:
+            favorite["sourceProfileId"] = target_profile_id
+
     for post in state.get("posts", {}).values():
         if post.get("authorProfileId") == source_profile_id:
             post["authorProfileId"] = target_profile_id
@@ -1186,6 +1195,31 @@ def normalize_threads(state):
             existing_message_ids.add(message.get("id"))
         target["messages"].sort(key=lambda item: item.get("createdAt", ""))
     state["threads"] = list(merged_threads.values())
+
+
+def normalize_post_favorites(state):
+    unique = []
+    seen = set()
+    valid_profile_ids = set(state.get("profiles", {}).keys())
+    valid_posts = state.get("posts", {})
+    for item in state.get("postFavorites", []):
+        source = item.get("sourceProfileId")
+        post_id = item.get("postId")
+        post = valid_posts.get(post_id)
+        if source not in valid_profile_ids or not post or not post.get("media"):
+            continue
+        pair = (source, post_id)
+        if pair in seen:
+            continue
+        seen.add(pair)
+        unique.append(
+            {
+                "sourceProfileId": source,
+                "postId": post_id,
+                "createdAt": item.get("createdAt") or iso_at(),
+            }
+        )
+    state["postFavorites"] = unique
 
 
 def deduplicate_profiles_by_phone_role(state):
@@ -1910,6 +1944,7 @@ def initial_state():
         "profiles": profiles,
         "posts": posts,
         "follows": follows,
+        "postFavorites": [],
         "bookings": bookings,
         "threads": threads,
         "otpCodes": {},
@@ -2106,6 +2141,43 @@ def serialize_comment(state, comment):
     }
 
 
+def serialize_profile_brief(state, profile_id):
+    profile = state.get("profiles", {}).get(profile_id)
+    if not profile:
+        return {
+            "id": profile_id,
+            "name": "平台用户",
+            "handle": f"@{profile_id}",
+            "role": "",
+            "city": "",
+            "locationLabel": "",
+            "shortDesc": "",
+            "bio": "",
+            "followers": 0,
+            "ratingAvg": 0,
+            "ratingCount": 0,
+            "avatarImage": "",
+        }
+
+    reviews = profile.get("reviews", [])
+    rating_count = len(reviews)
+    rating_avg = round(sum(item["score"] for item in reviews) / rating_count, 1) if rating_count else 0
+    return {
+        "id": profile["id"],
+        "name": profile.get("name", "平台用户"),
+        "handle": profile.get("handle") or f"@{profile['id']}",
+        "role": profile.get("role", ""),
+        "city": profile.get("city", ""),
+        "locationLabel": profile.get("locationLabel", ""),
+        "shortDesc": profile.get("shortDesc", ""),
+        "bio": profile.get("bio", ""),
+        "followers": follower_count(state, profile["id"]),
+        "ratingAvg": rating_avg,
+        "ratingCount": rating_count,
+        "avatarImage": compact_avatar_image(profile.get("avatarImage"), profile.get("role", "")),
+    }
+
+
 def serialize_checkin(checkin):
     return {
         "id": checkin["id"],
@@ -2140,6 +2212,129 @@ def serialize_post(state, post, current_actor_profile_id):
         "comments": [serialize_comment(state, item) for item in sorted(post.get("comments", []), key=lambda value: value["createdAt"])],
         "checkin": serialize_checkin(post["checkin"]) if post.get("checkin") else None,
     }
+
+
+def build_mention_tokens(profile):
+    if not profile:
+        return []
+    tokens = []
+    handle = str(profile.get("handle") or "").strip().lower()
+    if handle:
+        tokens.append(handle)
+    name = str(profile.get("name") or "").strip().lower()
+    if name:
+        tokens.append(f"@{name}")
+    return [token for token in tokens if token]
+
+
+def text_mentions_profile(text, profile):
+    content = str(text or "").strip().lower()
+    if not content or not profile:
+        return False
+    return any(token in content for token in build_mention_tokens(profile))
+
+
+def serialize_notifications(state, current_actor_profile_id):
+    if not current_actor_profile_id:
+        return []
+
+    current_profile = state.get("profiles", {}).get(current_actor_profile_id)
+    notifications = []
+
+    def add_notification(notification_id, actor_profile_id, type_label, text, created_at, post_id):
+        if not actor_profile_id or actor_profile_id == current_actor_profile_id:
+            return
+        actor = serialize_profile_brief(state, actor_profile_id)
+        notifications.append(
+            {
+                "id": notification_id,
+                "type": type_label,
+                "actorProfileId": actor_profile_id,
+                "actorName": actor["name"],
+                "actorHandle": actor["handle"],
+                "actorAvatarImage": actor["avatarImage"],
+                "actorRole": actor["role"],
+                "text": text,
+                "postId": post_id,
+                "time": relative_time_label(created_at),
+                "createdAt": created_at,
+            }
+        )
+
+    for post in state.get("posts", {}).values():
+        post_id = post.get("id")
+        author_profile_id = post.get("authorProfileId")
+        excerpt = str(post.get("content") or "").strip()[:48]
+
+        if author_profile_id == current_actor_profile_id:
+            for liker_id in post.get("likes", []):
+                add_notification(
+                    f"like-{post_id}-{liker_id}",
+                    liker_id,
+                    "like",
+                    f"赞了你的动态：{excerpt or '你的健身圈内容'}",
+                    post.get("createdAt"),
+                    post_id,
+                )
+            for comment in post.get("comments", []):
+                add_notification(
+                    comment.get("id") or f"comment-{post_id}-{comment.get('authorProfileId')}",
+                    comment.get("authorProfileId"),
+                    "comment",
+                    f"评论了你的动态：{str(comment.get('text') or '').strip()}",
+                    comment.get("createdAt"),
+                    post_id,
+                )
+
+        if author_profile_id != current_actor_profile_id and text_mentions_profile(post.get("content"), current_profile):
+            add_notification(
+                f"mention-post-{post_id}-{author_profile_id}",
+                author_profile_id,
+                "mention",
+                f"在动态里 @ 了你：{excerpt or '点开查看内容'}",
+                post.get("createdAt"),
+                post_id,
+            )
+
+        for comment in post.get("comments", []):
+            if comment.get("authorProfileId") == current_actor_profile_id:
+                continue
+            if text_mentions_profile(comment.get("text"), current_profile):
+                add_notification(
+                    f"mention-comment-{comment.get('id') or post_id}",
+                    comment.get("authorProfileId"),
+                    "mention",
+                    f"在评论里 @ 了你：{str(comment.get('text') or '').strip()}",
+                    comment.get("createdAt"),
+                    post_id,
+                )
+
+    notifications.sort(key=lambda item: item.get("createdAt") or "", reverse=True)
+    return notifications[:60]
+
+
+def serialize_favorite_posts(state, current_actor_profile_id):
+    if not current_actor_profile_id:
+        return []
+    favorites = [
+        item
+        for item in state.get("postFavorites", [])
+        if item.get("sourceProfileId") == current_actor_profile_id
+    ]
+    favorites.sort(key=lambda item: item.get("createdAt") or "", reverse=True)
+    serialized = []
+    for item in favorites:
+        post = state.get("posts", {}).get(item.get("postId"))
+        if not post or not post.get("media"):
+            continue
+        serialized.append(
+            {
+                "profile": serialize_profile_brief(state, post.get("authorProfileId")),
+                "post": serialize_post(state, post, current_actor_profile_id),
+                "favoritedAt": item.get("createdAt") or "",
+            }
+        )
+    return serialized
 
 
 def serialize_profile(state, profile_id, current_actor_profile_id):
@@ -2264,6 +2459,13 @@ def bootstrap_response(state, session):
         "profiles": profiles,
         "followSet": sorted(get_follow_set(state, current_actor_profile_id)),
         "followerSet": sorted(get_follower_set(state, current_actor_profile_id)),
+        "favoritePostIds": sorted(
+            item.get("postId")
+            for item in state.get("postFavorites", [])
+            if item.get("sourceProfileId") == current_actor_profile_id and item.get("postId")
+        ),
+        "favoritePosts": serialize_favorite_posts(state, current_actor_profile_id),
+        "notifications": serialize_notifications(state, current_actor_profile_id),
         "bookings": serialize_bookings(state, session),
         "threads": serialize_threads(state, current_actor_profile_id),
     }
@@ -3235,6 +3437,43 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 else:
                     likes.append(actor)
                 return bootstrap_response(state, session)
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/post/favorite-toggle":
+            def action(state):
+                session = ensure_session(state, session_id)
+                actor = session.get("currentActorProfileId")
+                if not actor:
+                    raise ValueError("请先注册后再收藏。")
+                post = state["posts"][payload["postId"]]
+                if not post.get("media"):
+                    raise ValueError("当前这条动态没有图片或视频可收藏。")
+                favorites = state.setdefault("postFavorites", [])
+                existing = next(
+                    (
+                        item
+                        for item in favorites
+                        if item.get("sourceProfileId") == actor and item.get("postId") == post["id"]
+                    ),
+                    None,
+                )
+                if existing:
+                    favorites.remove(existing)
+                else:
+                    favorites.append(
+                        {
+                            "sourceProfileId": actor,
+                            "postId": post["id"],
+                            "createdAt": iso_at(),
+                        }
+                    )
+                normalize_post_favorites(state)
+                return bootstrap_response(state, session)
+
             try:
                 self._write_json(self._with_state(action))
             except ValueError as exc:

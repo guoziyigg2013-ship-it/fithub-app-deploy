@@ -985,6 +985,9 @@ const state = {
   activeProfileId: "",
   followSet: new Set(),
   followerSet: new Set(),
+  favoritePostIds: new Set(),
+  favoritePosts: [],
+  notifications: [],
   ratingDrafts: {},
   reviewDrafts: {},
   commentDrafts: {},
@@ -1552,6 +1555,9 @@ function bootstrapRememberedAccountLocally() {
       profiles: mergedProfiles,
       followSet: snapshot?.followSet || [],
       followerSet: snapshot?.followerSet || [],
+      favoritePostIds: snapshot?.favoritePostIds || [],
+      favoritePosts: snapshot?.favoritePosts || [],
+      notifications: snapshot?.notifications || [],
       bookings: snapshot?.bookings || [],
       threads: snapshot?.threads || []
     },
@@ -1675,6 +1681,9 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
     : payload.session.currentActorProfileId || state.managedProfileIds[0] || "";
   state.followSet = new Set(payload.followSet || []);
   state.followerSet = new Set(payload.followerSet || []);
+  state.favoritePostIds = new Set(payload.favoritePostIds || []);
+  state.favoritePosts = Array.isArray(payload.favoritePosts) ? payload.favoritePosts : [];
+  state.notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
   state.bookings = payload.bookings || [];
   state.threads = payload.threads || [];
   state.composeProfileId = state.composeProfileId || state.currentActorProfileId || state.managedProfileIds[0] || "";
@@ -1809,6 +1818,9 @@ async function logoutCurrentDevice() {
   state.composeProfileId = "";
   state.followSet = new Set();
   state.followerSet = new Set();
+  state.favoritePostIds = new Set();
+  state.favoritePosts = [];
+  state.notifications = [];
   state.bookings = [];
   state.threads = [];
   state.authPhone = "";
@@ -2257,6 +2269,39 @@ function getFollowerProfiles() {
       if (right.ratingAvg !== left.ratingAvg) return right.ratingAvg - left.ratingAvg;
       return String(left.name).localeCompare(String(right.name), "zh-Hans-CN");
     });
+}
+
+function isMediaPost(post) {
+  return Boolean(Array.isArray(post?.media) && post.media.some((item) => item?.url));
+}
+
+function getAllPostEntries() {
+  return state.profiles
+    .flatMap((profile) => (profile.posts || []).map((post) => ({ profile, post })))
+    .sort((left, right) => String(right.post?.createdAt || "").localeCompare(String(left.post?.createdAt || "")));
+}
+
+function getFavoritedMediaEntries() {
+  const savedEntries = Array.isArray(state.favoritePosts)
+    ? state.favoritePosts
+        .filter((item) => item?.profile && item?.post && isMediaPost(item.post))
+        .map((item) => ({ profile: item.profile, post: item.post }))
+    : [];
+
+  const seenPostIds = new Set(savedEntries.map((item) => item.post.id));
+  getAllPostEntries().forEach((item) => {
+    if (!isMediaPost(item.post) || seenPostIds.has(item.post.id) || !state.favoritePostIds.has(item.post.id)) {
+      return;
+    }
+    savedEntries.push(item);
+    seenPostIds.add(item.post.id);
+  });
+
+  return savedEntries.sort((left, right) => String(right.post?.createdAt || "").localeCompare(String(left.post?.createdAt || "")));
+}
+
+function getInboxCount() {
+  return (state.notifications?.length || 0) + (state.threads?.length || 0);
 }
 
 function getBookingsForProfile(profile, direction = "") {
@@ -3466,6 +3511,11 @@ async function togglePostLike(postId) {
   renderPage();
 }
 
+async function togglePostFavorite(postId) {
+  await postAndSync(`${API_BASE}/post/favorite-toggle`, { postId }, { keepOverlay: Boolean(state.overlayMode) });
+  renderPage();
+}
+
 async function submitPostComment(postId) {
   const text = (state.commentDrafts[postId] || "").trim();
   if (!text) return;
@@ -3810,6 +3860,8 @@ function renderPostCard(profile, post, options = {}) {
   const { compact = false, showProfileButton = true } = options;
   const commentDraft = state.commentDrafts[post.id] || "";
   const showChatButton = canOpenChatWith(profile.id);
+  const canFavorite = isMediaPost(post);
+  const favorited = state.favoritePostIds.has(post.id);
   const checkinMeta = post.checkin
     ? `
         <div class="checkin-inline-row">
@@ -3841,6 +3893,11 @@ function renderPostCard(profile, post, options = {}) {
         <button class="mini-button ${post.likedByCurrentActor ? "mini-button--accent" : ""}" data-like-post="${post.id}" type="button">
           ${post.likedByCurrentActor ? "已赞" : "点赞"} ${post.likeCount ? `(${post.likeCount})` : ""}
         </button>
+        ${
+          canFavorite
+            ? `<button class="mini-button ${favorited ? "mini-button--accent mini-button--star-active" : "mini-button--star"}" data-favorite-post="${post.id}" type="button">${favorited ? "★ 已收藏" : "☆ 收藏"}</button>`
+            : ""
+        }
         <span class="post-action-count">评论 ${post.comments?.length || 0}</span>
         ${
           showProfileButton
@@ -4656,29 +4713,93 @@ function renderManagedBookingList(profile, bookings, { emptyText = "", primaryAc
 }
 
 function renderMessagesFeature(profile) {
+  const notifications = Array.isArray(state.notifications) ? state.notifications : [];
   const threads = (state.threads || []).filter(Boolean);
-  if (!threads.length) {
-    return '<article class="empty-card">还没有新的私信咨询。被关注后，用户给你发送的消息会集中显示在这里。</article>';
+  if (!notifications.length && !threads.length) {
+    return '<article class="empty-card">还没有新的互动消息。别人给你的赞、评论、@和私信会集中显示在这里。</article>';
   }
 
   return `
     <section class="stack-list">
-      ${threads
-        .map(
-          (thread) => `
-            <article class="feature-follow-item">
-              <button class="feature-follow-main" data-open-chat="${thread.withProfileId}" type="button">
-                ${renderAvatarMarkup({ name: thread.withProfileName, avatarImage: thread.withProfileAvatarImage, role: "enthusiast" }, "avatar")}
+      ${
+        notifications.length
+          ? `
+            <article class="detail-card">
+              <div class="section-title-row">
                 <div>
-                  <strong>${escapeHtml(thread.withProfileName)}</strong>
-                  <p>${escapeHtml(thread.lastMessage?.text || "打开查看最新消息")}</p>
+                  <h3>互动消息</h3>
+                  <p class="result-tip">集中查看别人给你的赞、评论和 @ 你的内容。</p>
                 </div>
-              </button>
-              <button class="mini-button" data-open-chat="${thread.withProfileId}" type="button">查看</button>
+              </div>
+              <section class="stack-list">
+                ${notifications
+                  .map(
+                    (item) => `
+                      <article class="feature-follow-item">
+                        <button class="feature-follow-main" data-open-profile="${item.actorProfileId}" type="button">
+                          ${renderAvatarMarkup({ name: item.actorName, avatarImage: item.actorAvatarImage, role: item.actorRole || "enthusiast" }, "avatar")}
+                          <div>
+                            <strong>${escapeHtml(item.actorName)}</strong>
+                            <p>${escapeHtml(item.text)}</p>
+                            <small>${escapeHtml(item.time)}</small>
+                          </div>
+                        </button>
+                        <span class="status-pill status-pill--soft">${escapeHtml(item.type === "like" ? "赞" : item.type === "comment" ? "评论" : "@我")}</span>
+                      </article>
+                    `
+                  )
+                  .join("")}
+              </section>
             </article>
           `
-        )
-        .join("")}
+          : ""
+      }
+      ${
+        threads.length
+          ? `
+            <article class="detail-card">
+              <div class="section-title-row">
+                <div>
+                  <h3>私信咨询</h3>
+                  <p class="result-tip">已关注后可继续沟通预约、课程和训练安排。</p>
+                </div>
+              </div>
+              <section class="stack-list">
+                ${threads
+                  .map(
+                    (thread) => `
+                      <article class="feature-follow-item">
+                        <button class="feature-follow-main" data-open-chat="${thread.withProfileId}" type="button">
+                          ${renderAvatarMarkup({ name: thread.withProfileName, avatarImage: thread.withProfileAvatarImage, role: "enthusiast" }, "avatar")}
+                          <div>
+                            <strong>${escapeHtml(thread.withProfileName)}</strong>
+                            <p>${escapeHtml(thread.lastMessage?.text || "打开查看最新消息")}</p>
+                            <small>${escapeHtml(thread.lastMessage?.time || "刚刚")}</small>
+                          </div>
+                        </button>
+                        <button class="mini-button" data-open-chat="${thread.withProfileId}" type="button">查看</button>
+                      </article>
+                    `
+                  )
+                  .join("")}
+              </section>
+            </article>
+          `
+          : ""
+      }
+    </section>
+  `;
+}
+
+function renderCollectionsFeature() {
+  const entries = getFavoritedMediaEntries();
+  if (!entries.length) {
+    return '<article class="empty-card">你还没有收藏任何图片或视频。看到喜欢的动作讲解、训练视频或照片时，点一下星标就会收进这里。</article>';
+  }
+
+  return `
+    <section class="timeline-list">
+      ${entries.map(({ profile, post }) => renderPostCard(profile, post)).join("")}
     </section>
   `;
 }
@@ -5679,17 +5800,21 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
     profile.role === "enthusiast"
       ? [
           renderPersonalShortcutTile("账户", "资料与安全", "账", 'data-open-my-feature="account"'),
+          renderPersonalShortcutTile("消息", `${getInboxCount()} 条互动`, "信", 'data-open-my-feature="messages"'),
           renderPersonalShortcutTile("订单", "预约记录", "单", 'data-open-my-feature="orders"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
+          renderPersonalShortcutTile("收藏", `${getFavoritedMediaEntries().length} 条媒体`, "藏", 'data-open-my-feature="collections"'),
           renderPersonalShortcutTile("积分", `${getProfilePoints(profile, relatedBookings)} 分`, "分", 'data-open-my-feature="points"'),
           renderPersonalShortcutTile("健康", "BMI 与设备", "健", 'data-open-my-feature="health"')
         ]
       : [
           renderPersonalShortcutTile("账户", "资料与主页", "账", 'data-open-my-feature="account"'),
+          renderPersonalShortcutTile("消息", `${getInboxCount()} 条互动`, "信", 'data-open-my-feature="messages"'),
           renderPersonalShortcutTile("订单", `别人给我的 ${relatedBookings.length} 单`, "单", 'data-open-my-feature="orders"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
+          renderPersonalShortcutTile("收藏", `${getFavoritedMediaEntries().length} 条媒体`, "藏", 'data-open-my-feature="collections"'),
           renderPersonalShortcutTile("评分", profile.ratingCount ? `${getRatingDisplay(profile)} 分` : "等待评分", "评", 'data-open-my-feature="reviews"'),
-          renderPersonalShortcutTile("消息", `${state.threads.length} 条咨询`, "信", 'data-open-my-feature="messages"')
+          renderPersonalShortcutTile("健康", "BMI 与设备", "健", 'data-open-my-feature="health"')
         ];
   const roleSummary =
     profile.role === "enthusiast"
@@ -5916,6 +6041,11 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
       subtitle: "这里集中展示你已经关注的人，以及正在关注你的粉丝",
       content: renderSocialProfilesSection(socialTab)
     },
+    collections: {
+      title: "收藏",
+      subtitle: "把探索和动态里喜欢的视频、图片与训练干货收进这里，方便反复查看",
+      content: renderCollectionsFeature()
+    },
     followers: {
       title: "粉丝",
       subtitle: "查看已经关注你的用户、教练和健身房",
@@ -5968,7 +6098,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
     },
     messages: {
       title: "消息",
-      subtitle: "查看用户对你的私信、咨询和约课沟通",
+      subtitle: "查看别人给你的赞、评论、@和私信咨询",
       content: renderMessagesFeature(profile)
     },
     moments: {
@@ -6815,6 +6945,11 @@ appView.addEventListener("click", (event) => {
 
   if (target.dataset.likePost) {
     runTask(() => togglePostLike(target.dataset.likePost));
+    return;
+  }
+
+  if (target.dataset.favoritePost) {
+    runTask(() => togglePostFavorite(target.dataset.favoritePost));
     return;
   }
 

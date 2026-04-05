@@ -692,6 +692,15 @@ body.is-workout-live .app {
   background: linear-gradient(180deg, #ffab42, var(--primary-deep));
 }
 
+.mini-button--star {
+  color: #9d580f;
+  background: rgba(242, 140, 40, 0.1);
+}
+
+.mini-button--star-active {
+  box-shadow: 0 8px 18px rgba(242, 140, 40, 0.2);
+}
+
 .location-card,
 .helper-card,
 .role-entry {
@@ -1207,6 +1216,10 @@ body.is-workout-live .app {
   background: rgba(242, 140, 40, 0.14);
   color: #9d580f;
   font-size: 12px;
+}
+
+.status-pill--soft {
+  background: rgba(242, 140, 40, 0.1);
 }
 
 .booking-bottom span {
@@ -2251,7 +2264,8 @@ body.is-workout-live .app {
 }
 
 .feature-follow-main strong,
-.feature-follow-main p {
+.feature-follow-main p,
+.feature-follow-main small {
   margin: 0;
 }
 
@@ -2260,6 +2274,13 @@ body.is-workout-live .app {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.feature-follow-main small {
+  display: block;
+  margin-top: 4px;
+  color: #8d8d8d;
+  font-size: 12px;
 }
 
 .moment-card {
