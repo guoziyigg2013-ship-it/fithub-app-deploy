@@ -712,7 +712,13 @@ def find_profiles_by_account_role(state, account_id, role):
 
 def collect_profile_alias_ids(state, profile_id):
     profiles = state.get("profiles", {})
-    start = profiles.get(profile_id)
+    alias_registry = ensure_profile_alias_registry(state)
+    start_id = str(profile_id or "").strip()
+    visited = set()
+    while start_id in alias_registry and start_id not in visited:
+        visited.add(start_id)
+        start_id = alias_registry[start_id]
+    start = profiles.get(start_id)
     if not start:
         return {profile_id} if profile_id else set()
 
@@ -761,20 +767,26 @@ def collect_profile_alias_ids(state, profile_id):
 def resolve_canonical_profile_id(state, profile_id):
     if not profile_id:
         return ""
-    alias_ids = collect_profile_alias_ids(state, profile_id)
+    alias_registry = ensure_profile_alias_registry(state)
+    resolved_id = str(profile_id or "").strip()
+    visited = set()
+    while resolved_id in alias_registry and resolved_id not in visited:
+        visited.add(resolved_id)
+        resolved_id = alias_registry[resolved_id]
+    alias_ids = collect_profile_alias_ids(state, resolved_id)
     profiles = [state.get("profiles", {}).get(item_id) for item_id in alias_ids]
     preferred = pick_preferred_profile(state, profiles)
-    return preferred.get("id") if preferred else profile_id
+    return preferred.get("id") if preferred else resolved_id
 
 
 def canonicalize_profile_ids(state, profile_ids):
     canonical_ids = []
     seen = set()
     for profile_id in profile_ids or []:
-        canonical_profile_id = resolve_canonical_profile_id(state, profile_id)
-        if canonical_profile_id and canonical_profile_id not in seen and canonical_profile_id in state.get("profiles", {}):
-            seen.add(canonical_profile_id)
-            canonical_ids.append(canonical_profile_id)
+        canonical_id = resolve_canonical_profile_id(state, profile_id)
+        if canonical_id and canonical_id not in seen and canonical_id in state.get("profiles", {}):
+            seen.add(canonical_id)
+            canonical_ids.append(canonical_id)
     return canonical_ids
 
 
@@ -879,6 +891,32 @@ def merge_records_by_id(seed_items, existing_items):
 
 def ensure_account_registry(state):
     return state.setdefault("accounts", {})
+
+
+def ensure_profile_alias_registry(state):
+    aliases = state.setdefault("profileAliases", {})
+    normalized = {}
+    for source_id, target_id in aliases.items():
+        source_key = str(source_id or "").strip()
+        target_key = str(target_id or "").strip()
+        if source_key and target_key and source_key != target_key:
+            normalized[source_key] = target_key
+    if normalized != aliases:
+        state["profileAliases"] = normalized
+    return state["profileAliases"]
+
+
+def register_profile_alias(state, source_profile_id, target_profile_id):
+    source_id = str(source_profile_id or "").strip()
+    target_id = str(target_profile_id or "").strip()
+    if not source_id or not target_id or source_id == target_id:
+        return
+    aliases = ensure_profile_alias_registry(state)
+    visited = {source_id}
+    while target_id in aliases and target_id not in visited:
+        visited.add(target_id)
+        target_id = aliases[target_id]
+    aliases[source_id] = target_id
 
 
 def create_account_record(phone=""):
@@ -1180,6 +1218,7 @@ def merge_duplicate_profile_data(canonical, duplicate):
 def replace_profile_references(state, source_profile_id, target_profile_id):
     if source_profile_id == target_profile_id:
         return
+    register_profile_alias(state, source_profile_id, target_profile_id)
 
     for follow in state.get("follows", []):
         if follow.get("sourceProfileId") == source_profile_id:
@@ -2038,6 +2077,7 @@ def initial_state():
         "profiles": profiles,
         "posts": posts,
         "follows": follows,
+        "profileAliases": {},
         "postFavorites": [],
         "bookings": bookings,
         "threads": threads,
@@ -2255,6 +2295,14 @@ def normalize_session_profiles(state, session):
         changed = True
 
     return changed
+
+
+def session_manages_profile(state, session, profile_id):
+    canonical_profile_id = resolve_canonical_profile_id(state, profile_id)
+    if not canonical_profile_id:
+        return False, ""
+    managed_ids = canonicalize_profile_ids(state, session.get("managedProfileIds", []))
+    return canonical_profile_id in managed_ids, canonical_profile_id
 
 
 def ensure_session(state, session_id=None):
@@ -2997,7 +3045,8 @@ def build_native_checkin_payload(source, workout):
 
 def apply_native_health_sync(state, session, payload):
     profile_id = payload.get("profileId") or session.get("currentActorProfileId")
-    if not profile_id or profile_id not in session.get("managedProfileIds", []):
+    allowed, profile_id = session_manages_profile(state, session, profile_id)
+    if not allowed:
         raise ValueError("请先登录自己的训练者身份，再同步真实设备数据。")
 
     profile = state["profiles"].get(profile_id)
@@ -3462,7 +3511,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 session = ensure_session(state, session_id)
                 profile_id = payload.get("profileId") or session.get("currentActorProfileId")
-                if not profile_id or profile_id not in session.get("managedProfileIds", []):
+                allowed, profile_id = session_manages_profile(state, session, profile_id)
+                if not allowed:
                     raise ValueError("请先注册自己的训练者身份。")
 
                 profile = state["profiles"].get(profile_id)
@@ -3490,7 +3540,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 session = ensure_session(state, session_id)
                 profile_id = payload.get("profileId") or session.get("currentActorProfileId")
-                if not profile_id or profile_id not in session.get("managedProfileIds", []):
+                allowed, profile_id = session_manages_profile(state, session, profile_id)
+                if not allowed:
                     raise ValueError("请先注册自己的训练者身份。")
 
                 profile = state["profiles"].get(profile_id)
@@ -3570,11 +3621,53 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        if parsed.path == f"{API_PREFIX}/auth/restore-follows":
+            def action(state):
+                session = ensure_session(state, session_id)
+                profile_id = payload.get("profileId") or session.get("currentActorProfileId")
+                allowed, profile_id = session_manages_profile(state, session, profile_id)
+                if not allowed:
+                    raise ValueError("请先登录原来的账号后再恢复关注。")
+
+                target_profile_ids = canonicalize_profile_ids(state, payload.get("targetProfileIds", []))
+                if not target_profile_ids:
+                    response = bootstrap_response(state, session)
+                    response["followRestoreSummary"] = {"restoredCount": 0}
+                    return response
+
+                existing_targets = get_follow_set(state, profile_id)
+                restored_count = 0
+                for target_profile_id in target_profile_ids:
+                    if not target_profile_id or target_profile_id == profile_id:
+                        continue
+                    if target_profile_id not in state.get("profiles", {}):
+                        continue
+                    if target_profile_id in existing_targets:
+                        continue
+                    state["follows"].append({
+                        "sourceProfileId": profile_id,
+                        "targetProfileId": target_profile_id,
+                        "createdAt": iso_at()
+                    })
+                    existing_targets.add(target_profile_id)
+                    restored_count += 1
+
+                normalize_follows(state)
+                response = bootstrap_response(state, session)
+                response["followRestoreSummary"] = {"restoredCount": restored_count}
+                return response
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if parsed.path == f"{API_PREFIX}/post/create":
             def action(state):
                 session = ensure_session(state, session_id)
-                profile_id = payload["profileId"]
-                if profile_id not in session["managedProfileIds"]:
+                allowed, profile_id = session_manages_profile(state, session, payload["profileId"])
+                if not allowed:
                     raise ValueError("只能用当前设备已注册的身份发布动态。")
                 post_id = f"post-{uuid.uuid4().hex[:10]}"
                 state["posts"][post_id] = {
@@ -3599,7 +3692,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 session = ensure_session(state, session_id)
                 profile_id = payload.get("profileId") or session.get("currentActorProfileId")
-                if not profile_id or profile_id not in session["managedProfileIds"]:
+                allowed, profile_id = session_manages_profile(state, session, profile_id)
+                if not allowed:
                     raise ValueError("请先注册后再打卡。")
                 profile = state["profiles"][profile_id]
                 if profile.get("role") != "enthusiast":

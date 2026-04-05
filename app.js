@@ -906,6 +906,7 @@ const SESSION_STORAGE_KEY = "fithub_trial_session_id";
 const SNAPSHOT_STORAGE_KEY = "fithub_trial_snapshot_v2";
 const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
 const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
+const FOLLOW_BACKUP_STORAGE_KEY = "fithub_trial_follow_backups_v1";
 const ACTIVE_ACCOUNT_STORAGE_KEY = "fithub_trial_active_account_v1";
 const DEFAULT_RUNTIME_CONFIG = Object.freeze(normalizeRuntimeConfig(window.__FITHUB_CONFIG__ || {}));
 const DEFAULT_LOCATION_STATUS = "默认城市为厦门，你可以点击顶部城市切换成自己的城市或使用实时定位。";
@@ -1026,6 +1027,7 @@ const profileSwipe = {
 
 let refreshPromise = null;
 let restorePromise = null;
+let followRestorePromise = null;
 let lastSuccessfulSyncAt = 0;
 let authLookupTimeout = null;
 let mapSdkPromise = null;
@@ -1121,6 +1123,79 @@ function storeProfileBackups(items) {
   } catch (_error) {
     // Ignore storage quota failures.
   }
+}
+
+function getStoredFollowBackups() {
+  try {
+    const raw = window.localStorage.getItem(FOLLOW_BACKUP_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function storeFollowBackups(items) {
+  try {
+    window.localStorage.setItem(FOLLOW_BACKUP_STORAGE_KEY, JSON.stringify(items));
+  } catch (_error) {
+    // Ignore storage quota failures.
+  }
+}
+
+function getFollowBackupKey({ role = "", phone = "", accountId = "" } = {}) {
+  if (accountId && role) return `account:${accountId}:${role}`;
+  if (phone && role) return `phone:${phone}:${role}`;
+  return "";
+}
+
+function rememberFollowBackup(profile, account = null, followSet = state.followSet, followerSet = state.followerSet) {
+  const role = profile?.role || "";
+  const phone = normalizePhone(account?.phone || profile?.phone || "");
+  const accountId = account?.id || account?.accountId || "";
+  const key = getFollowBackupKey({ role, phone, accountId });
+  if (!roleConfig[role] || !key) return;
+
+  const merged = new Map();
+  getStoredFollowBackups().forEach((item) => {
+    const itemKey = getFollowBackupKey({
+      role: item?.role || "",
+      phone: normalizePhone(item?.phone || ""),
+      accountId: item?.accountId || ""
+    });
+    if (itemKey) merged.set(itemKey, item);
+  });
+
+  merged.set(key, {
+    role,
+    phone,
+    accountId,
+    profileId: profile?.id || "",
+    followSet: Array.from(followSet || []).filter(Boolean),
+    followerSet: Array.from(followerSet || []).filter(Boolean),
+    updatedAt: new Date().toISOString()
+  });
+
+  storeFollowBackups(Array.from(merged.values()).slice(0, 18));
+}
+
+function findStoredFollowBackup(profile, account = null) {
+  const role = profile?.role || "";
+  const phone = normalizePhone(account?.phone || profile?.phone || "");
+  const accountId = account?.id || account?.accountId || "";
+  const preferredKeys = [
+    getFollowBackupKey({ role, phone: "", accountId }),
+    getFollowBackupKey({ role, phone, accountId: "" })
+  ].filter(Boolean);
+  const backups = getStoredFollowBackups();
+  return backups.find((item) => {
+    const itemKey = getFollowBackupKey({
+      role: item?.role || "",
+      phone: normalizePhone(item?.phone || ""),
+      accountId: item?.accountId || ""
+    });
+    return preferredKeys.includes(itemKey);
+  }) || null;
 }
 
 function rememberManagedProfileBackups(payload) {
@@ -1568,6 +1643,26 @@ function bootstrapRememberedAccountLocally() {
   return true;
 }
 
+function clearStaleManagedSession({ keepStoredAccounts = true } = {}) {
+  state.managedProfileIds = [];
+  state.managedAccounts = keepStoredAccounts ? getStoredAccounts() : [];
+  state.currentActorProfileId = "";
+  state.activeProfileId = "";
+  state.composeProfileId = "";
+  state.followSet = new Set();
+  state.followerSet = new Set();
+  state.favoritePostIds = new Set();
+  state.favoritePosts = [];
+  state.notifications = [];
+  state.bookings = [];
+  state.threads = [];
+  state.selectedRole = "enthusiast";
+  state.registerRole = "enthusiast";
+  if (!keepStoredAccounts) {
+    clearAuthResolution({ preservePhone: false });
+  }
+}
+
 async function maybeRestoreRememberedAccounts({ force = false } = {}) {
   if (state.managedProfileIds.length && !force) return false;
   const preferred = getStoredActiveAccount();
@@ -1607,6 +1702,39 @@ async function maybeRestoreRememberedAccounts({ force = false } = {}) {
     });
 
   return restorePromise;
+}
+
+async function maybeRestoreFollowState({ force = false } = {}) {
+  if (followRestorePromise) return followRestorePromise;
+  const actor = getCurrentActor();
+  if (!actor || !state.managedProfileIds.length) return false;
+  if (state.followSet.size && !force) return false;
+
+  const matchedAccount =
+    state.managedAccounts.find(
+      (item) =>
+        item.roles.includes(actor.role) &&
+        (!normalizePhone(actor.phone) || item.phone === normalizePhone(actor.phone))
+    ) || state.managedAccounts[0] || null;
+
+  const backup = findStoredFollowBackup(actor, matchedAccount);
+  const targetProfileIds = Array.isArray(backup?.followSet) ? backup.followSet.filter(Boolean) : [];
+  if (!targetProfileIds.length) return false;
+
+  followRestorePromise = postAndSync(`${API_BASE}/auth/restore-follows`, {
+    profileId: actor.id,
+    targetProfileIds
+  }, { keepOverlay: true })
+    .then(() => {
+      state.locationStatus = "已恢复这个账号之前关注的对象。";
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => {
+      followRestorePromise = null;
+    });
+
+  return followRestorePromise;
 }
 
 function shouldRetryAfterRestore(error) {
@@ -1703,6 +1831,7 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
       matchedAccount?.restoreToken || "",
       activeProfile.id || ""
     );
+    rememberFollowBackup(activeProfile, matchedAccount, state.followSet, state.followerSet);
   }
 
   const myProfile = getMyPageProfile();
@@ -1731,8 +1860,16 @@ async function refreshSharedState({ keepOverlay = false } = {}) {
   refreshPromise = apiRequest(`${API_BASE}/bootstrap${suffix}`)
     .then(async (payload) => {
       syncStateFromServer(payload, { keepOverlay });
-      if (!payload?.session?.managedProfileIds?.length && getStoredAccounts().length) {
-        await maybeRestoreRememberedAccounts({ force: true });
+      const backendManagedIds = Array.isArray(payload?.session?.managedProfileIds) ? payload.session.managedProfileIds : [];
+      if (!backendManagedIds.length && getStoredAccounts().length) {
+        const restored = await maybeRestoreRememberedAccounts({ force: true });
+        if (!restored) {
+          clearStaleManagedSession({ keepStoredAccounts: true });
+          state.overlayMode = "welcome";
+          state.locationStatus = "这个设备的登录状态已过期，请重新登录。";
+        } else {
+          await maybeRestoreFollowState();
+        }
       } else {
         await maybeRestoreRememberedAccounts();
       }
@@ -1788,6 +1925,7 @@ function clearStoredAuthArtifacts() {
     SNAPSHOT_STORAGE_KEY,
     ACCOUNT_STORAGE_KEY,
     PROFILE_BACKUP_STORAGE_KEY,
+    FOLLOW_BACKUP_STORAGE_KEY,
     ACTIVE_ACCOUNT_STORAGE_KEY
   ].forEach((key) => {
     try {
@@ -3241,6 +3379,10 @@ async function submitAuthLogin() {
     if (!(phone && (await recoverAccountFromSnapshot(role, phone)))) {
       throw error;
     }
+  }
+
+  if (!state.followSet.size) {
+    await maybeRestoreFollowState({ force: true });
   }
 
   rememberManagedAccounts(state.managedAccounts);
