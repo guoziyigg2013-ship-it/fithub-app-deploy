@@ -917,10 +917,10 @@ def serialize_phone_matches(state, phone):
 
 
 def reconcile_account_registry(state):
+    changed = deduplicate_profiles_by_phone_role(state)
     old_accounts = ensure_account_registry(state)
     rebuilt_accounts = {}
     phone_index = {}
-    changed = False
 
     def build_account_seed(existing_account, phone=""):
         normalized_phone = normalize_phone(phone or (existing_account or {}).get("phone"))
@@ -973,6 +973,219 @@ def reconcile_account_registry(state):
     if rebuilt_accounts != old_accounts:
         state["accounts"] = rebuilt_accounts
         changed = True
+
+    return changed
+
+
+def merge_string_lists(*values):
+    merged = []
+    for value in values:
+        for item in value or []:
+            text = str(item or "").strip()
+            if text and text not in merged:
+                merged.append(text)
+    return merged
+
+
+def merge_plan_lists(primary, secondary):
+    merged = {}
+    for item in secondary or []:
+        if not isinstance(item, dict):
+            continue
+        key = f"{item.get('title','')}|{item.get('price','')}|{item.get('detail','')}"
+        merged[key] = deepcopy(item)
+    for item in primary or []:
+        if not isinstance(item, dict):
+            continue
+        key = f"{item.get('title','')}|{item.get('price','')}|{item.get('detail','')}"
+        merged[key] = deepcopy(item)
+    return list(merged.values())
+
+
+def merge_profile_records(primary_items, secondary_items):
+    merged = {}
+    for item in secondary_items or []:
+        if isinstance(item, dict) and item.get("id"):
+            merged[item["id"]] = deepcopy(item)
+    for item in primary_items or []:
+        if isinstance(item, dict) and item.get("id"):
+            merged[item["id"]] = deepcopy(item)
+    values = list(merged.values())
+    values.sort(key=lambda item: item.get("createdAt", ""), reverse=True)
+    return values
+
+
+def merge_duplicate_profile_data(canonical, duplicate):
+    for field in [
+        "phone",
+        "gender",
+        "heightCm",
+        "weightKg",
+        "bodyFat",
+        "restingHeartRate",
+        "healthSource",
+        "deviceSyncedAt",
+        "city",
+        "locationLabel",
+        "bio",
+        "shortDesc",
+        "price",
+        "hours",
+        "contactName",
+        "years",
+        "coverImage",
+        "avatarImage",
+        "goal",
+        "level",
+        "lat",
+        "lng",
+    ]:
+        if canonical.get(field) in (None, "", 0) and duplicate.get(field) not in (None, "", 0):
+            canonical[field] = duplicate.get(field)
+
+    canonical["listed"] = bool(canonical.get("listed", True) or duplicate.get("listed", True))
+    canonical["createdAt"] = min(
+        [item for item in [canonical.get("createdAt"), duplicate.get("createdAt")] if item],
+        default=canonical.get("createdAt") or duplicate.get("createdAt") or iso_at(),
+    )
+    canonical["tags"] = merge_string_lists(canonical.get("tags"), duplicate.get("tags"))
+    canonical["favoriteSports"] = merge_string_lists(canonical.get("favoriteSports"), duplicate.get("favoriteSports"))
+    canonical["connectedDevices"] = merge_string_lists(canonical.get("connectedDevices"), duplicate.get("connectedDevices"))
+    canonical["certifications"] = merge_string_lists(canonical.get("certifications"), duplicate.get("certifications"))
+    canonical["externalWorkoutIds"] = merge_string_lists(canonical.get("externalWorkoutIds"), duplicate.get("externalWorkoutIds"))
+    canonical["pricingPlans"] = merge_plan_lists(canonical.get("pricingPlans"), duplicate.get("pricingPlans"))
+    canonical["reviews"] = merge_profile_records(canonical.get("reviews"), duplicate.get("reviews"))
+    canonical["checkins"] = merge_profile_records(canonical.get("checkins"), duplicate.get("checkins"))
+    canonical["healthSnapshot"] = {
+        **(duplicate.get("healthSnapshot") or {}),
+        **(canonical.get("healthSnapshot") or {}),
+    }
+
+
+def replace_profile_references(state, source_profile_id, target_profile_id):
+    if source_profile_id == target_profile_id:
+        return
+
+    for follow in state.get("follows", []):
+        if follow.get("sourceProfileId") == source_profile_id:
+            follow["sourceProfileId"] = target_profile_id
+        if follow.get("targetProfileId") == source_profile_id:
+            follow["targetProfileId"] = target_profile_id
+
+    for booking in state.get("bookings", []):
+        if booking.get("createdByProfileId") == source_profile_id:
+            booking["createdByProfileId"] = target_profile_id
+        if booking.get("targetProfileId") == source_profile_id:
+            booking["targetProfileId"] = target_profile_id
+
+    for post in state.get("posts", {}).values():
+        if post.get("authorProfileId") == source_profile_id:
+            post["authorProfileId"] = target_profile_id
+        post["likes"] = [target_profile_id if item == source_profile_id else item for item in post.get("likes", [])]
+        for comment in post.get("comments", []):
+            if comment.get("authorProfileId") == source_profile_id:
+                comment["authorProfileId"] = target_profile_id
+
+    for profile in state.get("profiles", {}).values():
+        for review in profile.get("reviews", []):
+            if review.get("authorProfileId") == source_profile_id:
+                review["authorProfileId"] = target_profile_id
+
+    for thread in state.get("threads", []):
+        thread["participants"] = [
+            target_profile_id if item == source_profile_id else item
+            for item in thread.get("participants", [])
+        ]
+        for message in thread.get("messages", []):
+            if message.get("senderProfileId") == source_profile_id:
+                message["senderProfileId"] = target_profile_id
+
+    for session in state.get("sessions", {}).values():
+        managed_ids = []
+        for profile_id in session.get("managedProfileIds", []):
+            remapped = target_profile_id if profile_id == source_profile_id else profile_id
+            if remapped not in managed_ids:
+                managed_ids.append(remapped)
+        session["managedProfileIds"] = managed_ids
+        if session.get("currentActorProfileId") == source_profile_id:
+            session["currentActorProfileId"] = target_profile_id
+
+    for account in ensure_account_registry(state).values():
+        profiles_by_role = account.get("profilesByRole") or {}
+        for role, profile_id in list(profiles_by_role.items()):
+            if profile_id == source_profile_id:
+                profiles_by_role[role] = target_profile_id
+
+
+def normalize_follows(state):
+    unique = []
+    seen = set()
+    for item in state.get("follows", []):
+        source = item.get("sourceProfileId")
+        target = item.get("targetProfileId")
+        if not source or not target or source == target:
+            continue
+        pair = (source, target)
+        if pair in seen:
+            continue
+        seen.add(pair)
+        unique.append(item)
+    state["follows"] = unique
+
+
+def normalize_threads(state):
+    merged_threads = {}
+    for thread in state.get("threads", []):
+        participants = []
+        for item in thread.get("participants", []):
+            if item and item not in participants:
+                participants.append(item)
+        if len(participants) < 2:
+            continue
+        participants = sorted(participants[:2])
+        thread_id = get_thread_id(participants[0], participants[1])
+        target = merged_threads.setdefault(
+            thread_id,
+            {"id": thread_id, "participants": participants, "messages": []},
+        )
+        existing_message_ids = {message.get("id") for message in target["messages"]}
+        for message in thread.get("messages", []):
+            if message.get("id") in existing_message_ids:
+                continue
+            target["messages"].append(message)
+            existing_message_ids.add(message.get("id"))
+        target["messages"].sort(key=lambda item: item.get("createdAt", ""))
+    state["threads"] = list(merged_threads.values())
+
+
+def deduplicate_profiles_by_phone_role(state):
+    profiles_by_key = {}
+    changed = False
+
+    for profile in list(state.get("profiles", {}).values()):
+        role = str(profile.get("role") or "").strip()
+        phone = normalize_phone(profile.get("phone"))
+        if role not in {"enthusiast", "gym", "coach"} or not phone:
+            continue
+        profiles_by_key.setdefault((phone, role), []).append(profile)
+
+    for (_phone, _role), profiles in profiles_by_key.items():
+        if len(profiles) < 2:
+            continue
+        canonical = pick_preferred_profile(state, profiles)
+        duplicates = [profile for profile in profiles if profile.get("id") != canonical.get("id")]
+        if not duplicates:
+            continue
+
+        for duplicate in duplicates:
+            merge_duplicate_profile_data(canonical, duplicate)
+            replace_profile_references(state, duplicate["id"], canonical["id"])
+            state["profiles"].pop(duplicate["id"], None)
+            changed = True
+
+    if changed:
+        normalize_follows(state)
+        normalize_threads(state)
 
     return changed
 
