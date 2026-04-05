@@ -1688,15 +1688,47 @@ async function maybeRestoreRememberedAccounts({ force = false } = {}) {
       currentActorProfileId: state.currentActorProfileId
     }
   })
-    .then((payload) => {
+    .then(async (payload) => {
       if (payload?.session?.managedProfileIds?.length) {
         syncStateFromServer(payload, { keepOverlay: true });
         state.locationStatus = "已恢复这个设备保存的账户记录。";
         return true;
       }
+      const recoveryCandidates = [];
+      if (preferred?.role && preferred?.phone) {
+        recoveryCandidates.push({ role: preferred.role, phone: preferred.phone });
+      }
+      accounts.forEach((item) => {
+        (item.roles || []).forEach((role) => {
+          recoveryCandidates.push({ role, phone: item.phone });
+        });
+      });
+      for (const candidate of recoveryCandidates) {
+        if (!roleConfig[candidate.role] || !normalizePhone(candidate.phone)) continue;
+        if (await recoverAccountFromSnapshot(candidate.role, candidate.phone)) {
+          return true;
+        }
+      }
       return false;
     })
-    .catch(() => false)
+    .catch(async () => {
+      const recoveryCandidates = [];
+      if (preferred?.role && preferred?.phone) {
+        recoveryCandidates.push({ role: preferred.role, phone: preferred.phone });
+      }
+      accounts.forEach((item) => {
+        (item.roles || []).forEach((role) => {
+          recoveryCandidates.push({ role, phone: item.phone });
+        });
+      });
+      for (const candidate of recoveryCandidates) {
+        if (!roleConfig[candidate.role] || !normalizePhone(candidate.phone)) continue;
+        if (await recoverAccountFromSnapshot(candidate.role, candidate.phone)) {
+          return true;
+        }
+      }
+      return false;
+    })
     .finally(() => {
       restorePromise = null;
     });
@@ -1764,16 +1796,20 @@ async function apiRequest(path, { method = "GET", body } = {}) {
 
 function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   if (!payload?.session) return;
-  storeSnapshot(payload);
-  const preserveManagedSession =
-    !Array.isArray(payload.session.managedProfileIds) || !payload.session.managedProfileIds.length
-      ? state.managedProfileIds.length > 0
-      : false;
+  const incomingManagedIds = Array.isArray(payload.session.managedProfileIds) ? payload.session.managedProfileIds : [];
+  const preserveManagedSession = !incomingManagedIds.length && state.managedProfileIds.length > 0;
   const previousManagedIds = [...state.managedProfileIds];
   const previousManagedAccounts = [...state.managedAccounts];
   const previousCurrentActorProfileId = state.currentActorProfileId;
   const previousSelectedRole = state.selectedRole;
   const previousRegisterRole = state.registerRole;
+  const previousFollowSet = new Set(state.followSet);
+  const previousFollowerSet = new Set(state.followerSet);
+  const previousFavoritePostIds = new Set(state.favoritePostIds);
+  const previousFavoritePosts = [...state.favoritePosts];
+  const previousNotifications = [...state.notifications];
+  const previousBookings = [...state.bookings];
+  const previousThreads = [...state.threads];
   const incomingProfiles = enhanceProfiles(payload.profiles || []);
   const mergedProfileMap = new Map(incomingProfiles.map((profile) => [profile.id, profile]));
 
@@ -1807,13 +1843,13 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   state.currentActorProfileId = preserveManagedSession
     ? previousCurrentActorProfileId || previousManagedIds[0] || ""
     : payload.session.currentActorProfileId || state.managedProfileIds[0] || "";
-  state.followSet = new Set(payload.followSet || []);
-  state.followerSet = new Set(payload.followerSet || []);
-  state.favoritePostIds = new Set(payload.favoritePostIds || []);
-  state.favoritePosts = Array.isArray(payload.favoritePosts) ? payload.favoritePosts : [];
-  state.notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
-  state.bookings = payload.bookings || [];
-  state.threads = payload.threads || [];
+  state.followSet = preserveManagedSession ? previousFollowSet : new Set(payload.followSet || []);
+  state.followerSet = preserveManagedSession ? previousFollowerSet : new Set(payload.followerSet || []);
+  state.favoritePostIds = preserveManagedSession ? previousFavoritePostIds : new Set(payload.favoritePostIds || []);
+  state.favoritePosts = preserveManagedSession ? previousFavoritePosts : (Array.isArray(payload.favoritePosts) ? payload.favoritePosts : []);
+  state.notifications = preserveManagedSession ? previousNotifications : (Array.isArray(payload.notifications) ? payload.notifications : []);
+  state.bookings = preserveManagedSession ? previousBookings : (payload.bookings || []);
+  state.threads = preserveManagedSession ? previousThreads : (payload.threads || []);
   state.composeProfileId = state.composeProfileId || state.currentActorProfileId || state.managedProfileIds[0] || "";
 
   const activeProfile = getProfile(state.currentActorProfileId || state.managedProfileIds[0] || "");
@@ -1850,6 +1886,10 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
     } else if (state.overlayMode === "welcome") {
       state.overlayMode = null;
     }
+  }
+
+  if (!preserveManagedSession) {
+    storeSnapshot(payload);
   }
 }
 
