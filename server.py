@@ -503,6 +503,22 @@ def send_sms_code(state, session, phone, purpose="login"):
     if last_sent:
         wait_seconds = SMS_RESEND_SECONDS - int((current - last_sent).total_seconds())
         if wait_seconds > 0:
+            if SMS_DEV_MODE and not sms_provider_configured() and current_item.get("debugCode"):
+                return {
+                    "phone": phone_key,
+                    "cooldownSeconds": wait_seconds,
+                    "expiresInSeconds": max(
+                        0,
+                        int(
+                            (
+                                parse_optional_iso_datetime(current_item.get("expiresAt")) - current
+                            ).total_seconds()
+                        )
+                        if parse_optional_iso_datetime(current_item.get("expiresAt"))
+                        else SMS_CODE_TTL_SECONDS
+                    ),
+                    "debugCode": str(current_item.get("debugCode") or ""),
+                }
             raise ValueError(f"验证码已发送，请 {wait_seconds} 秒后再试。")
 
     code = generate_sms_code()
@@ -519,6 +535,7 @@ def send_sms_code(state, session, phone, purpose="login"):
         "purpose": purpose,
         "attempts": 0,
         "sessionId": session.get("id"),
+        "debugCode": code if SMS_DEV_MODE and not sms_provider_configured() else "",
     }
     response = {
         "phone": phone_key,

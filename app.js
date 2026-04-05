@@ -3180,6 +3180,7 @@ function renderAuthVerificationField() {
 function renderRegisterVerificationField() {
   if (!isSmsVerificationEnabled()) return "";
   const secondsLeft = Math.max(0, Math.ceil((state.registerCodeCooldownUntil - Date.now()) / 1000));
+  const helperText = state.registerSuccess || state.authCodeHint || "新设备注册或绑定手机号时，用验证码确认本人操作。";
   return `
     <label class="form-field">
       <span>短信验证码 *</span>
@@ -3200,7 +3201,7 @@ function renderRegisterVerificationField() {
           ${secondsLeft ? "disabled" : ""}
         >${secondsLeft ? escapeHtml(getSmsSendCooldown(secondsLeft)) : "发送验证码"}</button>
       </div>
-      <small class="helper-note">新设备注册或绑定手机号时，用验证码确认本人操作。</small>
+      <small class="helper-note">${escapeHtml(helperText)}</small>
     </label>
   `;
 }
