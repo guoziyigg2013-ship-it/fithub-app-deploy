@@ -2432,16 +2432,26 @@ async function readSingleFile(inputName, formData) {
 
 async function readMediaFiles(files) {
   const media = [];
+  const skipped = [];
   for (const file of files) {
     if (!isProvidedFile(file) || !file.size) continue;
+    const isVideo = file.type.startsWith("video/");
+    const maxBytes = isVideo ? 8 * 1024 * 1024 : 10 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      skipped.push(`${file.name} 过大`);
+      continue;
+    }
     const url = file.type.startsWith("image/")
       ? await optimizeImageFile(file, { maxEdge: 1080, quality: 0.8 })
       : await readFileAsDataUrl(file);
     media.push({
-      type: file.type.startsWith("video/") ? "video" : "image",
+      type: isVideo ? "video" : "image",
       url,
       name: file.name
     });
+  }
+  if (skipped.length) {
+    showError(`以下文件暂未加入：${skipped.join("，")}。建议选择更短的视频或更小的图片。`);
   }
   return media;
 }
@@ -2877,19 +2887,62 @@ function getFollowingFeedItems() {
         profile.id !== actor?.id &&
         state.followSet.has(profile.id)
     )
-    .flatMap((profile) =>
-      (profile.posts || []).map((post, index) => ({
-        id: `${profile.id}-post-${index}`,
-        profile,
-        post,
-        minutes: getRelativeMinutes(post.time)
-      }))
-    )
+    .flatMap((profile) => {
+      const posts = Array.isArray(profile.posts) ? profile.posts : [];
+      if (posts.length) {
+        return posts.map((post, index) => ({
+          id: `${profile.id}-post-${index}`,
+          kind: "post",
+          profile,
+          post,
+          minutes: getTimelineMinutes(post.createdAt, post.time)
+        }));
+      }
+
+      return [
+        {
+          id: `${profile.id}-intro`,
+          kind: "profile",
+          profile,
+          minutes: getTimelineMinutes(profile.createdAt, "最近")
+        }
+      ];
+    })
     .sort((left, right) => {
       if (left.minutes !== right.minutes) return left.minutes - right.minutes;
       return right.profile.followers - left.profile.followers;
     })
     .slice(0, 10);
+}
+
+function getTimelineMinutes(createdAt = "", fallbackLabel = "") {
+  const created = createdAt ? new Date(createdAt).getTime() : NaN;
+  if (Number.isFinite(created) && created > 0) {
+    return Math.max(0, Math.round((Date.now() - created) / 60000));
+  }
+  return getRelativeMinutes(fallbackLabel);
+}
+
+function renderDiscoverProfileEntry(profile) {
+  return `
+    <article class="timeline-card timeline-card--compact">
+      <div class="timeline-head">
+        <div class="timeline-author">
+          ${renderAvatarMarkup(profile, "avatar")}
+          <div>
+            <strong>${escapeHtml(profile.name)}</strong>
+            <p>${escapeHtml(profile.handle)} · ${escapeHtml(getRoleLabel(profile.role))}</p>
+          </div>
+        </div>
+        <span>已关注</span>
+      </div>
+      <p>${escapeHtml(profile.bio || profile.shortDesc || "这个用户刚刚加入了 FitHub。")}</p>
+      <small>${escapeHtml(profile.locationLabel || profile.city || "同城用户")}</small>
+      <div class="post-action-bar">
+        <button class="mini-button" data-open-profile="${profile.id}" type="button">查看主页</button>
+      </div>
+    </article>
+  `;
 }
 
 function slugForRole(role) {
@@ -4276,7 +4329,9 @@ function renderDiscover() {
       ${
         discoverFeed.length
           ? discoverFeed
-              .map(({ profile, post }) => renderPostCard(profile, post, { compact: true }))
+              .map((item) => item.kind === "profile"
+                ? renderDiscoverProfileEntry(item.profile)
+                : renderPostCard(item.profile, item.post, { compact: true }))
               .join("")
           : `
             <article class="empty-card">
@@ -8883,7 +8938,19 @@ overlay.addEventListener("change", (event) => {
   if (event.target.dataset.composeMediaInput) {
     runTask(async () => {
       const files = Array.from(event.target.files || []).slice(0, 9);
-      state.composeMedia = await readMediaFiles(files);
+      const existing = Array.isArray(state.composeMedia) ? [...state.composeMedia] : [];
+      const nextMedia = await readMediaFiles(files);
+      const combined = [...existing];
+      nextMedia.forEach((item) => {
+        const alreadyExists = combined.some(
+          (current) => current.type === item.type && current.name === item.name && current.url === item.url
+        );
+        if (!alreadyExists && combined.length < 9) {
+          combined.push(item);
+        }
+      });
+      state.composeMedia = combined;
+      event.target.value = "";
       renderOverlay();
     });
     return;

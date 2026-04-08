@@ -122,7 +122,7 @@ STATE_RUNTIME_META = {
     "supabase_config_valid": True,
 }
 MAX_INLINE_AVATAR_CHARS = 120_000
-MAX_INLINE_MEDIA_CHARS = 180_000
+MAX_INLINE_MEDIA_CHARS = 12_000_000
 LEGACY_DEMO_ENTHUSIAST_IDS = {"enthusiast-demo-a", "enthusiast-demo-b"}
 NATIVE_DEVICE_LABELS = {
     "apple-health": "Apple Health",
@@ -282,12 +282,10 @@ def compact_avatar_image(url, role):
 def compact_media_item(item):
     url = item.get("url", "")
     if isinstance(url, str) and url.startswith("data:") and len(url) > MAX_INLINE_MEDIA_CHARS:
-        label = "已压缩图片" if item.get("type") != "video" else "视频预览"
-        return {
-            "type": "image",
-            "url": demo_image(label, "#d8d8d8", "#a7a7a7"),
-            "name": item.get("name") or label,
-        }
+        trimmed = dict(item)
+        trimmed["tooLarge"] = True
+        trimmed["name"] = item.get("name") or ("视频文件" if item.get("type") == "video" else "图片文件")
+        return trimmed
     return item
 
 
