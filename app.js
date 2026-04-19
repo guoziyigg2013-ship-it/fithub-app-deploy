@@ -4607,15 +4607,15 @@ function renderPostCard(profile, post, options = {}) {
       ${renderPostMedia(post)}
       <small>${escapeHtml(post.meta)}</small>
       <div class="post-action-bar">
-        <button class="mini-button ${post.likedByCurrentActor ? "mini-button--accent" : ""}" data-like-post="${post.id}" type="button">
+        <button class="post-action-button ${post.likedByCurrentActor ? "is-active" : ""}" data-like-post="${post.id}" type="button">
           ${post.likedByCurrentActor ? "已赞" : "点赞"} ${post.likeCount ? `(${post.likeCount})` : ""}
         </button>
         ${
           canFavorite
-            ? `<button class="mini-button ${favorited ? "mini-button--accent mini-button--star-active" : "mini-button--star"}" data-favorite-post="${post.id}" type="button">${favorited ? "★ 已收藏" : "☆ 收藏"}</button>`
+            ? `<button class="post-action-button post-action-button--favorite ${favorited ? "is-active" : ""}" data-favorite-post="${post.id}" type="button">${favorited ? "★ 已收藏" : "☆ 收藏"}</button>`
             : ""
         }
-        <span class="post-action-count">评论 ${post.comments?.length || 0}</span>
+        <span class="post-action-button post-action-button--count">评论 ${post.comments?.length || 0}</span>
         ${
           showProfileButton
             ? `<button class="mini-button" data-open-profile="${profile.id}" type="button">查看主页</button>`
@@ -4623,7 +4623,7 @@ function renderPostCard(profile, post, options = {}) {
         }
         ${
           showChatButton
-            ? `<button class="mini-button" data-open-chat="${profile.id}" type="button">私信</button>`
+            ? `<button class="post-action-button" data-open-chat="${profile.id}" type="button">私信</button>`
             : ""
         }
       </div>
@@ -5920,11 +5920,11 @@ function renderSocialProfilesSection(mode = "following") {
                       </div>
                     </button>
                     ${
-                      mode === "following"
-                        ? `<button class="follow-button is-active" data-toggle-follow="${item.id}" type="button">已关注</button>`
-                        : state.followSet.has(item.id)
+                      mode === "followers"
+                        ? state.followSet.has(item.id)
                           ? '<button class="follow-button is-reciprocal" type="button" disabled>已回关</button>'
                           : `<button class="follow-button following-action" data-follow-back="${item.id}" type="button">回关</button>`
+                        : ""
                     }
                   </article>
                 `
@@ -8505,7 +8505,7 @@ function renderFollowingOverlay() {
                       </div>
                       ${
                         mode === "following"
-                          ? `<button class="follow-button is-active following-action" data-toggle-follow="${profile.id}" type="button">已关注</button>`
+                          ? ""
                           : state.followSet.has(profile.id)
                             ? '<button class="follow-button is-reciprocal following-action" type="button" disabled>已回关</button>'
                             : `<button class="follow-button following-action" data-follow-back="${profile.id}" type="button">回关</button>`
