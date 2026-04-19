@@ -1228,6 +1228,7 @@ const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
 const FOLLOW_BACKUP_STORAGE_KEY = "fithub_trial_follow_backups_v1";
 const ACTIVE_ACCOUNT_STORAGE_KEY = "fithub_trial_active_account_v1";
 const LOGOUT_MARKER_STORAGE_KEY = "fithub_trial_logged_out_v1";
+const MESSAGE_READ_STATE_STORAGE_KEY = "fithub_trial_message_read_state_v1";
 const DEFAULT_RUNTIME_CONFIG = Object.freeze(normalizeRuntimeConfig(window.__FITHUB_CONFIG__ || {}));
 const DEFAULT_LOCATION_STATUS = "默认城市为厦门，你可以点击顶部城市切换成自己的城市或使用实时定位。";
 const REGISTER_WHEEL_ITEM_HEIGHT = 52;
@@ -1663,6 +1664,109 @@ function getStoredAccountKey(account) {
   if (account.phone) return `phone:${account.phone}`;
   if (account.id) return `id:${account.id}`;
   return "";
+}
+
+function getStoredMessageReadState() {
+  try {
+    const raw = window.localStorage.getItem(MESSAGE_READ_STATE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function storeMessageReadState(payload) {
+  try {
+    window.localStorage.setItem(MESSAGE_READ_STATE_STORAGE_KEY, JSON.stringify(payload));
+  } catch (_error) {
+    // Ignore storage quota failures.
+  }
+}
+
+function getActorMessageReadState(profileId = state.currentActorProfileId) {
+  const actorId = String(profileId || "");
+  if (!actorId) return { notificationsSeenAt: "", threads: {} };
+  const stored = getStoredMessageReadState();
+  const entry = stored[actorId];
+  return {
+    notificationsSeenAt: String(entry?.notificationsSeenAt || ""),
+    threads: entry?.threads && typeof entry.threads === "object" ? entry.threads : {}
+  };
+}
+
+function updateActorMessageReadState(profileId, updater) {
+  const actorId = String(profileId || "");
+  if (!actorId || typeof updater !== "function") return;
+  const stored = getStoredMessageReadState();
+  const current = {
+    notificationsSeenAt: String(stored[actorId]?.notificationsSeenAt || ""),
+    threads: stored[actorId]?.threads && typeof stored[actorId].threads === "object" ? { ...stored[actorId].threads } : {}
+  };
+  const next = updater(current) || current;
+  stored[actorId] = {
+    notificationsSeenAt: String(next.notificationsSeenAt || ""),
+    threads: next.threads && typeof next.threads === "object" ? next.threads : {}
+  };
+  storeMessageReadState(stored);
+}
+
+function getThreadUnreadCount(thread, actorId = state.currentActorProfileId) {
+  if (!thread?.id || !Array.isArray(thread.messages) || !actorId) return 0;
+  const readState = getActorMessageReadState(actorId);
+  const lastReadAt = new Date(readState.threads?.[thread.id] || 0).getTime() || 0;
+  return thread.messages.filter((message) => {
+    const createdAt = new Date(message.createdAt || 0).getTime() || 0;
+    return message.senderProfileId !== actorId && createdAt > lastReadAt;
+  }).length;
+}
+
+function getUnreadNotificationCount(actorId = state.currentActorProfileId) {
+  const notifications = Array.isArray(state.notifications) ? state.notifications : [];
+  if (!notifications.length || !actorId) return 0;
+  const readState = getActorMessageReadState(actorId);
+  const notificationsSeenAt = new Date(readState.notificationsSeenAt || 0).getTime() || 0;
+  return notifications.filter((item) => {
+    const createdAt = new Date(item.createdAt || 0).getTime() || 0;
+    return createdAt > notificationsSeenAt;
+  }).length;
+}
+
+function getTotalUnreadInboxCount(actorId = state.currentActorProfileId) {
+  const threadUnread = (state.threads || []).reduce((total, thread) => total + getThreadUnreadCount(thread, actorId), 0);
+  return getUnreadNotificationCount(actorId) + threadUnread;
+}
+
+function markNotificationsRead(actorId = state.currentActorProfileId) {
+  const notifications = Array.isArray(state.notifications) ? state.notifications : [];
+  if (!actorId || !notifications.length) return;
+  const latestCreatedAt = notifications
+    .map((item) => item?.createdAt || "")
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  if (!latestCreatedAt) return;
+  updateActorMessageReadState(actorId, (current) => ({
+    ...current,
+    notificationsSeenAt: latestCreatedAt
+  }));
+}
+
+function markThreadRead(threadId, actorId = state.currentActorProfileId) {
+  const thread = (state.threads || []).find((item) => item.id === threadId);
+  if (!actorId || !thread?.messages?.length) return;
+  const latestIncoming = [...thread.messages]
+    .filter((message) => message.senderProfileId !== actorId)
+    .sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || "")))
+    .at(-1);
+  if (!latestIncoming?.createdAt) return;
+  updateActorMessageReadState(actorId, (current) => ({
+    ...current,
+    threads: {
+      ...(current.threads || {}),
+      [threadId]: latestIncoming.createdAt
+    }
+  }));
 }
 
 function rememberManagedAccounts(accounts = []) {
@@ -2529,16 +2633,21 @@ function renderAvatarMarkup(profile, className = "avatar") {
   const safeClassName = escapeHtml(className);
   const avatarText = escapeHtml(profile?.avatar || getInitialCharacter(profile?.name || "?"));
   const avatarAlt = escapeHtml(`${profile?.name || "用户"}头像`);
+  const unreadCount = Math.max(0, Number(profile?.unreadCount || 0));
+  const unreadBadge = unreadCount
+    ? `<span class="avatar-unread-badge">${escapeHtml(unreadCount > 99 ? "99+" : String(unreadCount))}</span>`
+    : "";
 
   if (profile?.avatarImage) {
     return `
       <div class="${safeClassName} avatar--photo">
         <img class="avatar-image" src="${optimizeRemoteImageUrl(profile.avatarImage, "avatar")}" alt="${avatarAlt}" decoding="async">
+        ${unreadBadge}
       </div>
     `;
   }
 
-  return `<div class="${safeClassName}">${avatarText}</div>`;
+  return `<div class="${safeClassName}">${avatarText}${unreadBadge}</div>`;
 }
 
 function toRadians(value) {
@@ -2846,7 +2955,7 @@ function getFavoritedMediaEntries() {
 }
 
 function getInboxCount() {
-  return (state.notifications?.length || 0) + (state.threads?.length || 0);
+  return getTotalUnreadInboxCount();
 }
 
 function getBookingsForProfile(profile, direction = "") {
@@ -5868,6 +5977,7 @@ function renderManagedBookingList(profile, bookings, { emptyText = "", primaryAc
 function renderMessagesFeature(profile) {
   const notifications = Array.isArray(state.notifications) ? state.notifications : [];
   const threads = (state.threads || []).filter(Boolean);
+  const notificationsSeenAt = new Date(getActorMessageReadState().notificationsSeenAt || 0).getTime() || 0;
   if (!notifications.length && !threads.length) {
     return '<article class="empty-card">还没有新的互动消息。别人给你的赞、评论、@和私信会集中显示在这里。</article>';
   }
@@ -5890,7 +6000,7 @@ function renderMessagesFeature(profile) {
                     (item) => `
                       <article class="feature-follow-item">
                         <button class="feature-follow-main" data-open-profile="${item.actorProfileId}" type="button">
-                          ${renderAvatarMarkup({ name: item.actorName, avatarImage: item.actorAvatarImage, role: item.actorRole || "enthusiast" }, "avatar")}
+                          ${renderAvatarMarkup({ name: item.actorName, avatarImage: item.actorAvatarImage, role: item.actorRole || "enthusiast", unreadCount: new Date(item.createdAt || 0).getTime() > notificationsSeenAt ? 1 : 0 }, "avatar")}
                           <div>
                             <strong>${escapeHtml(item.actorName)}</strong>
                             <p>${escapeHtml(item.text)}</p>
@@ -5923,14 +6033,13 @@ function renderMessagesFeature(profile) {
                     (thread) => `
                       <article class="feature-follow-item">
                         <button class="feature-follow-main" data-open-chat="${thread.withProfileId}" type="button">
-                          ${renderAvatarMarkup({ name: thread.withProfileName, avatarImage: thread.withProfileAvatarImage, role: "enthusiast" }, "avatar")}
+                          ${renderAvatarMarkup({ name: thread.withProfileName, avatarImage: thread.withProfileAvatarImage, role: "enthusiast", unreadCount: getThreadUnreadCount(thread) }, "avatar")}
                           <div>
                             <strong>${escapeHtml(thread.withProfileName)}</strong>
                             <p>${escapeHtml(thread.lastMessage?.text || "打开查看最新消息")}</p>
                             <small>${escapeHtml(thread.lastMessage?.time || "刚刚")}</small>
                           </div>
                         </button>
-                        <button class="mini-button" data-open-chat="${thread.withProfileId}" type="button">查看</button>
                       </article>
                     `
                   )
@@ -8526,6 +8635,9 @@ appView.addEventListener("click", (event) => {
     if (target.dataset.openMyFeature === "shop") {
       state.shopCategory = "all";
     }
+    if (target.dataset.openMyFeature === "messages") {
+      markNotificationsRead(myProfile.id);
+    }
     state.activePage = "profile";
     state.activeProfileId = myProfile.id;
     state.profileSubpage = target.dataset.openMyFeature;
@@ -8619,6 +8731,10 @@ appView.addEventListener("click", (event) => {
   if (target.dataset.openChat) {
     state.chatTargetProfileId = target.dataset.openChat;
     state.chatDraft = "";
+    const thread = getThreadForProfile(target.dataset.openChat);
+    if (thread?.id) {
+      markThreadRead(thread.id);
+    }
     openOverlay("chat");
     return;
   }
