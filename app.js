@@ -8419,13 +8419,24 @@ function renderChatOverlay() {
           thread?.messages?.length
             ? thread.messages
                 .map(
-                  (message) => `
-                    <article class="chat-bubble ${message.senderProfileId === state.currentActorProfileId ? "is-self" : ""}">
-                      <strong>${escapeHtml(message.senderName)}</strong>
-                      <p>${escapeHtml(message.text)}</p>
-                      <span>${escapeHtml(message.time)}</span>
-                    </article>
-                  `
+                  (message) => {
+                    const isSelf = message.senderProfileId === state.currentActorProfileId;
+                    const bubbleProfile = isSelf
+                      ? getMyPageProfile()
+                      : targetProfile;
+                    return `
+                      <article class="chat-row ${isSelf ? "chat-row--self" : ""}">
+                        ${!isSelf ? renderAvatarMarkup(bubbleProfile || { name: message.senderName }, "chat-avatar") : ""}
+                        <div class="chat-stack ${isSelf ? "chat-stack--self" : ""}">
+                          <div class="chat-bubble ${isSelf ? "is-self" : ""}">
+                            <p>${escapeHtml(message.text)}</p>
+                          </div>
+                          <span class="chat-time">${escapeHtml(message.time)}</span>
+                        </div>
+                        ${isSelf ? renderAvatarMarkup(bubbleProfile || { name: message.senderName }, "chat-avatar") : ""}
+                      </article>
+                    `;
+                  }
                 )
                 .join("")
             : '<article class="empty-card">还没有聊天记录，先发一句打招呼吧。</article>'

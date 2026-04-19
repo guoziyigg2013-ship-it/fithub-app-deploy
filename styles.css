@@ -4063,31 +4063,53 @@ body.is-workout-live .app {
   padding-right: 2px;
 }
 
+.chat-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.chat-row--self {
+  justify-content: flex-end;
+}
+
+.chat-avatar {
+  width: 34px;
+  height: 34px;
+  font-size: 14px;
+}
+
+.chat-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: calc(100% - 54px);
+}
+
+.chat-stack--self {
+  align-items: flex-end;
+}
+
 .chat-bubble {
-  max-width: 86%;
+  max-width: 100%;
   padding: 12px 14px;
   border-radius: 18px 18px 18px 6px;
   background: #f6f6f6;
 }
 
 .chat-bubble.is-self {
-  margin-left: auto;
   border-radius: 18px 18px 6px 18px;
   background: #fff1de;
 }
 
-.chat-bubble strong,
-.chat-bubble span {
-  display: block;
-}
-
 .chat-bubble p {
-  margin: 6px 0 0;
+  margin: 0;
   line-height: 1.55;
 }
 
-.chat-bubble span {
-  margin-top: 8px;
+.chat-time {
+  display: block;
+  margin-top: 6px;
   color: var(--muted);
   font-size: 12px;
 }
