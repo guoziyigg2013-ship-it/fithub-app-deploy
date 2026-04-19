@@ -5922,7 +5922,9 @@ function renderSocialProfilesSection(mode = "following") {
                     ${
                       mode === "following"
                         ? `<button class="follow-button is-active" data-toggle-follow="${item.id}" type="button">已关注</button>`
-                        : `<button class="mini-button" data-open-chat="${item.id}" type="button">回关/私信</button>`
+                        : state.followSet.has(item.id)
+                          ? '<button class="follow-button is-reciprocal" type="button" disabled>已回关</button>'
+                          : `<button class="follow-button following-action" data-follow-back="${item.id}" type="button">回关</button>`
                     }
                   </article>
                 `
@@ -8456,7 +8458,7 @@ function renderFollowingOverlay() {
   const profiles = mode === "followers" ? getFollowerProfiles() : getFollowedProfiles();
   const heading = mode === "followers" ? "我的粉丝" : "我关注的";
   const description = mode === "followers"
-    ? "这里会显示当前身份的粉丝，你可以回关或直接发起私信。"
+    ? "这里会显示当前身份的粉丝，点一下就能直接回关。"
     : "这里会显示你当前身份已经关注的健身房、教练和训练搭子。";
 
   return `
@@ -8504,7 +8506,9 @@ function renderFollowingOverlay() {
                       ${
                         mode === "following"
                           ? `<button class="follow-button is-active following-action" data-toggle-follow="${profile.id}" type="button">已关注</button>`
-                          : `<button class="mini-button following-action" data-open-chat="${profile.id}" type="button">回关/私信</button>`
+                          : state.followSet.has(profile.id)
+                            ? '<button class="follow-button is-reciprocal following-action" type="button" disabled>已回关</button>'
+                            : `<button class="follow-button following-action" data-follow-back="${profile.id}" type="button">回关</button>`
                       }
                     </article>
                   `;
@@ -8714,6 +8718,11 @@ appView.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.dataset.followBack) {
+    runTask(() => toggleFollow(target.dataset.followBack));
+    return;
+  }
+
   if (target.dataset.setSocialTab) {
     state.socialTab = target.dataset.setSocialTab === "followers" ? "followers" : "following";
     if (state.overlayMode === "following") {
@@ -8891,6 +8900,11 @@ overlay.addEventListener("click", (event) => {
 
   if (target.dataset.toggleFollow) {
     runTask(() => toggleFollow(target.dataset.toggleFollow));
+    return;
+  }
+
+  if (target.dataset.followBack) {
+    runTask(() => toggleFollow(target.dataset.followBack));
     return;
   }
 

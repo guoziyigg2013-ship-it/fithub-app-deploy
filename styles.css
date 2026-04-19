@@ -1114,6 +1114,18 @@ body.is-workout-live .app {
   background: #f6f4f1;
 }
 
+.follow-button.is-reciprocal {
+  color: #fffaf4;
+  border-color: rgba(230, 111, 20, 0.55);
+  background: linear-gradient(180deg, #ffb24b, var(--primary-deep));
+  box-shadow: 0 10px 22px rgba(242, 140, 40, 0.2);
+}
+
+.follow-button.is-reciprocal:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
 .follow-button--card {
   width: 72px;
   min-width: 72px;
