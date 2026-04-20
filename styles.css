@@ -4559,9 +4559,39 @@ body.is-workout-live .app {
   transform: rotate(45deg) scale(0.78);
 }
 
-.nav-icon.compass,
-.nav-icon.user {
+.nav-icon.compass {
   border-radius: 50%;
+}
+
+.nav-icon.user {
+  border: 0;
+  border-radius: 0;
+  position: relative;
+}
+
+.nav-icon.user::before,
+.nav-icon.user::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 2px solid currentColor;
+}
+
+.nav-icon.user::before {
+  top: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.nav-icon.user::after {
+  bottom: 0;
+  width: 14px;
+  height: 8px;
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
+  border-bottom: 0;
 }
 
 .nav-icon.calendar {
