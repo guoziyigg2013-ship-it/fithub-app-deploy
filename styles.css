@@ -3379,6 +3379,21 @@ body.is-workout-live .app {
   font-size: 12px;
 }
 
+.timeline-author-button {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  justify-content: flex-start;
+}
+
+.timeline-author-button > div {
+  min-width: 0;
+}
+
 .timeline-card p,
 .review-card p {
   line-height: 1.5;
