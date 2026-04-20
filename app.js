@@ -4573,6 +4573,23 @@ function renderPostComments(post) {
   `;
 }
 
+function renderPostActionGlyph(kind, active = false) {
+  const common = 'class="post-action-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
+  if (kind === "like") {
+    return active
+      ? `<svg ${common}><path d="M12 21s-6.95-4.35-9.17-8.09C1.1 10.03 1.94 6.5 5.05 5.23c2.07-.84 4.32-.13 5.55 1.66 1.23-1.79 3.48-2.5 5.55-1.66 3.11 1.27 3.95 4.8 2.22 7.68C18.95 16.65 12 21 12 21z" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`
+      : `<svg ${common}><path d="M12 21s-6.95-4.35-9.17-8.09C1.1 10.03 1.94 6.5 5.05 5.23c2.07-.84 4.32-.13 5.55 1.66 1.23-1.79 3.48-2.5 5.55-1.66 3.11 1.27 3.95 4.8 2.22 7.68C18.95 16.65 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+
+  if (kind === "favorite") {
+    return active
+      ? `<svg ${common}><path d="M12 3.8l2.54 5.14 5.67.82-4.11 4 0.97 5.64L12 16.78l-5.07 2.62 0.97-5.64-4.11-4 5.67-.82L12 3.8z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`
+      : `<svg ${common}><path d="M12 3.8l2.54 5.14 5.67.82-4.11 4 0.97 5.64L12 16.78l-5.07 2.62 0.97-5.64-4.11-4 5.67-.82L12 3.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+  }
+
+  return `<svg ${common}><path d="M6 7.2h12a3 3 0 0 1 3 3v5.1a3 3 0 0 1-3 3H9.8l-4.6 3v-3H6a3 3 0 0 1-3-3v-5.1a3 3 0 0 1 3-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
 function renderPostCard(profile, post, options = {}) {
   const { compact = false, showProfileButton = true } = options;
   const commentDraft = state.commentDrafts[post.id] || "";
@@ -4622,15 +4639,15 @@ function renderPostCard(profile, post, options = {}) {
       <small>${escapeHtml(post.meta)}</small>
       <div class="post-action-bar">
         <button class="post-action-button post-action-button--icon ${post.likedByCurrentActor ? "is-active" : ""}" data-like-post="${post.id}" type="button" aria-label="${post.likedByCurrentActor ? "取消点赞" : "点赞"}">
-          <span class="post-action-icon">${post.likedByCurrentActor ? "♥" : "♡"}</span>
+          ${renderPostActionGlyph("like", post.likedByCurrentActor)}
           <span class="post-action-number">${post.likeCount || 0}</span>
         </button>
         ${
           canFavorite
-            ? `<button class="post-action-button post-action-button--icon post-action-button--favorite ${favorited ? "is-active" : ""}" data-favorite-post="${post.id}" type="button" aria-label="${favorited ? "取消收藏" : "收藏"}"><span class="post-action-icon">${favorited ? "★" : "☆"}</span><span class="post-action-number">${post.favoriteCount || 0}</span></button>`
+            ? `<button class="post-action-button post-action-button--icon post-action-button--favorite ${favorited ? "is-active" : ""}" data-favorite-post="${post.id}" type="button" aria-label="${favorited ? "取消收藏" : "收藏"}">${renderPostActionGlyph("favorite", favorited)}<span class="post-action-number">${post.favoriteCount || 0}</span></button>`
             : ""
         }
-        <span class="post-action-button post-action-button--icon post-action-button--count"><span class="post-action-icon">💬</span><span class="post-action-number">${post.comments?.length || 0}</span></span>
+        <span class="post-action-button post-action-button--icon post-action-button--count">${renderPostActionGlyph("comment", false)}<span class="post-action-number">${post.comments?.length || 0}</span></span>
         ${
           showChatButton
             ? `<button class="post-action-button" data-open-chat="${profile.id}" type="button">私信</button>`
