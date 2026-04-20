@@ -4576,9 +4576,10 @@ function renderPostComments(post) {
 function renderPostActionGlyph(kind, active = false) {
   const common = 'class="post-action-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
   if (kind === "like") {
+    const heartPath = "M12 20.6l-.72-.66C5.72 14.87 2.4 11.83 2.4 8.09 2.4 5.19 4.63 3 7.45 3c1.61 0 3.15.75 4.15 1.94C12.6 3.75 14.14 3 15.75 3 18.57 3 20.8 5.19 20.8 8.09c0 3.74-3.32 6.78-8.88 11.85l-.72.66z";
     return active
-      ? `<svg ${common}><path d="M12 21s-6.95-4.35-9.17-8.09C1.1 10.03 1.94 6.5 5.05 5.23c2.07-.84 4.32-.13 5.55 1.66 1.23-1.79 3.48-2.5 5.55-1.66 3.11 1.27 3.95 4.8 2.22 7.68C18.95 16.65 12 21 12 21z" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`
-      : `<svg ${common}><path d="M12 21s-6.95-4.35-9.17-8.09C1.1 10.03 1.94 6.5 5.05 5.23c2.07-.84 4.32-.13 5.55 1.66 1.23-1.79 3.48-2.5 5.55-1.66 3.11 1.27 3.95 4.8 2.22 7.68C18.95 16.65 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      ? `<svg ${common}><path d="${heartPath}" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`
+      : `<svg ${common}><path d="${heartPath}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   }
 
   if (kind === "favorite") {
