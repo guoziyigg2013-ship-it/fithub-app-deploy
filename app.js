@@ -1310,6 +1310,8 @@ const state = {
   favoritePostIds: new Set(),
   favoritePosts: [],
   notifications: [],
+  pendingLikePostIds: new Set(),
+  pendingMessageProfileIds: new Set(),
   ratingDrafts: {},
   reviewDrafts: {},
   commentDrafts: {},
@@ -2692,6 +2694,92 @@ function updateProfile(profileId, updater) {
   const current = state.profiles[index];
   const next = typeof updater === "function" ? updater(current) : { ...current, ...updater };
   state.profiles[index] = next;
+}
+
+function getPostById(postId) {
+  for (const profile of state.profiles) {
+    const post = (profile.posts || []).find((item) => item.id === postId);
+    if (post) {
+      return { profile, post };
+    }
+  }
+  const favoritePost = (state.favoritePosts || []).find((item) => item.id === postId);
+  return favoritePost ? { profile: null, post: favoritePost } : null;
+}
+
+function updatePostCollections(postId, updater) {
+  state.profiles = state.profiles.map((profile) => {
+    if (!Array.isArray(profile.posts) || !profile.posts.some((post) => post.id === postId)) return profile;
+    return {
+      ...profile,
+      posts: profile.posts.map((post) => (post.id === postId ? updater({ ...post }) : post))
+    };
+  });
+
+  if (Array.isArray(state.favoritePosts) && state.favoritePosts.some((post) => post.id === postId)) {
+    state.favoritePosts = state.favoritePosts.map((post) => (post.id === postId ? updater({ ...post }) : post));
+  }
+}
+
+function insertOptimisticMessage(profileId, text) {
+  const actor = getCurrentActor();
+  const targetProfile = getProfile(profileId);
+  const optimisticId = `optimistic-${profileId}-${Date.now()}`;
+  const createdAt = new Date().toISOString();
+  const optimisticMessage = {
+    id: optimisticId,
+    senderProfileId: actor?.id || "",
+    senderName: actor?.name || "我",
+    text,
+    createdAt,
+    time: "刚刚",
+    optimistic: true
+  };
+
+  const threadIndex = state.threads.findIndex((thread) => thread.withProfileId === profileId);
+  if (threadIndex >= 0) {
+    const thread = state.threads[threadIndex];
+    state.threads[threadIndex] = {
+      ...thread,
+      messages: [...(thread.messages || []), optimisticMessage],
+      lastMessage: { text, time: "刚刚" }
+    };
+  } else {
+    state.threads = [
+      {
+        id: `optimistic-thread-${profileId}`,
+        withProfileId: profileId,
+        withProfileName: targetProfile?.name || "聊天对象",
+        withProfileAvatarImage: targetProfile?.avatarImage || "",
+        messages: [optimisticMessage],
+        lastMessage: { text, time: "刚刚" }
+      },
+      ...state.threads
+    ];
+  }
+
+  return optimisticId;
+}
+
+function removeOptimisticMessage(profileId, messageId) {
+  state.threads = (state.threads || [])
+    .map((thread) => {
+      if (thread.withProfileId !== profileId) return thread;
+      const nextMessages = (thread.messages || []).filter((message) => message.id !== messageId);
+      return {
+        ...thread,
+        messages: nextMessages,
+        lastMessage: nextMessages.length
+          ? {
+              text: nextMessages[nextMessages.length - 1]?.text || "打开查看最新消息",
+              time: nextMessages[nextMessages.length - 1]?.time || "刚刚"
+            }
+          : thread.id.startsWith("optimistic-thread-")
+            ? null
+            : thread.lastMessage
+      };
+    })
+    .filter((thread) => (thread.messages || []).length || !String(thread.id || "").startsWith("optimistic-thread-"));
 }
 
 function getManagedProfiles() {
@@ -4222,8 +4310,33 @@ async function importHealthDevice(source) {
 }
 
 async function togglePostLike(postId) {
-  await postAndSync(`${API_BASE}/post/like`, { postId }, { keepOverlay: Boolean(state.overlayMode) });
+  if (state.pendingLikePostIds.has(postId)) return;
+  const found = getPostById(postId);
+  if (!found?.post) return;
+
+  const previousLiked = Boolean(found.post.likedByCurrentActor);
+  const previousLikeCount = Number(found.post.likeCount || 0);
+  state.pendingLikePostIds.add(postId);
+  updatePostCollections(postId, (post) => ({
+    ...post,
+    likedByCurrentActor: !previousLiked,
+    likeCount: Math.max(0, previousLikeCount + (previousLiked ? -1 : 1))
+  }));
   renderPage();
+
+  try {
+    await postAndSync(`${API_BASE}/post/like`, { postId }, { keepOverlay: Boolean(state.overlayMode) });
+  } catch (error) {
+    updatePostCollections(postId, (post) => ({
+      ...post,
+      likedByCurrentActor: previousLiked,
+      likeCount: previousLikeCount
+    }));
+    throw error;
+  } finally {
+    state.pendingLikePostIds.delete(postId);
+    renderPage();
+  }
 }
 
 async function togglePostFavorite(postId) {
@@ -4241,14 +4354,33 @@ async function submitPostComment(postId) {
 
 async function sendDirectMessage(profileId) {
   const text = state.chatDraft.trim();
-  if (!text) return;
-  await postAndSync(`${API_BASE}/message/send`, {
-    targetProfileId: profileId,
-    text
-  }, { keepOverlay: true });
+  if (!text || state.pendingMessageProfileIds.has(profileId)) return;
+
+  const previousDraft = state.chatDraft;
+  state.pendingMessageProfileIds.add(profileId);
   state.chatDraft = "";
+  const optimisticMessageId = insertOptimisticMessage(profileId, text);
   state.overlayMode = "chat";
   renderOverlay();
+
+  try {
+    await postAndSync(
+      `${API_BASE}/message/send`,
+      {
+        targetProfileId: profileId,
+        text
+      },
+      { keepOverlay: true }
+    );
+  } catch (error) {
+    removeOptimisticMessage(profileId, optimisticMessageId);
+    state.chatDraft = previousDraft;
+    throw error;
+  } finally {
+    state.pendingMessageProfileIds.delete(profileId);
+    state.overlayMode = "chat";
+    renderOverlay();
+  }
 }
 
 async function createBooking(profileId, plan = null) {
@@ -4579,6 +4711,7 @@ function renderPostCard(profile, post, options = {}) {
   const showChatButton = canOpenChatWith(profile.id);
   const canFavorite = isMediaPost(post);
   const favorited = state.favoritePostIds.has(post.id);
+  const likePending = state.pendingLikePostIds.has(post.id);
   const checkinMeta = post.checkin
     ? `
         <div class="checkin-inline-row">
@@ -4607,7 +4740,7 @@ function renderPostCard(profile, post, options = {}) {
       ${renderPostMedia(post)}
       <small>${escapeHtml(post.meta)}</small>
       <div class="post-action-bar">
-        <button class="post-action-button ${post.likedByCurrentActor ? "is-active" : ""}" data-like-post="${post.id}" type="button">
+        <button class="post-action-button ${post.likedByCurrentActor ? "is-active" : ""} ${likePending ? "is-pending" : ""}" data-like-post="${post.id}" type="button" ${likePending ? "disabled" : ""}>
           ${post.likedByCurrentActor ? "已赞" : "点赞"} ${post.likeCount ? `(${post.likeCount})` : ""}
         </button>
         ${
@@ -8388,6 +8521,8 @@ function renderComposeOverlay() {
 function renderChatOverlay() {
   const targetProfile = getProfile(state.chatTargetProfileId);
   const thread = getThreadForProfile(state.chatTargetProfileId);
+  const isSendingChat = state.pendingMessageProfileIds.has(state.chatTargetProfileId);
+  const canSendChat = Boolean(state.chatDraft.trim()) && !isSendingChat;
 
   if (!targetProfile) {
     return `
@@ -8445,9 +8580,9 @@ function renderChatOverlay() {
         }
       </section>
 
-      <form class="chat-form" id="chatForm">
-        <input data-chat-input="1" type="text" value="${escapeHtml(state.chatDraft)}" placeholder="输入私信内容，约课或咨询都可以">
-        <button class="compose-submit-top" type="submit">发送</button>
+      <form class="chat-form ${isSendingChat ? "is-sending" : ""}" id="chatForm">
+        <input data-chat-input="1" type="text" value="${escapeHtml(state.chatDraft)}" placeholder="输入私信内容，约课或咨询都可以" ${isSendingChat ? "disabled" : ""}>
+        <button class="compose-submit-top" type="submit" ${canSendChat ? "" : "disabled"}>${isSendingChat ? "发送中…" : "发送"}</button>
       </form>
     </div>
   `;
