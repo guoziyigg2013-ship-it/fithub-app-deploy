@@ -3451,30 +3451,30 @@ body.is-workout-live .app {
 .post-action-bar {
   flex-wrap: wrap;
   margin-top: 12px;
-  gap: 10px;
+  gap: 14px;
 }
 
 .post-action-button {
-  min-width: 66px;
-  min-height: 34px;
-  padding: 0 12px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 2px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: #7b6958;
+  color: #8a7968;
   font-size: 13px;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
-  transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.18s ease;
+  transition: color 160ms ease, background-color 160ms ease, transform 160ms ease, opacity 0.15s ease, box-shadow 0.18s ease;
 }
 
 .post-action-button.is-active {
   color: #f28c28;
-  background: rgba(242, 140, 40, 0.08);
+  background: rgba(242, 140, 40, 0.06);
 }
 
 .post-action-button:disabled,
@@ -3489,23 +3489,26 @@ body.is-workout-live .app {
 }
 
 .post-action-button--favorite {
-  min-width: 66px;
+  min-width: 0;
 }
 
 .post-action-button--icon {
   gap: 6px;
-  padding-inline: 8px;
-}
-
-.post-action-icon {
-  font-size: 15px;
-  line-height: 1;
+  padding-inline: 2px;
 }
 
 .post-action-number {
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
-  font-weight: 600;
+  font-weight: 700;
+}
+
+.post-action-glyph {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex-shrink: 0;
+  color: currentColor;
 }
 
 .post-action-count {
