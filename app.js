@@ -4593,27 +4593,13 @@ function renderPostCard(profile, post, options = {}) {
   return `
     <article class="timeline-card ${compact ? "timeline-card--compact" : ""}">
       <div class="timeline-head">
-        ${
-          showProfileButton
-            ? `
-              <button class="timeline-author timeline-author-button" data-open-profile="${profile.id}" type="button">
-                ${renderAvatarMarkup(profile, "avatar")}
-                <div>
-                  <strong>${escapeHtml(profile.name)}</strong>
-                  <p>${escapeHtml(profile.handle)} · ${escapeHtml(post.time)}</p>
-                </div>
-              </button>
-            `
-            : `
-              <div class="timeline-author">
-                ${renderAvatarMarkup(profile, "avatar")}
-                <div>
-                  <strong>${escapeHtml(profile.name)}</strong>
-                  <p>${escapeHtml(profile.handle)} · ${escapeHtml(post.time)}</p>
-                </div>
-              </div>
-            `
-        }
+        <div class="timeline-author">
+          ${renderAvatarMarkup(profile, "avatar")}
+          <div>
+            <strong>${escapeHtml(profile.name)}</strong>
+            <p>${escapeHtml(profile.handle)} · ${escapeHtml(post.time)}</p>
+          </div>
+        </div>
         <span>${escapeHtml(getRoleLabel(profile.role))}</span>
       </div>
       <p>${escapeHtml(post.content)}</p>
@@ -4630,6 +4616,11 @@ function renderPostCard(profile, post, options = {}) {
             : ""
         }
         <span class="post-action-button post-action-button--count">评论 ${post.comments?.length || 0}</span>
+        ${
+          showProfileButton
+            ? `<button class="mini-button" data-open-profile="${profile.id}" type="button">查看主页</button>`
+            : ""
+        }
         ${
           showChatButton
             ? `<button class="post-action-button" data-open-chat="${profile.id}" type="button">私信</button>`
