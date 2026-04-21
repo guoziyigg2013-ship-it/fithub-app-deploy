@@ -4579,18 +4579,18 @@ body.is-workout-live .app {
 }
 
 .nav-icon.user::before {
-  top: 1px;
-  width: 7px;
-  height: 7px;
+  top: 0;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
 }
 
 .nav-icon.user::after {
   bottom: 0;
   width: 14px;
-  height: 10px;
-  border-top-left-radius: 10px;
-  border-top-right-radius: 10px;
+  height: 8px;
+  border-top-left-radius: 9px;
+  border-top-right-radius: 9px;
   border-bottom: 0;
 }
 
