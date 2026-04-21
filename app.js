@@ -4621,16 +4621,15 @@ function renderPostCard(profile, post, options = {}) {
       ${renderPostMedia(post)}
       <small>${escapeHtml(post.meta)}</small>
       <div class="post-action-bar">
-        <button class="post-action-button post-action-button--icon ${post.likedByCurrentActor ? "is-active" : ""}" data-like-post="${post.id}" type="button" aria-label="${post.likedByCurrentActor ? "取消点赞" : "点赞"}">
-          <span class="post-action-icon">${post.likedByCurrentActor ? "♥" : "♡"}</span>
-          <span class="post-action-number">${post.likeCount || 0}</span>
+        <button class="post-action-button ${post.likedByCurrentActor ? "is-active" : ""}" data-like-post="${post.id}" type="button">
+          ${post.likedByCurrentActor ? "已赞" : "点赞"} ${post.likeCount ? `(${post.likeCount})` : ""}
         </button>
         ${
           canFavorite
-            ? `<button class="post-action-button post-action-button--icon post-action-button--favorite ${favorited ? "is-active" : ""}" data-favorite-post="${post.id}" type="button" aria-label="${favorited ? "取消收藏" : "收藏"}"><span class="post-action-icon">${favorited ? "★" : "☆"}</span><span class="post-action-number">${post.favoriteCount || 0}</span></button>`
+            ? `<button class="post-action-button post-action-button--favorite ${favorited ? "is-active" : ""}" data-favorite-post="${post.id}" type="button">${favorited ? "★ 已收藏" : "☆ 收藏"}</button>`
             : ""
         }
-        <span class="post-action-button post-action-button--icon post-action-button--count"><span class="post-action-icon">💬</span><span class="post-action-number">${post.comments?.length || 0}</span></span>
+        <span class="post-action-button post-action-button--count">评论 ${post.comments?.length || 0}</span>
         ${
           showChatButton
             ? `<button class="post-action-button" data-open-chat="${profile.id}" type="button">私信</button>`
@@ -8008,6 +8007,7 @@ function renderProfilePage(profile) {
                 ? `<button class="mini-button" data-create-booking="${profile.id}" type="button">预约</button>`
                 : ""
             }
+            <button class="mini-button" data-open-city="1" type="button">切换城市</button>
           </div>
         </div>
       </div>
