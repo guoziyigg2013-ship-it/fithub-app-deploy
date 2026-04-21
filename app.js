@@ -5906,6 +5906,7 @@ function renderPersonalShortcutTile(label, sublabel, icon, attrs = "") {
     <button class="account-tile" type="button" ${attrs}>
       <span class="account-tile-icon">${escapeHtml(icon)}</span>
       <strong>${escapeHtml(label)}</strong>
+      <span>${escapeHtml(sublabel)}</span>
     </button>
   `;
 }
