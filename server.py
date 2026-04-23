@@ -1,9 +1,11 @@
 import argparse
+import base64
 import hashlib
 import hmac
 import json
 import mimetypes
 import os
+import re
 import secrets
 import sys
 import threading
@@ -48,6 +50,7 @@ MAP_PROVIDER = (os.getenv("FITHUB_MAP_PROVIDER") or "").strip().lower()
 AMAP_WEB_KEY = (os.getenv("FITHUB_AMAP_WEB_KEY") or "").strip()
 AMAP_SECURITY_CODE = (os.getenv("FITHUB_AMAP_SECURITY_CODE") or "").strip()
 BAIDU_MAP_AK = (os.getenv("FITHUB_BAIDU_MAP_AK") or "").strip()
+SUPABASE_MEDIA_BUCKET = (os.getenv("FITHUB_MEDIA_BUCKET") or "fithub-media").strip()
 SMS_PROVIDER = (os.getenv("FITHUB_SMS_PROVIDER") or "").strip().lower()
 SMS_CODE_LENGTH = int(os.getenv("FITHUB_SMS_CODE_LENGTH") or "6")
 SMS_CODE_TTL_SECONDS = int(os.getenv("FITHUB_SMS_CODE_TTL_SECONDS") or "300")
@@ -95,6 +98,8 @@ def runtime_config():
         "amapKey": AMAP_WEB_KEY,
         "amapSecurityCode": AMAP_SECURITY_CODE,
         "baiduAk": BAIDU_MAP_AK,
+        "mediaStorageProvider": "supabase" if supabase_media_storage_enabled() else "",
+        "mediaBucket": SUPABASE_MEDIA_BUCKET if supabase_media_storage_enabled() else "",
         "smsEnabled": sms_verification_enabled(),
         "smsProvider": SMS_PROVIDER if sms_provider_configured() else ("debug" if SMS_DEV_MODE else ""),
     }
@@ -113,6 +118,7 @@ DEFAULT_LOCATION_STATUS = "默认城市为厦门，你可以点击顶部城市�
 
 STORE_LOCK = threading.Lock()
 STATE_CACHE = None
+SUPABASE_MEDIA_BUCKET_READY = False
 STATE_RUNTIME_META = {
     "loaded_from": "uninitialized",
     "supabase_writable": True,
@@ -595,6 +601,120 @@ def supabase_config_valid():
     return valid
 
 
+def supabase_media_storage_enabled():
+    return bool(supabase_storage_enabled() and SUPABASE_MEDIA_BUCKET)
+
+
+def build_supabase_public_media_url(object_path):
+    quoted_path = quote(str(object_path or "").lstrip("/"), safe="/")
+    return f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_MEDIA_BUCKET}/{quoted_path}"
+
+
+def ensure_supabase_media_bucket():
+    global SUPABASE_MEDIA_BUCKET_READY
+    if SUPABASE_MEDIA_BUCKET_READY or not supabase_media_storage_enabled():
+        return
+
+    buckets = supabase_storage_request("GET", "bucket", expect_json=True) or []
+    if any(str(item.get("id") or "") == SUPABASE_MEDIA_BUCKET for item in buckets if isinstance(item, dict)):
+        SUPABASE_MEDIA_BUCKET_READY = True
+        return
+
+    try:
+        supabase_storage_request(
+            "POST",
+            "bucket",
+            payload={
+                "id": SUPABASE_MEDIA_BUCKET,
+                "name": SUPABASE_MEDIA_BUCKET,
+                "public": True,
+                "allowedMimeTypes": ["image/*", "video/*"],
+            },
+            expect_json=True,
+        )
+    except Exception as exc:
+        body = ""
+        if hasattr(exc, "read"):
+            try:
+                body = exc.read().decode("utf-8", errors="ignore")
+            except Exception:  # noqa: BLE001
+                body = ""
+        if getattr(exc, "code", None) not in {400, 409} or ("exists" not in body.lower() and "duplicate" not in body.lower()):
+            raise
+    SUPABASE_MEDIA_BUCKET_READY = True
+
+
+def decode_data_url(data_url):
+    text = str(data_url or "").strip()
+    match = re.match(r"^data:([^;,]+)?(?:;charset=[^;,]+)?;base64,(.+)$", text, re.DOTALL)
+    if not match:
+        raise ValueError("媒体内容格式不正确，请重新选择文件。")
+    content_type = (match.group(1) or "application/octet-stream").strip()
+    try:
+        binary = base64.b64decode(match.group(2), validate=True)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("媒体内容无法解析，请重新上传。") from exc
+    return content_type, binary
+
+
+def sanitize_file_name(file_name, content_type):
+    raw = str(file_name or "").strip()
+    base, ext = os.path.splitext(raw)
+    safe_base = re.sub(r"[^a-zA-Z0-9._-]+", "-", base).strip("-._") or "asset"
+    safe_ext = re.sub(r"[^a-zA-Z0-9.]+", "", ext).lower()
+    if not safe_ext:
+        guessed = mimetypes.guess_extension(content_type or "")
+        safe_ext = guessed or ""
+    return f"{safe_base}{safe_ext}"
+
+
+def upload_media_asset(data_url, *, file_name, category, asset_type, force_inline=False):
+    content_type, binary = decode_data_url(data_url)
+    if asset_type == "video" and not content_type.startswith("video/"):
+        raise ValueError("当前文件不是有效视频，请重新选择。")
+    if asset_type == "image" and not content_type.startswith("image/"):
+        raise ValueError("当前文件不是有效图片，请重新选择。")
+
+    max_bytes = 8 * 1024 * 1024 if asset_type == "video" else 10 * 1024 * 1024
+    if len(binary) > max_bytes:
+        raise ValueError("媒体文件过大，请选择更短的视频或更小的图片。")
+
+    if force_inline or not supabase_media_storage_enabled():
+        return {
+            "url": data_url,
+            "name": sanitize_file_name(file_name, content_type),
+            "contentType": content_type,
+            "storageProvider": "inline",
+            "sizeBytes": len(binary),
+        }
+
+    ensure_supabase_media_bucket()
+
+    timestamp = now_utc().strftime("%Y/%m/%d")
+    sanitized_name = sanitize_file_name(file_name, content_type)
+    object_path = f"{category}/{timestamp}/{uuid.uuid4().hex[:12]}-{sanitized_name}"
+    quoted_path = quote(object_path, safe="/")
+    supabase_storage_request(
+        "POST",
+        f"object/{SUPABASE_MEDIA_BUCKET}/{quoted_path}",
+        payload=binary,
+        headers={
+            "Content-Type": content_type,
+            "x-upsert": "false",
+            "Cache-Control": "3600",
+        },
+        expect_json=True,
+    )
+    return {
+        "url": build_supabase_public_media_url(object_path),
+        "name": sanitized_name,
+        "contentType": content_type,
+        "storageProvider": "supabase",
+        "storagePath": object_path,
+        "sizeBytes": len(binary),
+    }
+
+
 def is_demo_profile_id(profile_id):
     return (
         profile_id in LEGACY_DEMO_ENTHUSIAST_IDS
@@ -721,6 +841,10 @@ def supabase_rest_url(path):
     return f"{SUPABASE_URL}/rest/v1/{path.lstrip('/')}"
 
 
+def supabase_storage_url(path):
+    return f"{SUPABASE_URL}/storage/v1/{path.lstrip('/')}"
+
+
 def supabase_request(method, path, payload=None, prefer=None):
     headers = {
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
@@ -748,6 +872,47 @@ def supabase_request(method, path, payload=None, prefer=None):
         if not raw:
             return None
         return json.loads(raw.decode("utf-8"))
+
+
+def supabase_storage_request(method, path, payload=None, headers=None, expect_json=True, allow_statuses=None):
+    request_headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Accept": "application/json" if expect_json else "*/*",
+    }
+    if headers:
+        request_headers.update(headers)
+
+    data = payload
+    if isinstance(payload, (dict, list)):
+        request_headers.setdefault("Content-Type", "application/json")
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    request = Request(
+        supabase_storage_url(path),
+        data=data,
+        headers=request_headers,
+        method=method.upper(),
+    )
+
+    try:
+        with urlopen(request, timeout=SUPABASE_TIMEOUT_SECONDS) as response:
+            raw = response.read()
+            if not raw:
+                return None
+            if expect_json:
+                return json.loads(raw.decode("utf-8"))
+            return raw
+    except Exception as exc:
+        status = getattr(exc, "code", None)
+        if allow_statuses and status in allow_statuses:
+            raw = exc.read() if hasattr(exc, "read") else b""
+            if not raw:
+                return None
+            if expect_json:
+                return json.loads(raw.decode("utf-8"))
+            return raw
+        raise
 
 
 def load_state_from_supabase():
@@ -4466,6 +4631,32 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 self._write_json(self._with_state(action))
             except ValueError as exc:
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/media/upload":
+            try:
+                media = upload_media_asset(
+                    payload.get("dataUrl"),
+                    file_name=payload.get("fileName") or "upload",
+                    category=str(payload.get("category") or "posts"),
+                    asset_type=str(payload.get("assetType") or "image"),
+                )
+                self._write_json({"media": media, "config": runtime_config()})
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            except Exception as exc:  # noqa: BLE001
+                storage_log(f"Media upload failed, falling back to inline storage: {exc}")
+                try:
+                    fallback = upload_media_asset(
+                        payload.get("dataUrl"),
+                        file_name=payload.get("fileName") or "upload",
+                        category=str(payload.get("category") or "posts"),
+                        asset_type=str(payload.get("assetType") or "image"),
+                        force_inline=True,
+                    )
+                    self._write_json({"media": fallback, "config": runtime_config()})
+                except ValueError as value_error:
+                    self._write_json({"error": str(value_error)}, status=HTTPStatus.BAD_REQUEST)
             return
 
         if parsed.path == f"{API_PREFIX}/checkin/create":

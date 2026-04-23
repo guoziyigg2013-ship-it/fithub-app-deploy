@@ -1,0 +1,33 @@
+name: Deploy Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_url:
+        description: Frontend URL to smoke test
+        required: false
+        default: https://fithub-cn.pages.dev/
+      backend_url:
+        description: Backend URL to smoke test
+        required: false
+        default: https://fithub-app-1btg.onrender.com
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run deploy smoke test
+        run: >-
+          python scripts/deploy_smoke.py
+          --frontend-url "${{ inputs.frontend_url }}"
+          --backend-url "${{ inputs.backend_url }}"

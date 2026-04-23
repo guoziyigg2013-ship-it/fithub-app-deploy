@@ -2376,6 +2376,7 @@ async function refreshSharedState({ keepOverlay = false } = {}) {
         await maybeRestoreRememberedAccounts();
       }
       state.isBootstrapping = false;
+      window.__FITHUB_BOOTSTRAP_DONE__ = true;
       lastSuccessfulSyncAt = Date.now();
       renderPage();
       return payload;
@@ -2530,10 +2531,42 @@ function optimizeImageFile(file, { maxEdge = 720, quality = 0.82 } = {}) {
 
 async function readSingleFile(inputName, formData) {
   const draftPreview = state.registerUploadDrafts?.[inputName]?.preview;
-  if (draftPreview) return draftPreview;
   const value = formData.get(inputName);
   if (!isProvidedFile(value) || !value.size) return "";
-  return optimizeImageFile(value, { maxEdge: 360, quality: 0.72 });
+  const dataUrl = draftPreview || await optimizeImageFile(value, { maxEdge: 360, quality: 0.72 });
+  const uploaded = await uploadManagedMedia({
+    dataUrl,
+    fileName: value.name || `${inputName}.jpg`,
+    assetType: "image",
+    category: "avatars"
+  });
+  return uploaded.url;
+}
+
+async function uploadManagedMedia({ dataUrl, fileName, assetType, category }) {
+  const payload = await apiRequest(`${API_BASE}/media/upload`, {
+    method: "POST",
+    body: {
+      sessionId: state.sessionId || getStoredSessionId(),
+      dataUrl,
+      fileName,
+      assetType,
+      category
+    }
+  });
+
+  if (payload?.config) {
+    state.runtimeConfig = normalizeRuntimeConfig({
+      ...state.runtimeConfig,
+      ...payload.config
+    });
+  }
+
+  if (!payload?.media?.url) {
+    throw new Error("媒体上传失败，请稍后再试。");
+  }
+
+  return payload.media;
 }
 
 async function readMediaFiles(files) {
@@ -2550,10 +2583,20 @@ async function readMediaFiles(files) {
     const url = file.type.startsWith("image/")
       ? await optimizeImageFile(file, { maxEdge: 1080, quality: 0.8 })
       : await readFileAsDataUrl(file);
+    const uploaded = await uploadManagedMedia({
+      dataUrl: url,
+      fileName: file.name,
+      assetType: isVideo ? "video" : "image",
+      category: "posts"
+    });
     media.push({
       type: isVideo ? "video" : "image",
-      url,
-      name: file.name
+      url: uploaded.url,
+      name: uploaded.name || file.name,
+      storageProvider: uploaded.storageProvider || "",
+      storagePath: uploaded.storagePath || "",
+      contentType: uploaded.contentType || file.type || "",
+      sizeBytes: uploaded.sizeBytes || file.size || 0
     });
   }
   if (skipped.length) {
@@ -8708,6 +8751,25 @@ function renderOverlay() {
   }
 }
 
+function syncChatComposerState() {
+  const chatForm = overlay.querySelector("#chatForm");
+  if (!chatForm) return;
+  const input = chatForm.querySelector('[data-chat-input="1"]');
+  const submit = chatForm.querySelector('button[type="submit"]');
+  const isSendingChat = state.pendingMessageProfileIds.has(state.chatTargetProfileId);
+  const canSendChat = Boolean((state.chatDraft || "").trim()) && !isSendingChat;
+  if (input) {
+    input.disabled = isSendingChat;
+  }
+  if (submit) {
+    submit.disabled = !canSendChat;
+    submit.textContent = isSendingChat ? "发送中…" : "发送";
+  }
+  if (chatForm) {
+    chatForm.classList.toggle("is-sending", isSendingChat);
+  }
+}
+
 function renderPage() {
   resetProfileSwipe();
   routeMapRegistry.clear();
@@ -9233,6 +9295,7 @@ overlay.addEventListener("input", (event) => {
 
   if (event.target.dataset.chatInput) {
     state.chatDraft = event.target.value;
+    syncChatComposerState();
   }
 });
 
@@ -9510,6 +9573,8 @@ syncViewportHeight();
 registerAppServiceWorker();
 window.addEventListener("resize", syncViewportHeight, { passive: true });
 window.addEventListener("orientationchange", syncViewportHeight, { passive: true });
+window.__FITHUB_READY__ = false;
+window.__FITHUB_BOOTSTRAP_DONE__ = false;
 
 const cachedSnapshot = getStoredSnapshot();
 if (cachedSnapshot?.session) {
@@ -9522,9 +9587,12 @@ if (!state.managedProfileIds.length) {
 }
 
 renderPage();
+window.__FITHUB_READY__ = true;
 refreshSharedState().catch((error) => {
   state.isBootstrapping = false;
   renderPage();
+  window.__FITHUB_READY__ = true;
+  window.__FITHUB_BOOTSTRAP_DONE__ = true;
   showError(error?.message || "试用服务连接失败，请稍后刷新页面。");
 });
 window.addEventListener("visibilitychange", () => {

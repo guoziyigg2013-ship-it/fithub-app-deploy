@@ -85,10 +85,27 @@ python3 server.py --port 8010
 
 - `FITHUB_SUPABASE_TABLE=fithub_app_state`
 - `FITHUB_SUPABASE_ROW_ID=primary`
+- `FITHUB_MEDIA_BUCKET=fithub-media`
 
 详细初始化 SQL 和步骤见：
 
 - [docs/fithub-supabase-setup.md](./docs/fithub-supabase-setup.md)
+
+## 媒体对象存储
+
+当前图片/视频与头像已经支持走 `Supabase Storage`：
+
+- 注册头像优先上传到对象存储
+- 动态里的图片/视频优先上传到对象存储
+- 如果对象存储暂时不可用，会自动回退到旧的内联方式，不会直接把发布流程打断
+
+默认 bucket：
+
+- `fithub-media`
+
+如果你想改名字，可以设置：
+
+- `FITHUB_MEDIA_BUCKET`
 
 ## 验证码登录
 
@@ -118,3 +135,33 @@ python3 server.py --port 8010
 详细说明见：
 
 - [docs/fithub-sms-login.md](./docs/fithub-sms-login.md)
+
+## 回归与发布自检
+
+本地发布前推荐直接跑：
+
+```bash
+npm run check:preflight
+```
+
+它会依次执行：
+
+- `node --check app.js`
+- `python3 -m py_compile server.py`
+- API 回归测试
+- Playwright UI 主链回归
+
+部署到固定域和 Render 后，再跑：
+
+```bash
+npm run check:smoke
+```
+
+默认检查：
+
+- `https://fithub-cn.pages.dev/`
+- `https://fithub-app-1btg.onrender.com`
+
+完整发布前后顺序见：
+
+- [docs/fithub-release-runbook.md](./docs/fithub-release-runbook.md)
