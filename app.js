@@ -2633,6 +2633,14 @@ function getMediaDisplayUrl(item) {
   return item?.url || "";
 }
 
+function formatMediaSize(bytes) {
+  const numeric = Number(bytes || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return "";
+  if (numeric < 1024) return `${Math.round(numeric)} B`;
+  if (numeric < 1024 * 1024) return `${(numeric / 1024).toFixed(1).replace(/\.0$/, "")} KB`;
+  return `${(numeric / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
+}
+
 function serializeManagedMediaItem(item) {
   if (!item || !item.url) return null;
   return {
@@ -8830,6 +8838,9 @@ function renderMediaDetailOverlay() {
   const canGoNext = index < total - 1;
   const profileName = profile?.name || "FitHub 用户";
   const authorMeta = [profile?.handle, post.time].filter(Boolean).join(" · ");
+  const detailUrl = getMediaDisplayUrl(item);
+  const detailTypeLabel = item.type === "video" ? "视频" : "图片";
+  const detailSizeLabel = formatMediaSize(item.sizeBytes);
 
   return `
     <div class="overlay-backdrop" data-close-overlay="1"></div>
@@ -8880,6 +8891,18 @@ function renderMediaDetailOverlay() {
           <div class="media-detail-copy">
             <p>${escapeHtml(post.content || "分享了一条新的媒体动态。")}</p>
             <small>${escapeHtml(post.meta || "")}</small>
+          </div>
+          <div class="media-detail-actions">
+            <div class="media-detail-badges">
+              <span class="media-detail-pill">${escapeHtml(detailTypeLabel)}</span>
+              ${detailSizeLabel ? `<span class="media-detail-pill">${escapeHtml(detailSizeLabel)}</span>` : ""}
+              ${item.storageProvider === "supabase" ? '<span class="media-detail-pill media-detail-pill--accent">云端已保存</span>' : ""}
+            </div>
+            ${
+              detailUrl
+                ? `<a class="mini-button media-detail-link" href="${escapeHtml(detailUrl)}" target="_blank" rel="noreferrer">${item.type === "video" ? "打开视频" : "打开原图"}</a>`
+                : ""
+            }
           </div>
           <div class="media-detail-stats">
             <span>${escapeHtml(`${post.likeCount || 0} 赞`)}</span>

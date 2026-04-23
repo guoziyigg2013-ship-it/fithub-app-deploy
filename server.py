@@ -622,6 +622,21 @@ def build_supabase_public_media_url(object_path):
     return f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_MEDIA_BUCKET}/{quoted_path}"
 
 
+def supabase_public_media_prefix():
+    return build_supabase_public_media_url("").rstrip("/")
+
+
+def extract_storage_path_from_public_url(url):
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    prefix = supabase_public_media_prefix()
+    if not text.startswith(prefix):
+        return ""
+    suffix = text[len(prefix):].lstrip("/")
+    return unquote(suffix)
+
+
 def ensure_supabase_media_bucket():
     global SUPABASE_MEDIA_BUCKET_READY
     if SUPABASE_MEDIA_BUCKET_READY or not supabase_media_storage_enabled():
@@ -803,6 +818,107 @@ def delete_media_asset(media_item):
             continue
         deleted_paths.append(path)
     return deleted_paths
+
+
+def list_media_bucket_entries(prefix="", limit=1000, offset=0):
+    if not supabase_media_storage_enabled():
+        return []
+    normalized_prefix = str(prefix or "").strip().strip("/")
+    return (
+        supabase_storage_request(
+            "POST",
+            f"object/list/{SUPABASE_MEDIA_BUCKET}",
+            payload={
+                "prefix": normalized_prefix,
+                "limit": max(1, int(limit)),
+                "offset": max(0, int(offset)),
+                "sortBy": {"column": "name", "order": "asc"},
+            },
+            expect_json=True,
+        )
+        or []
+    )
+
+
+def is_media_bucket_folder_entry(entry):
+    if not isinstance(entry, dict):
+        return False
+    name = str(entry.get("name") or "").strip()
+    if not name:
+        return False
+    if str(entry.get("id") or "").strip():
+        return False
+    if entry.get("metadata") not in (None, {}):
+        return False
+    if entry.get("updated_at") or entry.get("created_at") or entry.get("last_accessed_at"):
+        return False
+    return True
+
+
+def iter_media_bucket_objects(prefix="", limit=1000):
+    pending_prefixes = [str(prefix or "").strip().strip("/")]
+    while pending_prefixes:
+        current_prefix = pending_prefixes.pop(0)
+        offset = 0
+        while True:
+            entries = list_media_bucket_entries(current_prefix, limit=limit, offset=offset)
+            if not entries:
+                break
+            for entry in entries:
+                if is_media_bucket_folder_entry(entry):
+                    folder_name = str(entry.get("name") or "").strip().strip("/")
+                    next_prefix = "/".join(filter(None, [current_prefix, folder_name]))
+                    if next_prefix:
+                        pending_prefixes.append(next_prefix)
+                    continue
+                path = "/".join(filter(None, [current_prefix, str(entry.get("name") or "").strip().strip("/")]))
+                item = dict(entry)
+                item["path"] = path
+                yield item
+            if len(entries) < limit:
+                break
+            offset += len(entries)
+
+
+def _collect_storage_paths_from_state(value, collected):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in {"storagePath", "thumbnailStoragePath"}:
+                path = str(item or "").strip().lstrip("/")
+                if path:
+                    collected.add(path)
+                continue
+            if key in {"url", "thumbnailUrl", "posterUrl", "avatarImage"}:
+                derived = extract_storage_path_from_public_url(item)
+                if derived:
+                    collected.add(derived)
+            _collect_storage_paths_from_state(item, collected)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _collect_storage_paths_from_state(item, collected)
+
+
+def collect_referenced_media_paths(state):
+    collected = set()
+    if not isinstance(state, dict):
+        return collected
+    _collect_storage_paths_from_state(state, collected)
+    return collected
+
+
+def collect_session_draft_media_paths(state):
+    paths = set()
+    if not isinstance(state, dict):
+        return paths
+    for session in (state.get("sessions") or {}).values():
+        if not isinstance(session, dict):
+            continue
+        for entry in session.get("draftMediaPaths", []) or []:
+            path = str((entry or {}).get("path") or "").strip().lstrip("/")
+            if path:
+                paths.add(path)
+    return paths
 
 
 def is_demo_profile_id(profile_id):

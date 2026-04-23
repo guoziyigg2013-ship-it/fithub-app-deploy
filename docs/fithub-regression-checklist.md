@@ -389,3 +389,18 @@ tests/
 - 关闭发布弹窗或切到底部其他页面时，也会清理未发布的草稿媒体
 - 已新增媒体元数据持久化与草稿清理 API 回归用例：
   - `/Users/guoziyi/Documents/gpt/fithub-app-deploy/tests/api/test_content.py`
+
+第三步当前已落地：
+
+- 媒体详情页补充了更完整的查看动作和媒体信息标签
+- 已新增对象存储巡检/清理脚本：
+  - `/Users/guoziyi/Documents/gpt/fithub-app-deploy/scripts/media_maintenance.py`
+- 脚本会区分：
+  - 已被引用的对象
+  - 会话中的草稿对象
+  - 最近未引用对象
+  - 超过阈值的未引用候选对象
+- 可通过：
+  - `npm run media:report`
+  - `npm run media:clean`
+  做媒体桶巡检与清理

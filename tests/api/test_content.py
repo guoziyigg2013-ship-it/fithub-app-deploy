@@ -1,3 +1,4 @@
+from server import build_supabase_public_media_url, collect_referenced_media_paths, extract_storage_path_from_public_url
 from tests.api.support import FitHubApiTestCase
 
 
@@ -55,6 +56,36 @@ class ContentRegressionTests(FitHubApiTestCase):
         self.assertEqual(post["media"][0]["name"], "detail.png")
         self.assertEqual(post["media"][0]["thumbnailName"], "detail-thumb.png")
         self.assertTrue(str(post["media"][0]["thumbnailUrl"] or "").startswith(("data:image/png", "https://")))
+
+    def test_collect_referenced_media_paths_understands_public_urls(self):
+        state = {
+            "profiles": {
+                "enthusiast-test": {
+                    "avatarImage": build_supabase_public_media_url("avatars/2026/04/23/avatar-test.png"),
+                }
+            },
+            "posts": {
+                "post-test": {
+                    "media": [
+                        {
+                            "storagePath": "posts/2026/04/23/post-test.png",
+                            "thumbnailStoragePath": "posts-thumbs/2026/04/23/post-test-thumb.png",
+                            "url": build_supabase_public_media_url("posts/2026/04/23/post-test.png"),
+                            "thumbnailUrl": build_supabase_public_media_url("posts-thumbs/2026/04/23/post-test-thumb.png"),
+                        }
+                    ]
+                }
+            },
+        }
+
+        referenced = collect_referenced_media_paths(state)
+        self.assertIn("avatars/2026/04/23/avatar-test.png", referenced)
+        self.assertIn("posts/2026/04/23/post-test.png", referenced)
+        self.assertIn("posts-thumbs/2026/04/23/post-test-thumb.png", referenced)
+        self.assertEqual(
+            extract_storage_path_from_public_url(build_supabase_public_media_url("posts/2026/04/23/post-test.png")),
+            "posts/2026/04/23/post-test.png",
+        )
 
     def test_post_checkin_and_message_surface_in_bootstrap(self):
         phone = self.make_phone(4)

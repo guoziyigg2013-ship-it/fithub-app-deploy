@@ -4208,6 +4208,39 @@ body.is-workout-live .app {
   border: 1px solid rgba(242, 140, 40, 0.08);
 }
 
+.media-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.media-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.media-detail-pill {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(242, 140, 40, 0.1);
+  color: #7d6953;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.media-detail-pill--accent {
+  color: #c36a10;
+  background: rgba(255, 243, 226, 0.92);
+}
+
+.media-detail-link {
+  text-decoration: none;
+}
+
 .media-detail-stats {
   display: flex;
   flex-wrap: wrap;

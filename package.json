@@ -5,6 +5,8 @@
     "check:syntax": "node --check app.js && python3 -m py_compile server.py",
     "check:preflight": "python3 scripts/preflight_check.py",
     "check:smoke": "python3 scripts/deploy_smoke.py",
+    "media:report": "python3 scripts/media_maintenance.py",
+    "media:clean": "python3 scripts/media_maintenance.py --delete",
     "test:api": "python3 -m unittest discover -s tests/api -p 'test_*.py' -v",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed"
