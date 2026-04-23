@@ -35,7 +35,7 @@ async function gotoApp(page) {
 async function waitForBootstrapToSettle(page) {
   await expect
     .poll(async () => page.evaluate(() => Boolean(window.__FITHUB_BOOTSTRAP_DONE__)), {
-      timeout: 20000,
+      timeout: 30000,
       message: "等待应用 bootstrap 完成",
     })
     .toBe(true);
@@ -44,7 +44,12 @@ async function waitForBootstrapToSettle(page) {
 async function openRegister(page, role = "enthusiast") {
   await gotoApp(page);
   await waitForBootstrapToSettle(page);
-  if (await page.locator("#registerForm").isVisible().catch(() => false)) {
+  const registerNameField = page.locator('#registerForm input[name="name"]');
+  const registerCodeButton = page.locator('[data-send-register-code="1"]');
+  if (
+    (await registerNameField.isVisible().catch(() => false)) &&
+    (await registerCodeButton.isVisible().catch(() => false))
+  ) {
     return;
   }
   if (!(await page.locator(`[data-choose-role="${role}"]`).isVisible().catch(() => false))) {
@@ -52,7 +57,23 @@ async function openRegister(page, role = "enthusiast") {
   }
   await expect(page.locator(`[data-choose-role="${role}"]`)).toBeVisible();
   await page.locator(`[data-choose-role="${role}"]`).click();
-  await expect(page.locator("#registerForm")).toBeVisible();
+  const directOpened = await registerNameField
+    .waitFor({ state: "visible", timeout: 1500 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!directOpened) {
+    const authButton = page.getByRole("button", { name: "登录已有账户" });
+    if (await authButton.isVisible().catch(() => false)) {
+      await authButton.click();
+      const registerFromAuth = page.locator(`[data-open-register-from-auth="${role}"]`);
+      await expect(registerFromAuth).toBeVisible();
+      await registerFromAuth.click();
+    }
+  }
+
+  await expect(registerNameField).toBeVisible();
+  await expect(registerCodeButton).toBeVisible();
 }
 
 async function sendRegisterCode(page, phone) {

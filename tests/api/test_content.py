@@ -23,6 +23,38 @@ class ContentRegressionTests(FitHubApiTestCase):
         self.assertTrue(str(media.get("url") or "").startswith(("data:image/png", "https://")))
         self.assertTrue(str(media.get("thumbnailUrl") or "").startswith(("data:image/png", "https://")))
         self.assertEqual(media.get("thumbnailName"), "tiny-thumb.png")
+        deleted = client.delete_media([media])
+        self.assertIn("deletedPaths", deleted)
+
+    def test_post_persists_media_thumbnail_metadata(self):
+        phone = self.make_phone(42)
+        client = self.make_client()
+        code = client.send_code(phone, purpose="register")["debugCode"]
+        payload = client.register_enthusiast(phone, "媒体元数据用户", code)
+        profile = self.current_profile(payload)
+
+        tiny_png = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn0n8kAAAAASUVORK5CYII="
+        )
+        uploaded = client.upload_media(
+            tiny_png,
+            file_name="detail.png",
+            asset_type="image",
+            category="posts",
+            thumbnail_data_url=tiny_png,
+            thumbnail_name="detail-thumb.png",
+        )["media"]
+
+        post_payload = client.create_post(
+            profile["id"],
+            "带封面图的媒体动态。",
+            media=[uploaded],
+        )
+        post = next(item for item in self.current_profile(post_payload).get("posts", []) if item["content"] == "带封面图的媒体动态。")
+        self.assertEqual(post["media"][0]["name"], "detail.png")
+        self.assertEqual(post["media"][0]["thumbnailName"], "detail-thumb.png")
+        self.assertTrue(str(post["media"][0]["thumbnailUrl"] or "").startswith(("data:image/png", "https://")))
 
     def test_post_checkin_and_message_surface_in_bootstrap(self):
         phone = self.make_phone(4)

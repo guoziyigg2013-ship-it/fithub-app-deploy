@@ -380,3 +380,12 @@ tests/
   - 缩略图 `2 MB`
 - 已新增媒体上传 API 回归用例：
   - `/Users/guoziyi/Documents/gpt/fithub-app-deploy/tests/api/test_content.py`
+
+第二步也已经落地：
+
+- 动态卡片和收藏页里的图片/视频支持详情预览
+- 多图/多视频帖子支持在详情页里左右切换和缩略条定位
+- 发布弹窗里删除未发布媒体时，会尝试同步清理对象存储草稿文件
+- 关闭发布弹窗或切到底部其他页面时，也会清理未发布的草稿媒体
+- 已新增媒体元数据持久化与草稿清理 API 回归用例：
+  - `/Users/guoziyi/Documents/gpt/fithub-app-deploy/tests/api/test_content.py`

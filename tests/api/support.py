@@ -142,6 +142,9 @@ class ApiClient:
             },
         )
 
+    def delete_media(self, items):
+        return self.post("/api/media/delete", {"items": items})
+
     def create_checkin(self, profile_id, sport_id="outdoor-walk", sport_label="户外行走"):
         return self.post(
             "/api/checkin/create",

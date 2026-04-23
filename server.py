@@ -727,6 +727,84 @@ def upload_media_asset(data_url, *, file_name, category, asset_type, force_inlin
     }
 
 
+def iter_media_storage_paths(media_item):
+    if not isinstance(media_item, dict):
+        return []
+    paths = []
+    for key in ("storagePath", "thumbnailStoragePath"):
+        path = str(media_item.get(key) or "").strip().lstrip("/")
+        if path and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def remember_session_draft_media(session, media_item):
+    if not isinstance(session, dict):
+        return
+    registry = session.setdefault("draftMediaPaths", [])
+    known_paths = {
+        str(entry.get("path") or "").strip().lstrip("/")
+        for entry in registry
+        if isinstance(entry, dict)
+    }
+    created_at = iso_at()
+    for path in iter_media_storage_paths(media_item):
+        if path in known_paths:
+            continue
+        registry.append({"path": path, "createdAt": created_at})
+        known_paths.add(path)
+
+
+def release_session_draft_media(session, media_items):
+    if not isinstance(session, dict):
+        return
+    paths_to_drop = set()
+    for item in media_items or []:
+        paths_to_drop.update(iter_media_storage_paths(item))
+    if not paths_to_drop:
+        return
+    registry = session.setdefault("draftMediaPaths", [])
+    session["draftMediaPaths"] = [
+        entry
+        for entry in registry
+        if str((entry or {}).get("path") or "").strip().lstrip("/") not in paths_to_drop
+    ]
+
+
+def session_allows_media_delete(session, media_item):
+    if not isinstance(session, dict):
+        return False
+    paths = iter_media_storage_paths(media_item)
+    if not paths:
+        return True
+    registry = {
+        str(entry.get("path") or "").strip().lstrip("/")
+        for entry in session.get("draftMediaPaths", [])
+        if isinstance(entry, dict)
+    }
+    return all(path in registry for path in paths)
+
+
+def delete_media_asset(media_item):
+    deleted_paths = []
+    if not supabase_media_storage_enabled():
+        return deleted_paths
+    for path in iter_media_storage_paths(media_item):
+        quoted_path = quote(path, safe="/")
+        try:
+            supabase_storage_request(
+                "DELETE",
+                f"object/{SUPABASE_MEDIA_BUCKET}/{quoted_path}",
+                expect_json=False,
+                allow_statuses={404},
+            )
+        except Exception as exc:  # noqa: BLE001
+            storage_log(f"Media delete skipped for {path}: {exc}")
+            continue
+        deleted_paths.append(path)
+    return deleted_paths
+
+
 def is_demo_profile_id(profile_id):
     return (
         profile_id in LEGACY_DEMO_ENTHUSIAST_IDS
@@ -2931,6 +3009,7 @@ def create_session_record():
         "selectedRole": "enthusiast",
         "managedProfileIds": [],
         "managedAccountIds": [],
+        "draftMediaPaths": [],
         "verifiedPhones": {},
         "lastVerifiedPhone": "",
         "currentActorProfileId": None,
@@ -3055,6 +3134,7 @@ def ensure_session(state, session_id=None):
         session = sessions[session_id]
         session.setdefault("managedProfileIds", [])
         session.setdefault("managedAccountIds", [])
+        session.setdefault("draftMediaPaths", [])
         session.setdefault("verifiedPhones", {})
         session.setdefault("lastVerifiedPhone", "")
         normalize_session_profiles(state, session)
@@ -4626,6 +4706,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 )
                 if not allowed:
                     raise ValueError("只能用当前设备已注册的身份发布动态。")
+                media_items = [deepcopy(item) for item in (payload.get("media") or []) if isinstance(item, dict)]
                 post_id = f"post-{uuid.uuid4().hex[:10]}"
                 state["posts"][post_id] = {
                     "id": post_id,
@@ -4633,10 +4714,11 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     "createdAt": iso_at(),
                     "content": payload.get("content") or "分享了一条新的动态。",
                     "meta": payload.get("meta") or state["profiles"][profile_id]["locationLabel"],
-                    "media": payload.get("media", []),
+                    "media": media_items,
                     "likes": [],
                     "comments": [],
                 }
+                release_session_draft_media(session, media_items)
                 session["currentActorProfileId"] = profile_id
                 return bootstrap_response(state, session)
             try:
@@ -4646,35 +4728,36 @@ class FitHubHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == f"{API_PREFIX}/media/upload":
-            try:
-                media = upload_media_asset(
-                    payload.get("dataUrl"),
-                    file_name=payload.get("fileName") or "upload",
-                    category=str(payload.get("category") or "posts"),
-                    asset_type=str(payload.get("assetType") or "image"),
-                )
-                thumbnail_data_url = payload.get("thumbnailDataUrl")
-                if thumbnail_data_url:
-                    thumb_name = payload.get("thumbnailName") or payload.get("fileName") or "thumb.jpg"
-                    thumb_media = upload_media_asset(
-                        thumbnail_data_url,
-                        file_name=thumb_name,
-                        category=f"{str(payload.get('category') or 'posts')}-thumbs",
-                        asset_type="image",
-                        max_bytes_override=MEDIA_THUMB_LIMIT_BYTES,
-                    )
-                    media["thumbnailUrl"] = thumb_media.get("url", "")
-                    media["thumbnailName"] = thumb_media.get("name", "")
-                    media["thumbnailContentType"] = thumb_media.get("contentType", "")
-                    media["thumbnailStorageProvider"] = thumb_media.get("storageProvider", "")
-                    media["thumbnailStoragePath"] = thumb_media.get("storagePath", "")
-                    media["thumbnailSizeBytes"] = thumb_media.get("sizeBytes", 0)
-                self._write_json({"media": media, "config": runtime_config()})
-            except ValueError as exc:
-                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
-            except Exception as exc:  # noqa: BLE001
-                storage_log(f"Media upload failed, falling back to inline storage: {exc}")
+            def action(state):
+                session = ensure_session(state, session_id) if session_id else None
                 try:
+                    media = upload_media_asset(
+                        payload.get("dataUrl"),
+                        file_name=payload.get("fileName") or "upload",
+                        category=str(payload.get("category") or "posts"),
+                        asset_type=str(payload.get("assetType") or "image"),
+                    )
+                    thumbnail_data_url = payload.get("thumbnailDataUrl")
+                    if thumbnail_data_url:
+                        thumb_name = payload.get("thumbnailName") or payload.get("fileName") or "thumb.jpg"
+                        thumb_media = upload_media_asset(
+                            thumbnail_data_url,
+                            file_name=thumb_name,
+                            category=f"{str(payload.get('category') or 'posts')}-thumbs",
+                            asset_type="image",
+                            max_bytes_override=MEDIA_THUMB_LIMIT_BYTES,
+                        )
+                        media["thumbnailUrl"] = thumb_media.get("url", "")
+                        media["thumbnailName"] = thumb_media.get("name", "")
+                        media["thumbnailContentType"] = thumb_media.get("contentType", "")
+                        media["thumbnailStorageProvider"] = thumb_media.get("storageProvider", "")
+                        media["thumbnailStoragePath"] = thumb_media.get("storagePath", "")
+                        media["thumbnailSizeBytes"] = thumb_media.get("sizeBytes", 0)
+                    if session:
+                        remember_session_draft_media(session, media)
+                    return {"media": media, "config": runtime_config()}
+                except Exception as exc:  # noqa: BLE001
+                    storage_log(f"Media upload failed, falling back to inline storage: {exc}")
                     fallback = upload_media_asset(
                         payload.get("dataUrl"),
                         file_name=payload.get("fileName") or "upload",
@@ -4699,9 +4782,32 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         fallback["thumbnailStorageProvider"] = thumb_fallback.get("storageProvider", "")
                         fallback["thumbnailStoragePath"] = thumb_fallback.get("storagePath", "")
                         fallback["thumbnailSizeBytes"] = thumb_fallback.get("sizeBytes", 0)
-                    self._write_json({"media": fallback, "config": runtime_config()})
-                except ValueError as value_error:
-                    self._write_json({"error": str(value_error)}, status=HTTPStatus.BAD_REQUEST)
+                    if session:
+                        remember_session_draft_media(session, fallback)
+                    return {"media": fallback, "config": runtime_config()}
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/media/delete":
+            def action(state):
+                session = ensure_session(state, session_id)
+                media_items = payload.get("items")
+                if not isinstance(media_items, list):
+                    single = payload.get("media")
+                    media_items = [single] if isinstance(single, dict) else []
+                deleted_paths = []
+                for item in media_items:
+                    if not isinstance(item, dict) or not session_allows_media_delete(session, item):
+                        continue
+                    deleted_paths.extend(delete_media_asset(item))
+                release_session_draft_media(session, media_items)
+                return {"deletedPaths": deleted_paths, "config": runtime_config()}
+
+            self._write_json(self._with_state(action))
             return
 
         if parsed.path == f"{API_PREFIX}/checkin/create":

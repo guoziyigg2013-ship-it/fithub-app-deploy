@@ -1328,6 +1328,8 @@ const state = {
   composeContent: "",
   composeMeta: "",
   composeMedia: [],
+  mediaViewerPostId: "",
+  mediaViewerIndex: 0,
   bookings: bookingCards,
   threads: [],
   checkinEditing: false,
@@ -2631,6 +2633,87 @@ function getMediaDisplayUrl(item) {
   return item?.url || "";
 }
 
+function serializeManagedMediaItem(item) {
+  if (!item || !item.url) return null;
+  return {
+    type: item.type,
+    url: item.url,
+    name: item.name || "",
+    contentType: item.contentType || "",
+    sizeBytes: item.sizeBytes || 0,
+    storageProvider: item.storageProvider || "",
+    storagePath: item.storagePath || "",
+    thumbnailUrl: item.thumbnailUrl || item.posterUrl || "",
+    thumbnailName: item.thumbnailName || "",
+    thumbnailContentType: item.thumbnailContentType || "",
+    thumbnailStorageProvider: item.thumbnailStorageProvider || "",
+    thumbnailStoragePath: item.thumbnailStoragePath || "",
+    thumbnailSizeBytes: item.thumbnailSizeBytes || 0,
+  };
+}
+
+async function deleteManagedMediaItems(items, { silent = false } = {}) {
+  const payloadItems = (Array.isArray(items) ? items : [items])
+    .map((item) => serializeManagedMediaItem(item))
+    .filter(Boolean);
+
+  if (!payloadItems.length) return { deletedPaths: [] };
+
+  try {
+    const payload = await apiRequest(`${API_BASE}/media/delete`, {
+      method: "POST",
+      body: {
+        sessionId: state.sessionId || getStoredSessionId(),
+        items: payloadItems,
+      },
+    });
+    if (payload?.config) {
+      state.runtimeConfig = normalizeRuntimeConfig({
+        ...state.runtimeConfig,
+        ...payload.config,
+      });
+    }
+    return payload || { deletedPaths: [] };
+  } catch (error) {
+    if (!silent) {
+      throw error;
+    }
+    return { deletedPaths: [], error };
+  }
+}
+
+async function cleanupComposeDraftMedia(items = state.composeMedia) {
+  const mediaItems = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (!mediaItems.length) return;
+  await deleteManagedMediaItems(mediaItems, { silent: true });
+}
+
+function getMediaViewerEntry() {
+  const found = getPostById(state.mediaViewerPostId);
+  if (!found?.post?.media?.length) return null;
+  const post = found.post;
+  const profile = found.profile || getProfile(post.authorProfileId) || null;
+  const total = post.media.length;
+  const index = Math.min(Math.max(0, Number(state.mediaViewerIndex || 0)), total - 1);
+  const item = post.media[index];
+  if (!item) return null;
+  return {
+    profile,
+    post,
+    total,
+    index,
+    item,
+  };
+}
+
+function openMediaViewer(postId, index = 0) {
+  const found = getPostById(postId);
+  if (!found?.post?.media?.length) return;
+  state.mediaViewerPostId = postId;
+  state.mediaViewerIndex = Math.min(Math.max(0, Number(index || 0)), found.post.media.length - 1);
+  openOverlay("media");
+}
+
 async function readSingleFile(inputName, formData) {
   const draftPreview = state.registerUploadDrafts?.[inputName]?.preview;
   const value = formData.get(inputName);
@@ -3322,10 +3405,19 @@ function openOverlay(mode) {
 }
 
 function closeOverlay() {
+  if (state.overlayMode === "compose" && state.composeMedia.length) {
+    const draftMedia = [...state.composeMedia];
+    runTask(() => cleanupComposeDraftMedia(draftMedia));
+    state.composeMedia = [];
+  }
   if (state.overlayMode === "register") {
     state.registerUploadDrafts = {};
     state.registerFormDrafts = {};
     state.registerWheelField = "";
+  }
+  if (state.overlayMode === "media") {
+    state.mediaViewerPostId = "";
+    state.mediaViewerIndex = 0;
   }
   state.overlayMode = null;
   state.registerSuccess = "";
@@ -4242,11 +4334,9 @@ async function submitComposePost() {
     profileId: profile.id,
     content: content || "分享了一条新的媒体动态。",
     meta: `${getRoleLabel(profile.role)} · ${state.userPosition.label}`,
-    media: state.composeMedia.map((item) => ({
-      type: item.type,
-      url: item.url,
-      name: item.name
-    }))
+    media: state.composeMedia
+      .map((item) => serializeManagedMediaItem(item))
+      .filter(Boolean)
   });
   state.currentActorProfileId = profile.id;
   state.activeProfileId = profile.id;
@@ -4812,10 +4902,22 @@ function renderPostMedia(post) {
   return `
     <div class="timeline-media-grid ${post.media.length === 1 ? "is-single" : ""}">
       ${post.media
-        .map((item) => {
+        .map((item, index) => {
+          const openButton = `
+            <button
+              class="timeline-media-open"
+              data-open-media-detail="${post.id}"
+              data-media-index="${index}"
+              type="button"
+              aria-label="查看媒体详情"
+            >
+              查看
+            </button>
+          `;
           if (item.type === "video") {
             return `
               <div class="timeline-media-card image-shell image-shell--cover is-loaded">
+                ${openButton}
                 <video class="timeline-media-video" src="${getMediaDisplayUrl(item)}" poster="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" controls playsinline preload="metadata"></video>
               </div>
             `;
@@ -4823,6 +4925,7 @@ function renderPostMedia(post) {
 
           return `
             <div class="timeline-media-card image-shell image-shell--cover">
+              ${openButton}
               <img class="timeline-media-image" src="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" alt="${escapeHtml(item.name || "动态图片")}" loading="lazy" decoding="async">
             </div>
           `;
@@ -8675,10 +8778,11 @@ function renderComposeOverlay() {
             ? `
               <div class="compose-preview-grid">
                 ${state.composeMedia
-                  .map((item) => {
+                  .map((item, index) => {
                     if (item.type === "video") {
                       return `
                         <div class="compose-preview-card image-shell image-shell--cover is-loaded">
+                          <button class="compose-preview-remove" data-remove-compose-media-index="${index}" type="button" aria-label="移除这个视频">×</button>
                           <video class="compose-preview-video" src="${getMediaDisplayUrl(item)}" poster="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" controls playsinline preload="metadata"></video>
                           <span class="compose-preview-label">视频</span>
                         </div>
@@ -8687,6 +8791,7 @@ function renderComposeOverlay() {
 
                     return `
                       <div class="compose-preview-card image-shell image-shell--cover is-loaded">
+                        <button class="compose-preview-remove" data-remove-compose-media-index="${index}" type="button" aria-label="移除这张图片">×</button>
                         <img class="compose-preview-image" src="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" alt="${escapeHtml(item.name || "预览图")}" loading="lazy" decoding="async">
                         <span class="compose-preview-label">图片</span>
                       </div>
@@ -8699,6 +8804,115 @@ function renderComposeOverlay() {
         }
         <div class="compose-footer-note">将发布到 ${escapeHtml(activeProfile?.name || "")} 的主页动态流</div>
       </form>
+    </div>
+  `;
+}
+
+function renderMediaDetailOverlay() {
+  const entry = getMediaViewerEntry();
+  if (!entry) {
+    return `
+      <div class="overlay-backdrop" data-close-overlay="1"></div>
+      <div class="overlay-panel overlay-panel--media">
+        <div class="overlay-head">
+          <div>
+            <p class="page-label">媒体详情</p>
+            <h2>内容不存在</h2>
+          </div>
+          <button class="close-button" data-close-overlay="1" type="button">×</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const { profile, post, item, index, total } = entry;
+  const canGoPrev = index > 0;
+  const canGoNext = index < total - 1;
+  const profileName = profile?.name || "FitHub 用户";
+  const authorMeta = [profile?.handle, post.time].filter(Boolean).join(" · ");
+
+  return `
+    <div class="overlay-backdrop" data-close-overlay="1"></div>
+    <div class="overlay-panel overlay-panel--media">
+      <div class="overlay-head overlay-head--media">
+        <div>
+          <p class="page-label">媒体详情</p>
+          <h2>${escapeHtml(profileName)}</h2>
+          <p>${escapeHtml(authorMeta)}</p>
+        </div>
+        <button class="close-button" data-close-overlay="1" type="button">×</button>
+      </div>
+
+      <section class="media-detail-shell">
+        <div class="media-detail-stage image-shell image-shell--cover is-loaded">
+          ${
+            item.type === "video"
+              ? `<video class="media-detail-video" src="${getMediaDisplayUrl(item)}" poster="${escapeHtml(getMediaThumbnailUrl(item, "detail"))}" controls playsinline preload="metadata"></video>`
+              : `<img class="media-detail-image" src="${escapeHtml(getMediaDisplayUrl(item) || getMediaThumbnailUrl(item, "detail"))}" alt="${escapeHtml(item.name || "媒体详情")}" decoding="async">`
+          }
+          ${
+            total > 1
+              ? `
+                <div class="media-detail-stage-actions">
+                  <button class="media-nav-button" data-shift-media-index="-1" type="button" ${canGoPrev ? "" : "disabled"}>上一张</button>
+                  <span class="media-detail-counter">${index + 1} / ${total}</span>
+                  <button class="media-nav-button" data-shift-media-index="1" type="button" ${canGoNext ? "" : "disabled"}>下一张</button>
+                </div>
+              `
+              : `<div class="media-detail-stage-actions"><span class="media-detail-counter">1 / 1</span></div>`
+          }
+        </div>
+
+        <div class="media-detail-meta">
+          ${
+            profile
+              ? `
+                <button class="media-detail-author" data-open-profile="${profile.id}" type="button">
+                  ${renderAvatarMarkup(profile, "avatar")}
+                  <div>
+                    <strong>${escapeHtml(profileName)}</strong>
+                    <p>${escapeHtml(getRoleLabel(profile.role))} · ${escapeHtml(profile.locationLabel || profile.city || "FitHub")}</p>
+                  </div>
+                </button>
+              `
+              : ""
+          }
+          <div class="media-detail-copy">
+            <p>${escapeHtml(post.content || "分享了一条新的媒体动态。")}</p>
+            <small>${escapeHtml(post.meta || "")}</small>
+          </div>
+          <div class="media-detail-stats">
+            <span>${escapeHtml(`${post.likeCount || 0} 赞`)}</span>
+            <span>${escapeHtml(`${post.favoriteCount || 0} 收藏`)}</span>
+            <span>${escapeHtml(`${post.comments?.length || 0} 评论`)}</span>
+          </div>
+        </div>
+
+        ${
+          total > 1
+            ? `
+              <div class="media-detail-strip">
+                ${post.media
+                  .map((mediaItem, mediaIndex) => `
+                    <button
+                      class="media-detail-thumb ${mediaIndex === index ? "is-active" : ""}"
+                      data-open-media-detail="${post.id}"
+                      data-media-index="${mediaIndex}"
+                      type="button"
+                    >
+                      ${
+                        mediaItem.type === "video"
+                          ? `<img src="${escapeHtml(getMediaThumbnailUrl(mediaItem, "thumb"))}" alt="${escapeHtml(mediaItem.name || "视频缩略图")}" decoding="async">`
+                          : `<img src="${escapeHtml(getMediaThumbnailUrl(mediaItem, "thumb"))}" alt="${escapeHtml(mediaItem.name || "图片缩略图")}" decoding="async">`
+                      }
+                    </button>
+                  `)
+                  .join("")}
+              </div>
+            `
+            : ""
+        }
+      </section>
     </div>
   `;
 }
@@ -8859,6 +9073,7 @@ function renderOverlay() {
   if (state.overlayMode === "city") overlay.innerHTML = renderCityOverlay();
   if (state.overlayMode === "register") overlay.innerHTML = renderRegisterOverlay();
   if (state.overlayMode === "compose") overlay.innerHTML = renderComposeOverlay();
+  if (state.overlayMode === "media") overlay.innerHTML = renderMediaDetailOverlay();
   if (state.overlayMode === "chat") overlay.innerHTML = renderChatOverlay();
   if (state.overlayMode === "following") overlay.innerHTML = renderFollowingOverlay();
   hydrateAsyncImages(overlay);
@@ -8966,6 +9181,11 @@ appView.addEventListener("click", (event) => {
 
   if (target.dataset.openProfile) {
     openProfile(target.dataset.openProfile);
+    return;
+  }
+
+  if (target.dataset.openMediaDetail) {
+    openMediaViewer(target.dataset.openMediaDetail, Number(target.dataset.mediaIndex || 0));
     return;
   }
 
@@ -9237,6 +9457,23 @@ overlay.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.dataset.openMediaDetail) {
+    openMediaViewer(target.dataset.openMediaDetail, Number(target.dataset.mediaIndex || 0));
+    return;
+  }
+
+  if (target.dataset.shiftMediaIndex) {
+    const entry = getMediaViewerEntry();
+    if (!entry) return;
+    const nextIndex = Math.min(
+      Math.max(0, entry.index + Number(target.dataset.shiftMediaIndex || 0)),
+      entry.total - 1
+    );
+    state.mediaViewerIndex = nextIndex;
+    renderOverlay();
+    return;
+  }
+
   if (target.dataset.toggleFollow) {
     runTask(() => toggleFollow(target.dataset.toggleFollow));
     return;
@@ -9345,6 +9582,16 @@ overlay.addEventListener("click", (event) => {
   if (target.dataset.composeProfile) {
     state.composeProfileId = target.dataset.composeProfile;
     renderOverlay();
+    return;
+  }
+
+  if (target.dataset.removeComposeMediaIndex) {
+    const index = Number(target.dataset.removeComposeMediaIndex || -1);
+    const item = Array.isArray(state.composeMedia) ? state.composeMedia[index] : null;
+    if (!item) return;
+    state.composeMedia = state.composeMedia.filter((_, itemIndex) => itemIndex !== index);
+    renderOverlay();
+    runTask(() => deleteManagedMediaItems([item], { silent: true }));
     return;
   }
 
@@ -9489,7 +9736,7 @@ overlay.addEventListener("submit", (event) => {
 
 navLinks.forEach((link) => {
   link.addEventListener("click", () => {
-    state.overlayMode = null;
+    closeOverlay();
     state.overlayReturnMode = null;
     state.registerWheelField = "";
     state.chatTargetProfileId = "";
