@@ -22,13 +22,28 @@ async function gotoApp(page) {
     .poll(async () => page.evaluate(() => Boolean(window.__FITHUB_READY__)))
     .toBe(true);
   await expect
-    .poll(async () => page.evaluate(() => Boolean(window.__FITHUB_BOOTSTRAP_DONE__)))
+    .poll(async () =>
+      page.evaluate(() =>
+        Boolean(window.__FITHUB_BOOTSTRAP_DONE__) ||
+        Boolean(document.querySelector('[data-open-role-picker="1"]'))
+      )
+    )
     .toBe(true);
   await page.waitForTimeout(250);
 }
 
+async function waitForBootstrapToSettle(page) {
+  await expect
+    .poll(async () => page.evaluate(() => Boolean(window.__FITHUB_BOOTSTRAP_DONE__)), {
+      timeout: 20000,
+      message: "等待应用 bootstrap 完成",
+    })
+    .toBe(true);
+}
+
 async function openRegister(page, role = "enthusiast") {
   await gotoApp(page);
+  await waitForBootstrapToSettle(page);
   if (await page.locator("#registerForm").isVisible().catch(() => false)) {
     return;
   }
@@ -92,6 +107,7 @@ async function registerEnthusiast(page, { name = "测试训练者", phone = buil
 
 async function loginWithPhone(page, { phone, role = "enthusiast" }) {
   await gotoApp(page);
+  await waitForBootstrapToSettle(page);
   if (await page.locator("#authForm").isVisible().catch(() => false)) {
     // already open
   } else if (await page.locator(`[data-auth-role="${role}"]`).isVisible().catch(() => false)) {

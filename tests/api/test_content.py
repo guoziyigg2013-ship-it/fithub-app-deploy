@@ -8,12 +8,21 @@ class ContentRegressionTests(FitHubApiTestCase):
             "data:image/png;base64,"
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn0n8kAAAAASUVORK5CYII="
         )
-        payload = client.upload_media(tiny_png, file_name="tiny.png", asset_type="image", category="posts")
+        payload = client.upload_media(
+            tiny_png,
+            file_name="tiny.png",
+            asset_type="image",
+            category="posts",
+            thumbnail_data_url=tiny_png,
+            thumbnail_name="tiny-thumb.png",
+        )
         media = payload.get("media") or {}
         self.assertEqual(media.get("name"), "tiny.png")
         self.assertEqual(media.get("contentType"), "image/png")
         self.assertIn(media.get("storageProvider"), {"inline", "supabase"})
         self.assertTrue(str(media.get("url") or "").startswith(("data:image/png", "https://")))
+        self.assertTrue(str(media.get("thumbnailUrl") or "").startswith(("data:image/png", "https://")))
+        self.assertEqual(media.get("thumbnailName"), "tiny-thumb.png")
 
     def test_post_checkin_and_message_surface_in_bootstrap(self):
         phone = self.make_phone(4)
@@ -73,6 +82,13 @@ class ContentRegressionTests(FitHubApiTestCase):
 
         favorite_payload = viewer_client.toggle_favorite(target_post["id"])
         self.assertIn(target_post["id"], favorite_payload["favoritePostIds"])
+        favorite_entry = next(
+            item for item in favorite_payload.get("favoritePosts", [])
+            if (item.get("post") or {}).get("id") == target_post["id"]
+        )
+        favorite_post = favorite_entry.get("post") or {}
+        self.assertTrue(favorite_post.get("media"))
+        self.assertEqual(favorite_post["media"][0]["type"], "image")
 
         commented_payload = viewer_client.comment_post(target_post["id"], "这条讲解很清楚。")
         author_after_comment = self.find_profile(commented_payload, author_profile["id"])

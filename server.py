@@ -51,6 +51,9 @@ AMAP_WEB_KEY = (os.getenv("FITHUB_AMAP_WEB_KEY") or "").strip()
 AMAP_SECURITY_CODE = (os.getenv("FITHUB_AMAP_SECURITY_CODE") or "").strip()
 BAIDU_MAP_AK = (os.getenv("FITHUB_BAIDU_MAP_AK") or "").strip()
 SUPABASE_MEDIA_BUCKET = (os.getenv("FITHUB_MEDIA_BUCKET") or "fithub-media").strip()
+MEDIA_IMAGE_LIMIT_BYTES = int(os.getenv("FITHUB_IMAGE_UPLOAD_LIMIT_BYTES") or str(10 * 1024 * 1024))
+MEDIA_VIDEO_LIMIT_BYTES = int(os.getenv("FITHUB_VIDEO_UPLOAD_LIMIT_BYTES") or str(8 * 1024 * 1024))
+MEDIA_THUMB_LIMIT_BYTES = int(os.getenv("FITHUB_THUMB_UPLOAD_LIMIT_BYTES") or str(2 * 1024 * 1024))
 SMS_PROVIDER = (os.getenv("FITHUB_SMS_PROVIDER") or "").strip().lower()
 SMS_CODE_LENGTH = int(os.getenv("FITHUB_SMS_CODE_LENGTH") or "6")
 SMS_CODE_TTL_SECONDS = int(os.getenv("FITHUB_SMS_CODE_TTL_SECONDS") or "300")
@@ -100,6 +103,11 @@ def runtime_config():
         "baiduAk": BAIDU_MAP_AK,
         "mediaStorageProvider": "supabase" if supabase_media_storage_enabled() else "",
         "mediaBucket": SUPABASE_MEDIA_BUCKET if supabase_media_storage_enabled() else "",
+        "mediaLimits": {
+            "imageBytes": MEDIA_IMAGE_LIMIT_BYTES,
+            "videoBytes": MEDIA_VIDEO_LIMIT_BYTES,
+            "thumbnailBytes": MEDIA_THUMB_LIMIT_BYTES,
+        },
         "smsEnabled": sms_verification_enabled(),
         "smsProvider": SMS_PROVIDER if sms_provider_configured() else ("debug" if SMS_DEV_MODE else ""),
     }
@@ -286,13 +294,17 @@ def compact_avatar_image(url, role):
 
 
 def compact_media_item(item):
-    url = item.get("url", "")
+    trimmed = dict(item)
+    url = trimmed.get("url", "")
     if isinstance(url, str) and url.startswith("data:") and len(url) > MAX_INLINE_MEDIA_CHARS:
-        trimmed = dict(item)
         trimmed["tooLarge"] = True
         trimmed["name"] = item.get("name") or ("视频文件" if item.get("type") == "video" else "图片文件")
-        return trimmed
-    return item
+    for key in ("thumbnailUrl", "posterUrl"):
+        asset_url = trimmed.get(key, "")
+        if isinstance(asset_url, str) and asset_url.startswith("data:") and len(asset_url) > MAX_INLINE_AVATAR_CHARS:
+            trimmed[key] = ""
+            trimmed[f"{key}TooLarge"] = True
+    return trimmed
 
 
 def sanitize_state(state):
@@ -668,14 +680,14 @@ def sanitize_file_name(file_name, content_type):
     return f"{safe_base}{safe_ext}"
 
 
-def upload_media_asset(data_url, *, file_name, category, asset_type, force_inline=False):
+def upload_media_asset(data_url, *, file_name, category, asset_type, force_inline=False, max_bytes_override=None):
     content_type, binary = decode_data_url(data_url)
     if asset_type == "video" and not content_type.startswith("video/"):
         raise ValueError("当前文件不是有效视频，请重新选择。")
     if asset_type == "image" and not content_type.startswith("image/"):
         raise ValueError("当前文件不是有效图片，请重新选择。")
 
-    max_bytes = 8 * 1024 * 1024 if asset_type == "video" else 10 * 1024 * 1024
+    max_bytes = max_bytes_override or (MEDIA_VIDEO_LIMIT_BYTES if asset_type == "video" else MEDIA_IMAGE_LIMIT_BYTES)
     if len(binary) > max_bytes:
         raise ValueError("媒体文件过大，请选择更短的视频或更小的图片。")
 
@@ -4641,6 +4653,22 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     category=str(payload.get("category") or "posts"),
                     asset_type=str(payload.get("assetType") or "image"),
                 )
+                thumbnail_data_url = payload.get("thumbnailDataUrl")
+                if thumbnail_data_url:
+                    thumb_name = payload.get("thumbnailName") or payload.get("fileName") or "thumb.jpg"
+                    thumb_media = upload_media_asset(
+                        thumbnail_data_url,
+                        file_name=thumb_name,
+                        category=f"{str(payload.get('category') or 'posts')}-thumbs",
+                        asset_type="image",
+                        max_bytes_override=MEDIA_THUMB_LIMIT_BYTES,
+                    )
+                    media["thumbnailUrl"] = thumb_media.get("url", "")
+                    media["thumbnailName"] = thumb_media.get("name", "")
+                    media["thumbnailContentType"] = thumb_media.get("contentType", "")
+                    media["thumbnailStorageProvider"] = thumb_media.get("storageProvider", "")
+                    media["thumbnailStoragePath"] = thumb_media.get("storagePath", "")
+                    media["thumbnailSizeBytes"] = thumb_media.get("sizeBytes", 0)
                 self._write_json({"media": media, "config": runtime_config()})
             except ValueError as exc:
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
@@ -4654,6 +4682,23 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         asset_type=str(payload.get("assetType") or "image"),
                         force_inline=True,
                     )
+                    thumbnail_data_url = payload.get("thumbnailDataUrl")
+                    if thumbnail_data_url:
+                        thumb_name = payload.get("thumbnailName") or payload.get("fileName") or "thumb.jpg"
+                        thumb_fallback = upload_media_asset(
+                            thumbnail_data_url,
+                            file_name=thumb_name,
+                            category=f"{str(payload.get('category') or 'posts')}-thumbs",
+                            asset_type="image",
+                            force_inline=True,
+                            max_bytes_override=MEDIA_THUMB_LIMIT_BYTES,
+                        )
+                        fallback["thumbnailUrl"] = thumb_fallback.get("url", "")
+                        fallback["thumbnailName"] = thumb_fallback.get("name", "")
+                        fallback["thumbnailContentType"] = thumb_fallback.get("contentType", "")
+                        fallback["thumbnailStorageProvider"] = thumb_fallback.get("storageProvider", "")
+                        fallback["thumbnailStoragePath"] = thumb_fallback.get("storagePath", "")
+                        fallback["thumbnailSizeBytes"] = thumb_fallback.get("sizeBytes", 0)
                     self._write_json({"media": fallback, "config": runtime_config()})
                 except ValueError as value_error:
                     self._write_json({"error": str(value_error)}, status=HTTPStatus.BAD_REQUEST)

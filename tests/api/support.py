@@ -121,7 +121,15 @@ class ApiClient:
             },
         )
 
-    def upload_media(self, data_url, file_name="demo.jpg", asset_type="image", category="posts"):
+    def upload_media(
+        self,
+        data_url,
+        file_name="demo.jpg",
+        asset_type="image",
+        category="posts",
+        thumbnail_data_url="",
+        thumbnail_name="",
+    ):
         return self.post(
             "/api/media/upload",
             {
@@ -129,6 +137,8 @@ class ApiClient:
                 "fileName": file_name,
                 "assetType": asset_type,
                 "category": category,
+                "thumbnailDataUrl": thumbnail_data_url,
+                "thumbnailName": thumbnail_name,
             },
         )
 

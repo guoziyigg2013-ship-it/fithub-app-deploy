@@ -287,6 +287,12 @@ const OUTDOOR_ROUTE_TEMPLATES = {
   ]
 };
 
+const DEFAULT_MEDIA_LIMITS = Object.freeze({
+  imageBytes: 10 * 1024 * 1024,
+  videoBytes: 8 * 1024 * 1024,
+  thumbnailBytes: 2 * 1024 * 1024,
+});
+
 function createDemoImage(title, accentA, accentB) {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="800" height="520" viewBox="0 0 800 520">
@@ -1558,6 +1564,13 @@ function normalizeRuntimeConfig(config = {}) {
     amapKey: String(config?.amapKey || "").trim(),
     amapSecurityCode: String(config?.amapSecurityCode || "").trim(),
     baiduAk: String(config?.baiduAk || "").trim(),
+    mediaStorageProvider: String(config?.mediaStorageProvider || "").trim().toLowerCase(),
+    mediaBucket: String(config?.mediaBucket || "").trim(),
+    mediaLimits: {
+      imageBytes: Number(config?.mediaLimits?.imageBytes) || DEFAULT_MEDIA_LIMITS.imageBytes,
+      videoBytes: Number(config?.mediaLimits?.videoBytes) || DEFAULT_MEDIA_LIMITS.videoBytes,
+      thumbnailBytes: Number(config?.mediaLimits?.thumbnailBytes) || DEFAULT_MEDIA_LIMITS.thumbnailBytes,
+    },
     smsEnabled: Boolean(config?.smsEnabled),
     smsProvider: String(config?.smsProvider || "").trim().toLowerCase()
   };
@@ -1579,6 +1592,12 @@ function getEffectiveRuntimeConfig() {
     ...(runtimeConfig.amapKey ? { amapKey: runtimeConfig.amapKey } : {}),
     ...(runtimeConfig.amapSecurityCode ? { amapSecurityCode: runtimeConfig.amapSecurityCode } : {}),
     ...(runtimeConfig.baiduAk ? { baiduAk: runtimeConfig.baiduAk } : {}),
+    ...(runtimeConfig.mediaStorageProvider ? { mediaStorageProvider: runtimeConfig.mediaStorageProvider } : {}),
+    ...(runtimeConfig.mediaBucket ? { mediaBucket: runtimeConfig.mediaBucket } : {}),
+    mediaLimits: {
+      ...baseConfig.mediaLimits,
+      ...(runtimeConfig.mediaLimits || {}),
+    },
     ...(runtimeConfig.smsEnabled ? { smsEnabled: runtimeConfig.smsEnabled } : {}),
     ...(runtimeConfig.smsProvider ? { smsProvider: runtimeConfig.smsProvider } : {})
   });
@@ -1591,6 +1610,10 @@ function isSmsVerificationEnabled() {
 function getSmsSendCooldown(secondsUntil) {
   if (!secondsUntil || secondsUntil <= 0) return "";
   return `${secondsUntil}s 后重发`;
+}
+
+function getMediaUploadLimits() {
+  return getEffectiveRuntimeConfig().mediaLimits || DEFAULT_MEDIA_LIMITS;
 }
 
 function normalizeStoredAccount(item) {
@@ -2529,6 +2552,85 @@ function optimizeImageFile(file, { maxEdge = 720, quality = 0.82 } = {}) {
   });
 }
 
+function createVideoPosterDataUrl(file, { maxEdge = 480, quality = 0.78, seekSeconds = 0.2 } = {}) {
+  if (!file?.type?.startsWith("video/")) {
+    return Promise.resolve("");
+  }
+
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+
+    const cleanup = () => {
+      URL.revokeObjectURL(objectUrl);
+      video.removeAttribute("src");
+      video.load();
+    };
+
+    const fallback = () => {
+      cleanup();
+      resolve("");
+    };
+
+    video.addEventListener("error", fallback, { once: true });
+    video.addEventListener(
+      "loadeddata",
+      () => {
+        try {
+          if (Number.isFinite(video.duration) && video.duration > seekSeconds) {
+            video.currentTime = seekSeconds;
+            return;
+          }
+        } catch (_error) {
+          // ignore seek issue and capture current frame
+        }
+        captureFrame();
+      },
+      { once: true }
+    );
+
+    video.addEventListener("seeked", captureFrame, { once: true });
+
+    function captureFrame() {
+      try {
+        const width = video.videoWidth || maxEdge;
+        const height = video.videoHeight || maxEdge;
+        const ratio = Math.min(1, maxEdge / Math.max(width, height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(width * ratio));
+        canvas.height = Math.max(1, Math.round(height * ratio));
+        const context = canvas.getContext("2d");
+        if (!context) {
+          fallback();
+          return;
+        }
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const poster = canvas.toDataURL("image/jpeg", quality);
+        cleanup();
+        resolve(poster);
+      } catch (_error) {
+        fallback();
+      }
+    }
+
+    video.src = objectUrl;
+  });
+}
+
+function getMediaThumbnailUrl(item, kind = "feed") {
+  const thumbnailUrl = item?.thumbnailUrl || item?.posterUrl || "";
+  const sourceUrl = thumbnailUrl || item?.url || "";
+  if (!sourceUrl) return "";
+  return optimizeRemoteImageUrl(sourceUrl, kind);
+}
+
+function getMediaDisplayUrl(item) {
+  return item?.url || "";
+}
+
 async function readSingleFile(inputName, formData) {
   const draftPreview = state.registerUploadDrafts?.[inputName]?.preview;
   const value = formData.get(inputName);
@@ -2543,7 +2645,7 @@ async function readSingleFile(inputName, formData) {
   return uploaded.url;
 }
 
-async function uploadManagedMedia({ dataUrl, fileName, assetType, category }) {
+async function uploadManagedMedia({ dataUrl, fileName, assetType, category, thumbnailDataUrl = "", thumbnailName = "" }) {
   const payload = await apiRequest(`${API_BASE}/media/upload`, {
     method: "POST",
     body: {
@@ -2551,7 +2653,9 @@ async function uploadManagedMedia({ dataUrl, fileName, assetType, category }) {
       dataUrl,
       fileName,
       assetType,
-      category
+      category,
+      thumbnailDataUrl,
+      thumbnailName,
     }
   });
 
@@ -2572,22 +2676,28 @@ async function uploadManagedMedia({ dataUrl, fileName, assetType, category }) {
 async function readMediaFiles(files) {
   const media = [];
   const skipped = [];
+  const limits = getMediaUploadLimits();
   for (const file of files) {
     if (!isProvidedFile(file) || !file.size) continue;
     const isVideo = file.type.startsWith("video/");
-    const maxBytes = isVideo ? 8 * 1024 * 1024 : 10 * 1024 * 1024;
+    const maxBytes = isVideo ? limits.videoBytes : limits.imageBytes;
     if (file.size > maxBytes) {
       skipped.push(`${file.name} 过大`);
       continue;
     }
     const url = file.type.startsWith("image/")
-      ? await optimizeImageFile(file, { maxEdge: 1080, quality: 0.8 })
+      ? await optimizeImageFile(file, { maxEdge: 1440, quality: 0.84 })
       : await readFileAsDataUrl(file);
+    const thumbnailDataUrl = file.type.startsWith("image/")
+      ? await optimizeImageFile(file, { maxEdge: 480, quality: 0.72 })
+      : await createVideoPosterDataUrl(file, { maxEdge: 480, quality: 0.78 });
     const uploaded = await uploadManagedMedia({
       dataUrl: url,
       fileName: file.name,
       assetType: isVideo ? "video" : "image",
-      category: "posts"
+      category: "posts",
+      thumbnailDataUrl,
+      thumbnailName: `${file.name.replace(/\.[^.]+$/, "") || "thumb"}-thumb.jpg`,
     });
     media.push({
       type: isVideo ? "video" : "image",
@@ -2596,7 +2706,13 @@ async function readMediaFiles(files) {
       storageProvider: uploaded.storageProvider || "",
       storagePath: uploaded.storagePath || "",
       contentType: uploaded.contentType || file.type || "",
-      sizeBytes: uploaded.sizeBytes || file.size || 0
+      sizeBytes: uploaded.sizeBytes || file.size || 0,
+      thumbnailUrl: uploaded.thumbnailUrl || "",
+      thumbnailName: uploaded.thumbnailName || "",
+      thumbnailContentType: uploaded.thumbnailContentType || "",
+      thumbnailStorageProvider: uploaded.thumbnailStorageProvider || "",
+      thumbnailStoragePath: uploaded.thumbnailStoragePath || "",
+      thumbnailSizeBytes: uploaded.thumbnailSizeBytes || 0,
     });
   }
   if (skipped.length) {
@@ -4700,14 +4816,14 @@ function renderPostMedia(post) {
           if (item.type === "video") {
             return `
               <div class="timeline-media-card image-shell image-shell--cover is-loaded">
-                <video class="timeline-media-video" src="${item.url}" controls playsinline preload="metadata"></video>
+                <video class="timeline-media-video" src="${getMediaDisplayUrl(item)}" poster="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" controls playsinline preload="metadata"></video>
               </div>
             `;
           }
 
           return `
             <div class="timeline-media-card image-shell image-shell--cover">
-              <img class="timeline-media-image" src="${optimizeRemoteImageUrl(item.url, "feed")}" alt="${escapeHtml(item.name || "动态图片")}" loading="lazy" decoding="async">
+              <img class="timeline-media-image" src="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" alt="${escapeHtml(item.name || "动态图片")}" loading="lazy" decoding="async">
             </div>
           `;
         })
@@ -8563,7 +8679,7 @@ function renderComposeOverlay() {
                     if (item.type === "video") {
                       return `
                         <div class="compose-preview-card image-shell image-shell--cover is-loaded">
-                          <video class="compose-preview-video" src="${item.url}" controls playsinline preload="metadata"></video>
+                          <video class="compose-preview-video" src="${getMediaDisplayUrl(item)}" poster="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" controls playsinline preload="metadata"></video>
                           <span class="compose-preview-label">视频</span>
                         </div>
                       `;
@@ -8571,7 +8687,7 @@ function renderComposeOverlay() {
 
                     return `
                       <div class="compose-preview-card image-shell image-shell--cover is-loaded">
-                        <img class="compose-preview-image" src="${item.url}" alt="${escapeHtml(item.name || "预览图")}" loading="lazy" decoding="async">
+                        <img class="compose-preview-image" src="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" alt="${escapeHtml(item.name || "预览图")}" loading="lazy" decoding="async">
                         <span class="compose-preview-label">图片</span>
                       </div>
                     `;
