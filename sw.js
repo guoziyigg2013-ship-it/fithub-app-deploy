@@ -1,4 +1,4 @@
-const CACHE_NAME = "fithub-shell-v14";
+const CACHE_NAME = "fithub-shell-v15";
 
 function coreUrls() {
   const scope = self.registration.scope;
@@ -47,12 +47,25 @@ async function networkFirst(request) {
   }
 }
 
+function isCacheableResponse(response) {
+  return Boolean(response && (response.ok || response.type === "opaque"));
+}
+
+function isImageRequest(request, url) {
+  const accept = request.headers.get("accept") || "";
+  return (
+    request.destination === "image" ||
+    accept.includes("image/") ||
+    /\.(?:png|jpg|jpeg|webp|gif|svg)$/i.test(url.pathname)
+  );
+}
+
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request, { ignoreSearch: true });
   if (cached) return cached;
   const response = await fetch(request);
-  if (response && response.ok) {
+  if (isCacheableResponse(response)) {
     cache.put(request, response.clone());
   }
   return response;
@@ -63,6 +76,11 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
 
   const url = new URL(request.url);
+  if (isImageRequest(request, url)) {
+    event.respondWith(cacheFirst(request));
+    return;
+  }
+
   if (url.origin !== self.location.origin) return;
   if (url.pathname.includes("/api/") || url.pathname === "/healthz") return;
 
@@ -74,11 +92,6 @@ self.addEventListener("fetch", (event) => {
         return cache.match(shellUrl, { ignoreSearch: true });
       })
     );
-    return;
-  }
-
-  if (url.pathname.includes("/assets/demo/") || /\.(?:png|jpg|jpeg|webp|svg)$/i.test(url.pathname)) {
-    event.respondWith(cacheFirst(request));
     return;
   }
 

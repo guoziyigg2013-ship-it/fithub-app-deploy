@@ -186,3 +186,37 @@ class ContentRegressionTests(FitHubApiTestCase):
         notification_types = [item["type"] for item in author_refreshed.get("notifications", []) if item.get("actorProfileId") == viewer_profile["id"]]
         self.assertIn("like", notification_types)
         self.assertIn("comment", notification_types)
+
+    def test_text_post_can_be_favorited_and_serialized(self):
+        phone_a = self.make_phone(48)
+        phone_b = self.make_phone(49)
+
+        author_client = self.make_client()
+        author_code = author_client.send_code(phone_a, purpose="register")["debugCode"]
+        author_payload = author_client.register_enthusiast(phone_a, "文字收藏作者", author_code)
+        author_profile = self.current_profile(author_payload)
+
+        viewer_client = self.make_client()
+        viewer_code = viewer_client.send_code(phone_b, purpose="register")["debugCode"]
+        viewer_client.register_enthusiast(phone_b, "文字收藏用户", viewer_code)
+
+        author_post_payload = author_client.create_post(
+            author_profile["id"],
+            "这是一条没有图片视频但值得收藏的训练心得。",
+            media=[],
+        )
+        target_post = next(
+            item for item in self.current_profile(author_post_payload).get("posts", [])
+            if item["content"] == "这是一条没有图片视频但值得收藏的训练心得。"
+        )
+
+        viewer_client.toggle_follow(author_profile["id"])
+        favorite_payload = viewer_client.toggle_favorite(target_post["id"])
+        self.assertIn(target_post["id"], favorite_payload["favoritePostIds"])
+        favorite_entry = next(
+            item for item in favorite_payload.get("favoritePosts", [])
+            if (item.get("post") or {}).get("id") == target_post["id"]
+        )
+        favorite_post = favorite_entry.get("post") or {}
+        self.assertEqual(favorite_post["content"], target_post["content"])
+        self.assertEqual(favorite_post.get("media"), [])

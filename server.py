@@ -2433,7 +2433,7 @@ def normalize_post_favorites(state):
         source = item.get("sourceProfileId")
         post_id = item.get("postId")
         post = valid_posts.get(post_id)
-        if source not in valid_profile_ids or not post or not post.get("media"):
+        if source not in valid_profile_ids or not post:
             continue
         pair = (source, post_id)
         if pair in seen:
@@ -3742,7 +3742,7 @@ def serialize_favorite_posts(state, current_actor_profile_id):
     serialized = []
     for item in favorites:
         post = state.get("posts", {}).get(item.get("postId"))
-        if not post or not post.get("media"):
+        if not post:
             continue
         serialized.append(
             {
@@ -5291,8 +5291,6 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 if not actor:
                     raise ValueError("请先注册后再收藏。")
                 post = state["posts"][payload["postId"]]
-                if not post.get("media"):
-                    raise ValueError("当前这条动态没有图片或视频可收藏。")
                 favorites = state.setdefault("postFavorites", [])
                 existing = next(
                     (

@@ -10,3 +10,4 @@ tmp/
 node_modules/
 playwright-report/
 test-results/
+.playwright-cli/

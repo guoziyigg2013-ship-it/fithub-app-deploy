@@ -1156,7 +1156,7 @@ function getImageHydrationObserver() {
         bindImageShell(entry.target);
       });
     },
-    { rootMargin: "520px 0px", threshold: 0.01 }
+    { rootMargin: "900px 0px", threshold: 0.01 }
   );
   return imageHydrationObserver;
 }
@@ -1221,7 +1221,8 @@ function createInitialProfiles() {
       name: "模拟健身房 A",
       handle: "@demo.gym.a",
       avatar: "馆",
-      avatarImage: createGymAvatar({ bgA: "#1f2a34", bgB: "#748ca2", accent: "#f28c28" }),
+      avatarImage: demoAsset("gym-a-avatar.jpg"),
+      coverImage: demoAsset("gym-a.jpg"),
       city: "厦门",
       locationLabel: "厦门 · 思明区",
       lat: 24.4828,
@@ -1252,12 +1253,12 @@ function createInitialProfiles() {
           media: [
             {
               type: "image",
-              url: createDemoImage("器械上新", "#f19a3e", "#2f8c88"),
+              url: demoAsset("gym-a.jpg"),
               name: "demo-gym-a-1.jpg"
             },
             {
               type: "image",
-              url: createDemoImage("团课教室", "#3a8fd1", "#6cc3a0"),
+              url: demoAsset("gym-d.jpg"),
               name: "demo-gym-a-2.jpg"
             }
           ]
@@ -1274,7 +1275,8 @@ function createInitialProfiles() {
       name: "模拟健身房 B",
       handle: "@demo.gym.b",
       avatar: "泳",
-      avatarImage: createGymAvatar({ bgA: "#214d64", bgB: "#76aeca", accent: "#59d4ff" }),
+      avatarImage: demoAsset("gym-b-avatar.jpg"),
+      coverImage: demoAsset("gym-b.jpg"),
       city: "厦门",
       locationLabel: "厦门 · 湖里区",
       lat: 24.5064,
@@ -1309,7 +1311,8 @@ function createInitialProfiles() {
       name: "模拟教练 A",
       handle: "@demo.coach.a",
       avatar: "林",
-      avatarImage: createPortraitAvatar({ skin: "#efc3a4", hair: "#281d17", shirt: "#17181d", bgA: "#d9e0ea", bgB: "#8b98ad" }),
+      avatarImage: demoAsset("coach-a-avatar.jpg"),
+      coverImage: demoAsset("coach-a.jpg"),
       city: "厦门",
       locationLabel: "厦门 · 思明区",
       lat: 24.4805,
@@ -1339,7 +1342,7 @@ function createInitialProfiles() {
           media: [
             {
               type: "image",
-              url: createDemoImage("动作纠正", "#293b72", "#6a82fb"),
+              url: demoAsset("coach-a.jpg"),
               name: "demo-coach-a.jpg"
             }
           ]
@@ -1355,7 +1358,8 @@ function createInitialProfiles() {
       name: "模拟教练 B",
       handle: "@demo.coach.b",
       avatar: "周",
-      avatarImage: createPortraitAvatar({ skin: "#f2c8ad", hair: "#5c3e2e", shirt: "#5f7fa0", bgA: "#f3dbc9", bgB: "#d2a48d" }),
+      avatarImage: demoAsset("coach-b-avatar.jpg"),
+      coverImage: demoAsset("coach-b.jpg"),
       city: "厦门",
       locationLabel: "厦门 · 湖里区",
       lat: 24.5002,
@@ -3090,7 +3094,7 @@ function renderAvatarMarkup(profile, className = "avatar") {
 
   return `
     <div class="${safeClassName} avatar--photo">
-      <img class="avatar-image" src="${optimizeRemoteImageUrl(avatarSrc, "avatar")}" alt="${avatarAlt}" loading="lazy" decoding="async">
+      <img class="avatar-image" src="${optimizeRemoteImageUrl(avatarSrc, "avatar")}" alt="${avatarAlt}" decoding="async">
       ${unreadBadge}
     </div>
   `;
@@ -3212,9 +3216,10 @@ function refreshPostLikeButtons(postId) {
   });
 }
 
-function getPostFavoriteDisplayCount(post) {
+function getPostFavoriteDisplayCount(post, fallbackPostId = "") {
   const favoriteCount = Math.max(0, Number(post?.favoriteCount || 0));
-  return state.favoritePostIds.has(post?.id) ? Math.max(1, favoriteCount) : favoriteCount;
+  const postId = post?.id || fallbackPostId;
+  return state.favoritePostIds.has(postId) ? Math.max(1, favoriteCount) : favoriteCount;
 }
 
 function applyPostFavoriteState(postId, favorited) {
@@ -3313,7 +3318,7 @@ function refreshPostFavoriteButtons(postId) {
     button.setAttribute("aria-label", favorited ? "取消收藏" : "收藏");
     const number = button.querySelector(".post-action-number");
     if (number) {
-      number.textContent = String(getPostFavoriteDisplayCount(found?.post));
+      number.textContent = String(getPostFavoriteDisplayCount(found?.post, postId));
     }
   });
 }
@@ -3752,16 +3757,16 @@ function getAllPostEntries() {
     .sort((left, right) => String(right.post?.createdAt || "").localeCompare(String(left.post?.createdAt || "")));
 }
 
-function getFavoritedMediaEntries() {
+function getFavoritedPostEntries() {
   const savedEntries = Array.isArray(state.favoritePosts)
     ? state.favoritePosts
-        .filter((item) => item?.profile && item?.post && isMediaPost(item.post))
+        .filter((item) => item?.profile && item?.post)
         .map((item) => ({ profile: item.profile, post: item.post }))
     : [];
 
   const seenPostIds = new Set(savedEntries.map((item) => item.post.id));
   getAllPostEntries().forEach((item) => {
-    if (!isMediaPost(item.post) || seenPostIds.has(item.post.id) || !state.favoritePostIds.has(item.post.id)) {
+    if (seenPostIds.has(item.post.id) || !state.favoritePostIds.has(item.post.id)) {
       return;
     }
     savedEntries.push(item);
@@ -5076,7 +5081,7 @@ async function togglePostLike(postId) {
 
 async function togglePostFavorite(postId) {
   const found = getPostById(postId);
-  if (!found?.post || !isMediaPost(found.post)) return;
+  if (!found?.post) return;
 
   const previousFavorited = state.favoritePostIds.has(postId);
   const nextFavorited = !previousFavorited;
@@ -5340,9 +5345,9 @@ function renderDiscover() {
       ${
         discoverFeed.length
           ? discoverFeed
-              .map((item) => item.kind === "profile"
+              .map((item, index) => item.kind === "profile"
                 ? renderDiscoverProfileEntry(item.profile)
-                : renderPostCard(item.profile, item.post, { compact: true }))
+                : renderPostCard(item.profile, item.post, { compact: true, priorityMedia: index < 3 }))
               .join("")
           : `
             <article class="empty-card">
@@ -5417,13 +5422,17 @@ function renderRatingStars(profileId, activeValue) {
   `;
 }
 
-function renderPostMedia(post) {
+function renderPostMedia(post, options = {}) {
   if (!post.media || !post.media.length) return "";
 
   return `
     <div class="timeline-media-grid ${post.media.length === 1 ? "is-single" : ""}">
       ${post.media
         .map((item, index) => {
+          const priority = Boolean(options.priority && index === 0);
+          const loadingAttrs = priority
+            ? 'loading="eager" fetchpriority="high"'
+            : 'loading="lazy" fetchpriority="low"';
           const openButton = `
             <button
               class="timeline-media-open"
@@ -5447,7 +5456,7 @@ function renderPostMedia(post) {
           return `
             <div class="timeline-media-card image-shell image-shell--cover">
               ${openButton}
-              <img class="timeline-media-image" src="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" alt="${escapeHtml(item.name || "动态图片")}" loading="lazy" decoding="async">
+              <img class="timeline-media-image" src="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" alt="${escapeHtml(item.name || "动态图片")}" ${loadingAttrs} decoding="async">
             </div>
           `;
         })
@@ -5503,10 +5512,9 @@ function renderPostActionGlyph(kind, active = false) {
 }
 
 function renderPostCard(profile, post, options = {}) {
-  const { compact = false, showProfileButton = true } = options;
+  const { compact = false, showProfileButton = true, priorityMedia = false } = options;
   const commentDraft = state.commentDrafts[post.id] || "";
   const showChatButton = canOpenChatWith(profile.id);
-  const canFavorite = isMediaPost(post);
   const favorited = state.favoritePostIds.has(post.id);
   const checkinMeta = post.checkin
     ? `
@@ -5547,18 +5555,14 @@ function renderPostCard(profile, post, options = {}) {
       </div>
       <p>${escapeHtml(post.content)}</p>
       ${checkinMeta}
-      ${renderPostMedia(post)}
+      ${renderPostMedia(post, { priority: priorityMedia })}
       <small>${escapeHtml(post.meta)}</small>
       <div class="post-action-bar">
         <button class="post-action-button post-action-button--icon ${post.likedByCurrentActor ? "is-active" : ""}" data-like-post="${post.id}" type="button" aria-label="${post.likedByCurrentActor ? "取消点赞" : "点赞"}">
           ${renderPostActionGlyph("like", post.likedByCurrentActor)}
           <span class="post-action-number">${post.likeCount || 0}</span>
         </button>
-        ${
-          canFavorite
-            ? `<button class="post-action-button post-action-button--icon post-action-button--favorite ${favorited ? "is-active" : ""}" data-favorite-post="${post.id}" type="button" aria-label="${favorited ? "取消收藏" : "收藏"}">${renderPostActionGlyph("favorite", favorited)}<span class="post-action-number">${getPostFavoriteDisplayCount(post)}</span></button>`
-            : ""
-        }
+        <button class="post-action-button post-action-button--icon post-action-button--favorite ${favorited ? "is-active" : ""}" data-favorite-post="${post.id}" type="button" aria-label="${favorited ? "取消收藏" : "收藏"}">${renderPostActionGlyph("favorite", favorited)}<span class="post-action-number">${getPostFavoriteDisplayCount(post)}</span></button>
         <span class="post-action-button post-action-button--icon post-action-button--count">${renderPostActionGlyph("comment", false)}<span class="post-action-number">${post.comments?.length || 0}</span></span>
         ${
           showChatButton
@@ -6994,9 +6998,9 @@ function renderMessagesFeature(profile) {
 }
 
 function renderCollectionsFeature() {
-  const entries = getFavoritedMediaEntries();
+  const entries = getFavoritedPostEntries();
   if (!entries.length) {
-    return '<article class="empty-card">你还没有收藏任何图片或视频。看到喜欢的动作讲解、训练视频或照片时，点一下星标就会收进这里。</article>';
+    return '<article class="empty-card">你还没有收藏任何动态。看到喜欢的训练干货、图片、视频或文字记录时，点一下星标就会收进这里。</article>';
   }
 
   return `
@@ -8149,7 +8153,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
           renderPersonalShortcutTile("消息", `${getInboxCount()} 条互动`, "信", 'data-open-my-feature="messages"'),
           renderPersonalShortcutTile("订单", "预约记录", "单", 'data-open-my-feature="orders"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
-          renderPersonalShortcutTile("收藏", `${getFavoritedMediaEntries().length} 条媒体`, "藏", 'data-open-my-feature="collections"'),
+          renderPersonalShortcutTile("收藏", `${getFavoritedPostEntries().length} 条`, "藏", 'data-open-my-feature="collections"'),
           renderPersonalShortcutTile("积分", `${getProfilePoints(profile, relatedBookings)} 分`, "分", 'data-open-my-feature="points"'),
           renderPersonalShortcutTile("健康", "数据中心", "健", 'data-open-my-feature="health"')
         ]
@@ -8159,7 +8163,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
           renderPersonalShortcutTile("消息", `${getInboxCount()} 条互动`, "信", 'data-open-my-feature="messages"'),
           renderPersonalShortcutTile("订单", `别人给我的 ${relatedBookings.length} 单`, "单", 'data-open-my-feature="orders"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
-          renderPersonalShortcutTile("收藏", `${getFavoritedMediaEntries().length} 条媒体`, "藏", 'data-open-my-feature="collections"'),
+          renderPersonalShortcutTile("收藏", `${getFavoritedPostEntries().length} 条`, "藏", 'data-open-my-feature="collections"'),
           renderPersonalShortcutTile("评分", profile.ratingCount ? `${getRatingDisplay(profile)} 分` : "等待评分", "评", 'data-open-my-feature="reviews"'),
           renderPersonalShortcutTile("健康", "数据中心", "健", 'data-open-my-feature="health"')
         ];
@@ -10454,7 +10458,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260424-5`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-1`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
