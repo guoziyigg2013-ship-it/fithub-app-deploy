@@ -5090,7 +5090,10 @@ async function sendDirectMessage(profileId) {
       targetProfileId: profileId,
       text
     });
-    mergeConfirmedThread(profileId, payload?.thread, optimisticMessageId);
+    const confirmedThread =
+      payload?.thread ||
+      (payload?.threads || []).find((thread) => thread.withProfileId === profileId);
+    mergeConfirmedThread(profileId, confirmedThread, optimisticMessageId);
   } catch (error) {
     removeOptimisticMessage(profileId, optimisticMessageId);
     if (!state.chatDraft) {
@@ -10404,7 +10407,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260424-3`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260424-4`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
