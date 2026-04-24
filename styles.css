@@ -3508,8 +3508,7 @@ body.is-workout-live .app {
   background: rgba(242, 140, 40, 0.06);
 }
 
-.post-action-button:disabled,
-.post-action-button.is-pending {
+.post-action-button:disabled {
   cursor: not-allowed;
   opacity: 0.72;
   transform: none;

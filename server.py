@@ -193,19 +193,64 @@ def data_uri_svg(svg):
 
 
 def demo_image(title, accent_a, accent_b):
+    is_coach_scene = any(token in str(title or "") for token in ["教练", "私教", "普拉提", "塑形", "动作", "训练"])
+    scene_markup = (
+        f"""
+            <rect x="86" y="292" width="256" height="24" rx="12" fill="#30343b"/>
+            <rect x="134" y="238" width="28" height="96" rx="14" fill="#2b3038"/>
+            <rect x="236" y="232" width="28" height="102" rx="14" fill="#2b3038"/>
+            <circle cx="476" cy="202" r="48" fill="#e9b996"/>
+            <path d="M429 196c8-44 36-68 70-57 24 8 36 29 36 55-34-20-65-20-106 2z" fill="#34261f"/>
+            <path d="M398 360c10-74 42-114 82-114 50 0 88 44 98 114z" fill="{accent_a}"/>
+            <rect x="586" y="268" width="96" height="82" rx="18" fill="#30343b"/>
+            <circle cx="606" cy="360" r="22" fill="#30343b"/>
+            <circle cx="664" cy="360" r="22" fill="#30343b"/>
+        """
+        if is_coach_scene
+        else f"""
+            <rect x="90" y="244" width="120" height="126" rx="18" fill="#2d343d"/>
+            <rect x="114" y="260" width="72" height="16" rx="8" fill="{accent_a}"/>
+            <rect x="128" y="296" width="16" height="62" rx="8" fill="#c8d1d8"/>
+            <rect x="158" y="286" width="16" height="72" rx="8" fill="#c8d1d8"/>
+            <rect x="264" y="306" width="176" height="22" rx="11" fill="#30343b"/>
+            <circle cx="280" cy="342" r="28" fill="#30343b"/>
+            <circle cx="424" cy="342" r="28" fill="#30343b"/>
+            <rect x="508" y="238" width="142" height="164" rx="26" fill="#353c45"/>
+            <rect x="534" y="268" width="90" height="96" rx="20" fill="#99a9b4"/>
+            <rect x="626" y="282" width="42" height="16" rx="8" fill="{accent_b}"/>
+        """
+    )
     svg = f"""
     <svg xmlns="http://www.w3.org/2000/svg" width="800" height="520" viewBox="0 0 800 520">
       <defs>
-        <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0%" stop-color="{accent_a}"/>
-          <stop offset="100%" stop-color="{accent_b}"/>
+        <linearGradient id="wall" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#f7f3ed"/>
+          <stop offset="100%" stop-color="#dfe8ea"/>
         </linearGradient>
+        <linearGradient id="floor" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#efe4d5"/>
+          <stop offset="100%" stop-color="#b9956a"/>
+        </linearGradient>
+        <linearGradient id="glass" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#d8ebf4"/>
+          <stop offset="100%" stop-color="#9fb7c4"/>
+        </linearGradient>
+        <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="12"/>
+        </filter>
       </defs>
-      <rect width="800" height="520" rx="36" fill="url(#g)"/>
-      <circle cx="664" cy="132" r="92" fill="rgba(255,255,255,0.16)"/>
-      <circle cx="152" cy="392" r="116" fill="rgba(255,255,255,0.14)"/>
-      <text x="60" y="246" fill="white" font-size="56" font-family="Arial, PingFang SC, sans-serif" font-weight="700">{title}</text>
-      <text x="60" y="306" fill="rgba(255,255,255,0.88)" font-size="28" font-family="Arial, PingFang SC, sans-serif">FitHub Moments Demo</text>
+      <rect width="800" height="520" rx="36" fill="url(#wall)"/>
+      <rect y="338" width="800" height="182" fill="url(#floor)"/>
+      <path d="M0 338h800" stroke="rgba(80,70,58,0.18)" stroke-width="4"/>
+      <rect x="54" y="58" width="238" height="220" rx="20" fill="url(#glass)"/>
+      <rect x="316" y="58" width="238" height="220" rx="20" fill="url(#glass)"/>
+      <rect x="578" y="58" width="168" height="220" rx="20" fill="url(#glass)"/>
+      <path d="M174 58v220M436 58v220M662 58v220M54 168h692" stroke="rgba(255,255,255,0.48)" stroke-width="8"/>
+      <circle cx="94" cy="94" r="78" fill="{accent_a}" opacity="0.16" filter="url(#soft)"/>
+      <circle cx="694" cy="102" r="92" fill="{accent_b}" opacity="0.16" filter="url(#soft)"/>
+      {scene_markup}
+      <rect x="40" y="402" width="330" height="70" rx="24" fill="rgba(24,29,35,0.58)"/>
+      <text x="70" y="447" fill="#fff" font-size="30" font-family="Arial, PingFang SC, sans-serif" font-weight="700">{title}</text>
     </svg>
     """
     return data_uri_svg(svg)
@@ -225,15 +270,17 @@ def portrait_avatar(skin="#f5c9a8", hair="#41291c", shirt="#1f2125", bg_a="#f4d6
         </linearGradient>
       </defs>
       <rect width="320" height="320" rx="52" fill="url(#bg)"/>
-      <ellipse cx="248" cy="78" rx="52" ry="36" fill="rgba(255,255,255,0.18)"/>
-      <ellipse cx="74" cy="256" rx="96" ry="62" fill="rgba(255,255,255,0.10)"/>
-      <circle cx="160" cy="116" r="58" fill="{skin}"/>
-      <path d="M101 120c2-42 28-66 59-66 35 0 61 22 63 65-18-18-44-26-62-26-23 0-41 7-60 27z" fill="{hair}"/>
-      <rect x="112" y="161" width="96" height="46" rx="20" fill="{skin}"/>
-      <path d="M74 304c8-55 42-87 86-87 44 0 78 32 86 87z" fill="url(#shirt)"/>
-      <circle cx="140" cy="119" r="4" fill="#38251c"/>
-      <circle cx="180" cy="119" r="4" fill="#38251c"/>
-      <path d="M143 146c8 8 26 8 34 0" fill="none" stroke="#bc7a63" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="258" cy="70" r="58" fill="rgba(255,255,255,0.22)"/>
+      <circle cx="76" cy="262" r="104" fill="rgba(255,255,255,0.12)"/>
+      <rect x="64" y="204" width="192" height="116" rx="58" fill="url(#shirt)"/>
+      <rect x="113" y="160" width="94" height="58" rx="24" fill="{skin}"/>
+      <circle cx="160" cy="119" r="62" fill="{skin}"/>
+      <path d="M97 122c4-48 32-76 68-76 37 0 64 25 67 74-26-20-53-29-79-26-22 2-39 10-56 28z" fill="{hair}"/>
+      <path d="M104 120c18-30 42-43 72-39 20 3 38 12 55 29-8-37-35-61-68-61-35 0-61 27-59 71z" fill="rgba(255,255,255,0.08)"/>
+      <circle cx="139" cy="122" r="4" fill="#38251c"/>
+      <circle cx="181" cy="122" r="4" fill="#38251c"/>
+      <path d="M142 148c9 8 27 8 36 0" fill="none" stroke="#a66b58" stroke-width="5" stroke-linecap="round"/>
+      <path d="M76 304h168" stroke="rgba(255,255,255,0.22)" stroke-width="10" stroke-linecap="round"/>
     </svg>
     """
     return data_uri_svg(svg)
@@ -247,17 +294,24 @@ def gym_avatar(bg_a="#26323e", bg_b="#7b91a8", accent="#f28c28"):
           <stop offset="0%" stop-color="{bg_a}"/>
           <stop offset="100%" stop-color="{bg_b}"/>
         </linearGradient>
+        <linearGradient id="floor" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#e7ded0"/>
+          <stop offset="100%" stop-color="#a98860"/>
+        </linearGradient>
       </defs>
       <rect width="320" height="320" rx="52" fill="url(#bg)"/>
-      <rect x="54" y="66" width="212" height="170" rx="22" fill="rgba(18,22,28,0.68)"/>
-      <rect x="72" y="86" width="58" height="20" rx="10" fill="{accent}"/>
-      <rect x="78" y="138" width="18" height="64" rx="8" fill="#d9dee7"/>
-      <rect x="112" y="126" width="18" height="76" rx="8" fill="#d9dee7"/>
-      <rect x="154" y="118" width="18" height="84" rx="8" fill="#d9dee7"/>
-      <rect x="190" y="132" width="18" height="70" rx="8" fill="#d9dee7"/>
-      <rect x="226" y="144" width="18" height="58" rx="8" fill="#d9dee7"/>
-      <rect x="64" y="248" width="192" height="24" rx="12" fill="rgba(255,255,255,0.14)"/>
-      <path d="M74 214h172" stroke="rgba(255,255,255,0.2)" stroke-width="6" stroke-linecap="round"/>
+      <rect x="0" y="202" width="320" height="118" fill="url(#floor)" opacity="0.92"/>
+      <rect x="28" y="42" width="264" height="126" rx="24" fill="rgba(225,239,246,0.78)"/>
+      <path d="M116 42v126M204 42v126M28 104h264" stroke="rgba(255,255,255,0.72)" stroke-width="7"/>
+      <rect x="54" y="154" width="72" height="94" rx="15" fill="#2d343d"/>
+      <rect x="70" y="170" width="40" height="10" rx="5" fill="{accent}"/>
+      <rect x="76" y="192" width="10" height="42" rx="5" fill="#cfd6dc"/>
+      <rect x="96" y="184" width="10" height="50" rx="5" fill="#cfd6dc"/>
+      <rect x="150" y="206" width="108" height="16" rx="8" fill="#30343b"/>
+      <circle cx="162" cy="236" r="18" fill="#30343b"/>
+      <circle cx="246" cy="236" r="18" fill="#30343b"/>
+      <rect x="218" y="126" width="54" height="96" rx="18" fill="rgba(37,44,52,0.86)"/>
+      <rect x="230" y="144" width="30" height="54" rx="10" fill="#aab6bf"/>
     </svg>
     """
     return data_uri_svg(svg)
@@ -290,7 +344,7 @@ def default_avatar_for_role(role):
         return gym_avatar()
     if role == "coach":
         return portrait_avatar(skin="#efc1a1", hair="#2f241d", shirt="#1f2125", bg_a="#dfe5ef", bg_b="#8d9bb3")
-    return portrait_avatar(skin="#f4ccb2", hair="#674632", shirt="#f28c28", bg_a="#f7e0c6", bg_b="#d8a06f")
+    return portrait_avatar(skin="#e8c7ad", hair="#4d4038", shirt="#2f3a46", bg_a="#eef2f5", bg_b="#cfd9e2")
 
 
 def compact_avatar_image(url, role):
