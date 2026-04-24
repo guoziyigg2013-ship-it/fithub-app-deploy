@@ -1,4 +1,4 @@
-const CACHE_NAME = "fithub-shell-v10";
+const CACHE_NAME = "fithub-shell-v11";
 
 function coreUrls() {
   const scope = self.registration.scope;
@@ -47,6 +47,17 @@ async function networkFirst(request) {
   }
 }
 
+async function cacheFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request, { ignoreSearch: true });
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response && response.ok) {
+    cache.put(request, response.clone());
+  }
+  return response;
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
@@ -63,6 +74,11 @@ self.addEventListener("fetch", (event) => {
         return cache.match(shellUrl, { ignoreSearch: true });
       })
     );
+    return;
+  }
+
+  if (url.pathname.includes("/assets/demo/") || /\.(?:png|jpg|jpeg|webp|svg)$/i.test(url.pathname)) {
+    event.respondWith(cacheFirst(request));
     return;
   }
 

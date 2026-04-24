@@ -192,6 +192,10 @@ def data_uri_svg(svg):
     return f"data:image/svg+xml;charset=UTF-8,{quote(svg)}"
 
 
+def demo_asset(name):
+    return f"assets/demo/{name}"
+
+
 def demo_image(title, accent_a, accent_b):
     is_coach_scene = any(token in str(title or "") for token in ["教练", "私教", "普拉提", "塑形", "动作", "训练"])
     scene_markup = (
@@ -340,11 +344,32 @@ def relative_time_label(iso_text):
 
 
 def default_avatar_for_role(role):
-    if role == "gym":
-        return gym_avatar()
-    if role == "coach":
-        return portrait_avatar(skin="#efc1a1", hair="#2f241d", shirt="#1f2125", bg_a="#dfe5ef", bg_b="#8d9bb3")
-    return portrait_avatar(skin="#e8c7ad", hair="#4d4038", shirt="#2f3a46", bg_a="#eef2f5", bg_b="#cfd9e2")
+    is_gym = role == "gym"
+    badge = (
+        '<path d="M105 170h110v74H105z" fill="#eef4f8"/>'
+        '<path d="M126 170v74M160 170v74M194 170v74M105 204h110" stroke="#c7d3dc" stroke-width="8"/>'
+        if is_gym
+        else '<circle cx="160" cy="126" r="48" fill="#f4f7f9"/><path d="M78 286c13-64 46-97 82-97s69 33 82 97" fill="#f4f7f9"/>'
+    )
+    svg = f"""
+    <svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320">
+      <defs>
+        <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#eef3f7"/>
+          <stop offset="100%" stop-color="#cbd8e3"/>
+        </linearGradient>
+        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#7d8b98" flood-opacity="0.18"/>
+        </filter>
+      </defs>
+      <rect width="320" height="320" rx="62" fill="url(#bg)"/>
+      <circle cx="244" cy="74" r="58" fill="rgba(255,255,255,0.46)"/>
+      <circle cx="88" cy="256" r="110" fill="rgba(255,255,255,0.24)"/>
+      <g filter="url(#shadow)">{badge}</g>
+      <path d="M96 286h128" stroke="rgba(117,132,146,0.32)" stroke-width="10" stroke-linecap="round"/>
+    </svg>
+    """
+    return data_uri_svg(svg)
 
 
 def compact_avatar_image(url, role):
@@ -2874,8 +2899,8 @@ def initial_state():
         {
             "name": "模拟健身房 A · 万象燃炼馆",
             "avatar": "万",
-            "avatarImage": gym_avatar(bg_a="#1f2a34", bg_b="#748ca2", accent="#f28c28"),
-            "coverImage": demo_image("万象燃炼馆", "#1f2a34", "#f28c28"),
+            "avatarImage": demo_asset("gym-a-avatar.jpg"),
+            "coverImage": demo_asset("gym-a.jpg"),
             "bio": "模拟门店，位于厦门万象城商圈，用于测试真实场馆照片、定价、预约、评分和主页展示。",
             "shortDesc": "万象城商圈器械馆，支持月卡、次卡和团课测试。",
             "price": "¥169/月起",
@@ -2893,8 +2918,8 @@ def initial_state():
         {
             "name": "模拟健身房 B · 轻氧塑能馆",
             "avatar": "氧",
-            "avatarImage": gym_avatar(bg_a="#214d64", bg_b="#76aeca", accent="#59d4ff"),
-            "coverImage": demo_image("轻氧塑能馆", "#214d64", "#59d4ff"),
+            "avatarImage": demo_asset("gym-b-avatar.jpg"),
+            "coverImage": demo_asset("gym-b.jpg"),
             "bio": "模拟精品训练馆，主打轻氧有氧和恢复类课程，适合测试价格展示和课程预约。",
             "shortDesc": "精品有氧空间，适合恢复训练和轻团课测试。",
             "tags": ["模拟场馆", "精品馆", "恢复"],
@@ -2909,8 +2934,8 @@ def initial_state():
     profiles["coach-demo-a"].update(
         {
             "name": "模拟教练 A · 林燃",
-            "avatarImage": portrait_avatar(skin="#efc3a4", hair="#281d17", shirt="#17181d", bg_a="#d9e0ea", bg_b="#8b98ad"),
-            "coverImage": demo_image("力量私教", "#293b72", "#6a82fb"),
+            "avatarImage": demo_asset("coach-a-avatar.jpg"),
+            "coverImage": demo_asset("coach-a.jpg"),
             "bio": "模拟私教，擅长力量提升和减脂塑形，用于测试真实头像、课时定价、预约和私信。",
             "shortDesc": "力量提升、减脂塑形，适合测试私教预约。",
             "price": "¥299/小时",
@@ -2926,8 +2951,8 @@ def initial_state():
     profiles["coach-demo-b"].update(
         {
             "name": "模拟教练 B · 周芮",
-            "avatarImage": portrait_avatar(skin="#f2c8ad", hair="#5c3e2e", shirt="#5f7fa0", bg_a="#f3dbc9", bg_b="#d2a48d"),
-            "coverImage": demo_image("普拉提恢复", "#a679c7", "#f0a36f"),
+            "avatarImage": demo_asset("coach-b-avatar.jpg"),
+            "coverImage": demo_asset("coach-b.jpg"),
             "bio": "模拟女教练，主打体态改善和普拉提恢复，方便测试女性教练主页、评分和动态流。",
             "shortDesc": "体态改善、核心激活，适合恢复和普拉提测试。",
             "price": "¥268/小时",
@@ -2946,8 +2971,8 @@ def initial_state():
         name="模拟健身房 C · Skyline Strength",
         handle="@demo.gym.c",
         avatar="天",
-        avatarImage=gym_avatar(bg_a="#283745", bg_b="#8fb2cf", accent="#66d0b8"),
-        coverImage=demo_image("Skyline Strength", "#283745", "#66d0b8"),
+        avatarImage=demo_asset("gym-c-avatar.jpg"),
+        coverImage=demo_asset("gym-c.jpg"),
         city="厦门",
         locationLabel="厦门 · 思明区 · 环岛路",
         lat=24.4576,
@@ -2974,8 +2999,8 @@ def initial_state():
         name="模拟健身房 D · 城市力量馆",
         handle="@demo.gym.d",
         avatar="城",
-        avatarImage=gym_avatar(bg_a="#30323b", bg_b="#c0a16b", accent="#f28c28"),
-        coverImage=demo_image("城市力量馆", "#30323b", "#c0a16b"),
+        avatarImage=demo_asset("gym-d-avatar.jpg"),
+        coverImage=demo_asset("gym-d.jpg"),
         city="厦门",
         locationLabel="厦门 · 湖里区 · SM 商圈",
         lat=24.5088,
@@ -3002,8 +3027,8 @@ def initial_state():
         name="模拟教练 C · 陈拓",
         handle="@demo.coach.c",
         avatar="陈",
-        avatarImage=portrait_avatar(skin="#efc1a1", hair="#30221a", shirt="#243247", bg_a="#d9e4ef", bg_b="#849bb5"),
-        coverImage=demo_image("进阶力量课", "#243247", "#6a82fb"),
+        avatarImage=demo_asset("coach-c-avatar.jpg"),
+        coverImage=demo_asset("coach-c.jpg"),
         city="厦门",
         locationLabel="厦门 · 湖里区 · 五缘湾",
         lat=24.5223,
@@ -3029,8 +3054,8 @@ def initial_state():
         name="模拟教练 D · Mia 沈",
         handle="@demo.coach.d",
         avatar="M",
-        avatarImage=portrait_avatar(skin="#f1c4a7", hair="#4d3328", shirt="#6f4ea1", bg_a="#f1dfef", bg_b="#c99ad8"),
-        coverImage=demo_image("晚间塑形", "#6f4ea1", "#f0a36f"),
+        avatarImage=demo_asset("coach-d-avatar.jpg"),
+        coverImage=demo_asset("coach-d.jpg"),
         city="厦门",
         locationLabel="厦门 · 思明区 · 明发商业广场",
         lat=24.4714,
@@ -3076,19 +3101,26 @@ def initial_state():
             "模拟健身房 A 新到一批力量器械，方便测试场馆动态展示。",
             "模拟动态 · 设备更新",
             media=[
-                {"type": "image", "url": demo_image("器械上新", "#f19a3e", "#2f8c88"), "name": "demo-gym-a-1.jpg"},
-                {"type": "image", "url": demo_image("团课教室", "#3a8fd1", "#6cc3a0"), "name": "demo-gym-a-2.jpg"},
+                {"type": "image", "url": demo_asset("gym-a.jpg"), "name": "demo-gym-a-1.jpg"},
+                {"type": "image", "url": demo_asset("gym-d.jpg"), "name": "demo-gym-a-2.jpg"},
             ],
             likes=["enthusiast-demo-a", "enthusiast-demo-b"],
         ),
-        "post-gym-b-1": make_post("post-gym-b-1", "gym-demo-b", 185, "模拟健身房 B 的周末亲子游泳课已开放预约。", "模拟动态 · 课程更新"),
+        "post-gym-b-1": make_post(
+            "post-gym-b-1",
+            "gym-demo-b",
+            185,
+            "模拟健身房 B 的周末亲子游泳课已开放预约。",
+            "模拟动态 · 课程更新",
+            media=[{"type": "image", "url": demo_asset("gym-b.jpg"), "name": "demo-gym-b.jpg"}],
+        ),
         "post-gym-c-1": make_post(
             "post-gym-c-1",
             "gym-demo-c",
             75,
             "海景跑步区今晚延长到 23:30，适合测试夜间训练场景。",
             "模拟动态 · 夜场开放",
-            media=[{"type": "image", "url": demo_image("海景夜训", "#283745", "#66d0b8"), "name": "demo-gym-c.jpg"}],
+            media=[{"type": "image", "url": demo_asset("gym-c.jpg"), "name": "demo-gym-c.jpg"}],
             likes=["enthusiast-demo-a"],
         ),
         "post-gym-d-1": make_post(
@@ -3097,7 +3129,7 @@ def initial_state():
             160,
             "自由重量区新调了灯光和动线，方便测试真实门店展示效果。",
             "模拟动态 · 场馆升级",
-            media=[{"type": "image", "url": demo_image("力量区升级", "#30323b", "#c0a16b"), "name": "demo-gym-d.jpg"}],
+            media=[{"type": "image", "url": demo_asset("gym-d.jpg"), "name": "demo-gym-d.jpg"}],
         ),
         "post-coach-a-1": make_post("post-coach-a-1", "coach-demo-a", 30, "模拟教练 A 今晚开放两个私教档期，方便测试即时预约。", "模拟动态 · 即时空闲", likes=["enthusiast-demo-a"]),
         "post-coach-a-2": make_post(
@@ -3106,12 +3138,34 @@ def initial_state():
             24 * 60,
             "整理了一份模拟学员常见动作错误清单。",
             "模拟动态 · 训练干货",
-            media=[{"type": "image", "url": demo_image("动作纠正", "#293b72", "#6a82fb"), "name": "demo-coach-a.jpg"}],
+            media=[{"type": "image", "url": demo_asset("coach-a.jpg"), "name": "demo-coach-a.jpg"}],
             comments=[{"id": "comment-coach-a-1", "authorProfileId": "enthusiast-demo-a", "text": "这个清单很实用，已收藏。", "createdAt": iso_at(20 * 60)}],
         ),
-        "post-coach-b-1": make_post("post-coach-b-1", "coach-demo-b", 6 * 60, "今天新增了两个康复评估时段，可以直接预约。", "模拟动态 · 档期开放"),
-        "post-coach-c-1": make_post("post-coach-c-1", "coach-demo-c", 45, "本周新开了一组 4 人力量训练营，方便测试多种定价模式。", "模拟动态 · 训练营上新", likes=["enthusiast-demo-a"]),
-        "post-coach-d-1": make_post("post-coach-d-1", "coach-demo-d", 120, "新增了 20:30 的晚间塑形档期，方便测试即时预约和私信咨询。", "模拟动态 · 晚间时段"),
+        "post-coach-b-1": make_post(
+            "post-coach-b-1",
+            "coach-demo-b",
+            6 * 60,
+            "今天新增了两个康复评估时段，可以直接预约。",
+            "模拟动态 · 档期开放",
+            media=[{"type": "image", "url": demo_asset("coach-b.jpg"), "name": "demo-coach-b.jpg"}],
+        ),
+        "post-coach-c-1": make_post(
+            "post-coach-c-1",
+            "coach-demo-c",
+            45,
+            "本周新开了一组 4 人力量训练营，方便测试多种定价模式。",
+            "模拟动态 · 训练营上新",
+            media=[{"type": "image", "url": demo_asset("coach-c.jpg"), "name": "demo-coach-c.jpg"}],
+            likes=["enthusiast-demo-a"],
+        ),
+        "post-coach-d-1": make_post(
+            "post-coach-d-1",
+            "coach-demo-d",
+            120,
+            "新增了 20:30 的晚间塑形档期，方便测试即时预约和私信咨询。",
+            "模拟动态 · 晚间时段",
+            media=[{"type": "image", "url": demo_asset("coach-d.jpg"), "name": "demo-coach-d.jpg"}],
+        ),
     }
 
     follows = [
@@ -3847,6 +3901,21 @@ def bootstrap_response(state, session):
         "notifications": serialize_notifications(state, current_actor_profile_id),
         "bookings": serialize_bookings(state, session),
         "threads": serialize_threads(state, current_actor_profile_id),
+    }
+
+
+def compact_post_interaction_response(state, session, post):
+    current_actor_profile_id = session.get("currentActorProfileId")
+    current_actor_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
+    return {
+        "ok": True,
+        "sessionId": session["id"],
+        "post": serialize_post(state, post, current_actor_profile_id),
+        "favoritePostIds": sorted(
+            str(item.get("postId") or "")
+            for item in state.get("postFavorites", [])
+            if item.get("sourceProfileId") in current_actor_alias_ids and item.get("postId")
+        ),
     }
 
 
@@ -5192,6 +5261,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     likes.remove(actor)
                 else:
                     likes.append(actor)
+                if payload.get("compact"):
+                    return compact_post_interaction_response(state, session, post)
                 return bootstrap_response(state, session)
             try:
                 self._write_json(self._with_state(action))
@@ -5228,6 +5299,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         }
                     )
                 normalize_post_favorites(state)
+                if payload.get("compact"):
+                    return compact_post_interaction_response(state, session, post)
                 return bootstrap_response(state, session)
 
             try:

@@ -293,6 +293,9 @@ const DEFAULT_MEDIA_LIMITS = Object.freeze({
   thumbnailBytes: 2 * 1024 * 1024,
 });
 
+const DEMO_ASSET_BASE = "assets/demo/";
+const demoAsset = (name) => `${DEMO_ASSET_BASE}${name}`;
+
 function createDemoImage(title, accentA, accentB) {
   const isCoachScene = /教练|私教|普拉提|塑形|动作|训练/.test(title || "");
   const svg = `
@@ -430,8 +433,8 @@ const DEMO_PROFILE_PATCHES = {
   "gym-demo-a": {
     name: "模拟健身房 A · 万象燃炼馆",
     avatar: "万",
-    avatarImage: createGymAvatar({ bgA: "#1f2a34", bgB: "#748ca2", accent: "#f28c28" }),
-    coverImage: createDemoImage("万象燃炼馆", "#1f2a34", "#f28c28"),
+    avatarImage: demoAsset("gym-a-avatar.jpg"),
+    coverImage: demoAsset("gym-a.jpg"),
     bio: "模拟门店，位于厦门万象城商圈，用于测试真实场馆照片、定价、预约、评分和主页展示。",
     shortDesc: "万象城商圈器械馆，支持月卡、次卡和团课测试。",
     price: "¥169/月起",
@@ -447,8 +450,8 @@ const DEMO_PROFILE_PATCHES = {
   "gym-demo-b": {
     name: "模拟健身房 B · 轻氧塑能馆",
     avatar: "氧",
-    avatarImage: createGymAvatar({ bgA: "#214d64", bgB: "#76aeca", accent: "#59d4ff" }),
-    coverImage: createDemoImage("轻氧塑能馆", "#214d64", "#59d4ff"),
+    avatarImage: demoAsset("gym-b-avatar.jpg"),
+    coverImage: demoAsset("gym-b.jpg"),
     bio: "模拟精品训练馆，主打轻氧有氧和恢复类课程，适合测试价格展示和课程预约。",
     shortDesc: "精品有氧空间，适合恢复训练和轻团课测试。",
     price: "¥138/月起",
@@ -464,8 +467,8 @@ const DEMO_PROFILE_PATCHES = {
   "coach-demo-a": {
     name: "模拟教练 A · 林燃",
     avatar: "林",
-    avatarImage: createPortraitAvatar({ skin: "#efc3a4", hair: "#281d17", shirt: "#17181d", bgA: "#d9e0ea", bgB: "#8b98ad" }),
-    coverImage: createDemoImage("力量私教", "#293b72", "#6a82fb"),
+    avatarImage: demoAsset("coach-a-avatar.jpg"),
+    coverImage: demoAsset("coach-a.jpg"),
     bio: "模拟私教，擅长力量提升和减脂塑形，用于测试真实头像、课时定价、预约和私信。",
     shortDesc: "力量提升、减脂塑形，适合测试私教预约。",
     price: "¥299/小时",
@@ -481,8 +484,8 @@ const DEMO_PROFILE_PATCHES = {
   "coach-demo-b": {
     name: "模拟教练 B · 周芮",
     avatar: "周",
-    avatarImage: createPortraitAvatar({ skin: "#f2c8ad", hair: "#5c3e2e", shirt: "#5f7fa0", bgA: "#f3dbc9", bgB: "#d2a48d" }),
-    coverImage: createDemoImage("普拉提恢复", "#a679c7", "#f0a36f"),
+    avatarImage: demoAsset("coach-b-avatar.jpg"),
+    coverImage: demoAsset("coach-b.jpg"),
     bio: "模拟女教练，主打体态改善和普拉提恢复，方便测试女性教练主页、评分和动态流。",
     shortDesc: "体态改善、核心激活，适合恢复和普拉提测试。",
     price: "¥268/小时",
@@ -497,14 +500,49 @@ const DEMO_PROFILE_PATCHES = {
   }
 };
 
+const DEMO_POST_MEDIA = {
+  "gym-demo-a": [
+    { type: "image", url: demoAsset("gym-a.jpg"), name: "demo-gym-a.jpg" },
+    { type: "image", url: demoAsset("gym-d.jpg"), name: "demo-gym-a-free-weight.jpg" }
+  ],
+  "gym-demo-b": [{ type: "image", url: demoAsset("gym-b.jpg"), name: "demo-gym-b.jpg" }],
+  "gym-demo-c": [{ type: "image", url: demoAsset("gym-c.jpg"), name: "demo-gym-c.jpg" }],
+  "gym-demo-d": [{ type: "image", url: demoAsset("gym-d.jpg"), name: "demo-gym-d.jpg" }],
+  "coach-demo-a": [{ type: "image", url: demoAsset("coach-a.jpg"), name: "demo-coach-a.jpg" }],
+  "coach-demo-b": [{ type: "image", url: demoAsset("coach-b.jpg"), name: "demo-coach-b.jpg" }],
+  "coach-demo-c": [{ type: "image", url: demoAsset("coach-c.jpg"), name: "demo-coach-c.jpg" }],
+  "coach-demo-d": [{ type: "image", url: demoAsset("coach-d.jpg"), name: "demo-coach-d.jpg" }]
+};
+
+function normalizeDemoPostMedia(profile) {
+  const demoMedia = DEMO_POST_MEDIA[profile?.id];
+  if (!demoMedia || !Array.isArray(profile.posts)) return profile;
+  return {
+    ...profile,
+    posts: profile.posts.map((post, index) => {
+      if (!post?.id) return post;
+      const shouldShowMedia =
+        isMediaPost(post) ||
+        profile.id !== "gym-demo-a" ||
+        /器械|设备|场馆|夜训|力量|塑形|训练|档期|课程/.test(`${post.content || ""}${post.meta || ""}`) ||
+        index > 0;
+      if (!shouldShowMedia) return post;
+      return {
+        ...post,
+        media: demoMedia.map((item) => ({ ...item }))
+      };
+    })
+  };
+}
+
 function applyDemoProfilePatch(profile) {
   if (!profile) return profile;
   const patch = DEMO_PROFILE_PATCHES[profile.id];
-  if (!patch) return profile;
-  return {
+  if (!patch) return normalizeDemoPostMedia(profile);
+  return normalizeDemoPostMedia({
     ...profile,
     ...patch
-  };
+  });
 }
 
 function isGeneratedInlineAvatar(url) {
@@ -808,8 +846,8 @@ function createSupplementalDemoProfiles() {
       name: "模拟健身房 C · Skyline Strength",
       handle: "@demo.gym.c",
       avatar: "天",
-      avatarImage: createGymAvatar({ bgA: "#283745", bgB: "#8fb2cf", accent: "#66d0b8" }),
-      coverImage: createDemoImage("Skyline Strength", "#283745", "#66d0b8"),
+      avatarImage: demoAsset("gym-c-avatar.jpg"),
+      coverImage: demoAsset("gym-c.jpg"),
       city: "厦门",
       locationLabel: "厦门 · 思明区 · 环岛路",
       lat: 24.4576,
@@ -839,7 +877,7 @@ function createSupplementalDemoProfiles() {
           media: [
             {
               type: "image",
-              url: createDemoImage("海景夜训", "#283745", "#66d0b8"),
+              url: demoAsset("gym-c.jpg"),
               name: "demo-gym-c.jpg"
             }
           ]
@@ -855,8 +893,8 @@ function createSupplementalDemoProfiles() {
       name: "模拟健身房 D · 城市力量馆",
       handle: "@demo.gym.d",
       avatar: "城",
-      avatarImage: createGymAvatar({ bgA: "#30323b", bgB: "#c0a16b", accent: "#f28c28" }),
-      coverImage: createDemoImage("城市力量馆", "#30323b", "#c0a16b"),
+      avatarImage: demoAsset("gym-d-avatar.jpg"),
+      coverImage: demoAsset("gym-d.jpg"),
       city: "厦门",
       locationLabel: "厦门 · 湖里区 · SM 商圈",
       lat: 24.5088,
@@ -886,7 +924,7 @@ function createSupplementalDemoProfiles() {
           media: [
             {
               type: "image",
-              url: createDemoImage("力量区升级", "#30323b", "#c0a16b"),
+              url: demoAsset("gym-d.jpg"),
               name: "demo-gym-d.jpg"
             }
           ]
@@ -902,8 +940,8 @@ function createSupplementalDemoProfiles() {
       name: "模拟教练 C · 陈拓",
       handle: "@demo.coach.c",
       avatar: "陈",
-      avatarImage: createPortraitAvatar({ skin: "#efc1a1", hair: "#30221a", shirt: "#243247", bgA: "#d9e4ef", bgB: "#849bb5" }),
-      coverImage: createDemoImage("进阶力量课", "#243247", "#6a82fb"),
+      avatarImage: demoAsset("coach-c-avatar.jpg"),
+      coverImage: demoAsset("coach-c.jpg"),
       city: "厦门",
       locationLabel: "厦门 · 湖里区 · 五缘湾",
       lat: 24.5223,
@@ -928,7 +966,8 @@ function createSupplementalDemoProfiles() {
         {
           time: "45 分钟前",
           content: "本周新开了一组 4 人力量训练营，方便测试多种定价模式。",
-          meta: "模拟动态 · 训练营上新"
+          meta: "模拟动态 · 训练营上新",
+          media: [{ type: "image", url: demoAsset("coach-c.jpg"), name: "demo-coach-c.jpg" }]
         }
       ],
       reviews: [
@@ -941,8 +980,8 @@ function createSupplementalDemoProfiles() {
       name: "模拟教练 D · Mia 沈",
       handle: "@demo.coach.d",
       avatar: "M",
-      avatarImage: createPortraitAvatar({ skin: "#f1c4a7", hair: "#4d3328", shirt: "#6f4ea1", bgA: "#f1dfef", bgB: "#c99ad8" }),
-      coverImage: createDemoImage("晚间塑形", "#6f4ea1", "#f0a36f"),
+      avatarImage: demoAsset("coach-d-avatar.jpg"),
+      coverImage: demoAsset("coach-d.jpg"),
       city: "厦门",
       locationLabel: "厦门 · 思明区 · 明发商业广场",
       lat: 24.4714,
@@ -967,7 +1006,8 @@ function createSupplementalDemoProfiles() {
         {
           time: "2 小时前",
           content: "新增了 20:30 的晚间塑形档期，方便测试即时预约和私信咨询。",
-          meta: "模拟动态 · 晚间时段"
+          meta: "模拟动态 · 晚间时段",
+          media: [{ type: "image", url: demoAsset("coach-d.jpg"), name: "demo-coach-d.jpg" }]
         }
       ],
       reviews: [
@@ -987,14 +1027,52 @@ function optimizeRemoteImageUrl(url, kind = "avatar") {
   try {
     const remoteUrl = new URL(url);
     if (remoteUrl.hostname !== "images.pexels.com") return url;
-    if (kind === "avatar") {
-      return createPortraitAvatar({ skin: "#f0c4a8", hair: "#3c2b21", shirt: "#20242b", bgA: "#f2e0d0", bgB: "#d2a16e" });
+    const localPexelsMap = {
+      "6046979": "gym-a",
+      "35215412": "gym-b",
+      "28455437": "coach-a",
+      "14055666": "coach-b",
+      "29149075": "gym-c",
+      "4716817": "gym-d",
+      "11327778": "coach-c",
+      "20418608": "coach-d"
+    };
+    const matchedId = Object.keys(localPexelsMap).find((photoId) => remoteUrl.pathname.includes(photoId));
+    if (matchedId) {
+      const assetName = localPexelsMap[matchedId];
+      return demoAsset(kind === "avatar" ? `${assetName}-avatar.jpg` : `${assetName}.jpg`);
     }
-    return createDemoImage("FitHub 训练瞬间", "#f4efe7", "#f28c28");
+    return kind === "avatar" ? createDefaultAvatar("enthusiast", "") : createDemoImage("FitHub 训练瞬间", "#f4efe7", "#f28c28");
 
   } catch (_error) {
     return url;
   }
+}
+
+function createNeutralAvatar(role = "enthusiast") {
+  const isGym = role === "gym";
+  const badge = isGym
+    ? `<path d="M105 170h110v74H105z" fill="#eef4f8"/><path d="M126 170v74M160 170v74M194 170v74M105 204h110" stroke="#c7d3dc" stroke-width="8"/>`
+    : `<circle cx="160" cy="126" r="48" fill="#f4f7f9"/><path d="M78 286c13-64 46-97 82-97s69 33 82 97" fill="#f4f7f9"/>`;
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320">
+      <defs>
+        <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#eef3f7"/>
+          <stop offset="100%" stop-color="#cbd8e3"/>
+        </linearGradient>
+        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#7d8b98" flood-opacity="0.18"/>
+        </filter>
+      </defs>
+      <rect width="320" height="320" rx="62" fill="url(#bg)"/>
+      <circle cx="244" cy="74" r="58" fill="rgba(255,255,255,0.46)"/>
+      <circle cx="88" cy="256" r="110" fill="rgba(255,255,255,0.24)"/>
+      <g filter="url(#shadow)">${badge}</g>
+      <path d="M96 286h128" stroke="rgba(117,132,146,0.32)" stroke-width="10" stroke-linecap="round"/>
+    </svg>
+  `;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
 function hydrateAsyncImages(root = document) {
@@ -1029,15 +1107,7 @@ function hydrateAsyncImages(root = document) {
 }
 
 function createDefaultAvatar(role, name) {
-  if (role === "gym") {
-    return createGymAvatar({ bgA: "#293744", bgB: "#7a97af", accent: "#f28c28" });
-  }
-
-  const palettes = {
-    enthusiast: { skin: "#e8c7ad", hair: "#4d4038", shirt: "#2f3a46", bgA: "#eef2f5", bgB: "#cfd9e2" },
-    coach: { skin: "#efc1a1", hair: "#2f241d", shirt: "#1f2125", bgA: "#dfe5ef", bgB: "#8d9bb3" }
-  };
-  return createPortraitAvatar(palettes[role] || palettes.enthusiast);
+  return createNeutralAvatar(role || "enthusiast");
 }
 
 function createInitialProfiles() {
@@ -2494,6 +2564,36 @@ async function postAndSync(path, body, { keepOverlay = false } = {}) {
   return payload;
 }
 
+async function postWithoutStateSync(path, body) {
+  const requestBody = {
+    sessionId: state.sessionId || getStoredSessionId(),
+    compact: true,
+    ...body
+  };
+
+  try {
+    return await apiRequest(path, {
+      method: "POST",
+      body: requestBody
+    });
+  } catch (error) {
+    if ((getStoredAccounts().length || getStoredProfileBackups().length) && shouldRetryAfterRestore(error)) {
+      const restored = await maybeRestoreRememberedAccounts({ force: true });
+      if (restored) {
+        return apiRequest(path, {
+          method: "POST",
+          body: {
+            sessionId: state.sessionId || getStoredSessionId(),
+            compact: true,
+            ...body
+          }
+        });
+      }
+    }
+    throw error;
+  }
+}
+
 function clearStoredAuthArtifacts() {
   [
     SESSION_STORAGE_KEY,
@@ -3007,6 +3107,16 @@ function getPostById(postId) {
     : { profile: null, post: favoriteEntry };
 }
 
+function getPayloadPostById(payload, postId) {
+  if (payload?.post?.id === postId) return payload.post;
+  for (const profile of payload?.profiles || []) {
+    const post = (profile.posts || []).find((item) => item.id === postId);
+    if (post) return post;
+  }
+  const favoriteEntry = (payload?.favoritePosts || []).find((item) => item?.post?.id === postId || item?.id === postId);
+  return favoriteEntry?.post || favoriteEntry || null;
+}
+
 function updatePostCollections(postId, updater) {
   state.profiles = state.profiles.map((profile) => {
     if (!Array.isArray(profile.posts) || !profile.posts.some((post) => post.id === postId)) return profile;
@@ -3048,11 +3158,16 @@ function refreshPostLikeButtons(postId) {
     const liked = Boolean(found.post.likedByCurrentActor);
     button.classList.toggle("is-active", liked);
     button.setAttribute("aria-label", liked ? "取消点赞" : "点赞");
-    button.innerHTML = `
-      ${renderPostActionGlyph("like", liked)}
-      <span class="post-action-number">${found.post.likeCount || 0}</span>
-    `;
+    const number = button.querySelector(".post-action-number");
+    if (number) {
+      number.textContent = String(found.post.likeCount || 0);
+    }
   });
+}
+
+function getPostFavoriteDisplayCount(post) {
+  const favoriteCount = Math.max(0, Number(post?.favoriteCount || 0));
+  return state.favoritePostIds.has(post?.id) ? Math.max(1, favoriteCount) : favoriteCount;
 }
 
 function applyPostFavoriteState(postId, favorited) {
@@ -3086,15 +3201,16 @@ function applyPostFavoriteState(postId, favorited) {
 }
 
 function refreshPostFavoriteButtons(postId) {
+  const found = getPostById(postId);
   document.querySelectorAll("[data-favorite-post]").forEach((button) => {
     if (button.dataset.favoritePost !== postId) return;
     const favorited = state.favoritePostIds.has(postId);
     button.classList.toggle("is-active", favorited);
     button.setAttribute("aria-label", favorited ? "取消收藏" : "收藏");
-    button.innerHTML = `
-      ${renderPostActionGlyph("favorite", favorited)}
-      <span class="post-action-number">${getPostById(postId)?.post?.favoriteCount || 0}</span>
-    `;
+    const number = button.querySelector(".post-action-number");
+    if (number) {
+      number.textContent = String(getPostFavoriteDisplayCount(found?.post));
+    }
   });
 }
 
@@ -3107,14 +3223,22 @@ async function flushPostLikeQueue(postId) {
 
   let failed = null;
   try {
-    await postAndSync(`${API_BASE}/post/like`, { postId }, { keepOverlay: Boolean(state.overlayMode) });
-    const confirmed = getPostById(postId)?.post;
+    const payload = await postWithoutStateSync(`${API_BASE}/post/like`, { postId });
+    const confirmed = getPayloadPostById(payload, postId);
     if (confirmed) {
       mutation.confirmedLiked = Boolean(confirmed.likedByCurrentActor);
       mutation.confirmedLikeCount = Number(confirmed.likeCount || 0);
+    } else {
+      mutation.confirmedLiked = !mutation.confirmedLiked;
+      mutation.confirmedLikeCount = Math.max(
+        0,
+        Number(mutation.confirmedLikeCount || 0) + (mutation.confirmedLiked ? 1 : -1)
+      );
     }
     if (mutation.queued > 0) {
       applyPostLikeState(postId, mutation.desiredLiked, mutation.desiredLikeCount);
+    } else {
+      applyPostLikeState(postId, mutation.confirmedLiked, mutation.confirmedLikeCount);
     }
   } catch (error) {
     failed = error;
@@ -3152,10 +3276,21 @@ async function flushPostFavoriteQueue(postId) {
 
   let failed = null;
   try {
-    await postAndSync(`${API_BASE}/post/favorite-toggle`, { postId }, { keepOverlay: Boolean(state.overlayMode) });
-    mutation.confirmedFavorited = state.favoritePostIds.has(postId);
+    const payload = await postWithoutStateSync(`${API_BASE}/post/favorite-toggle`, { postId });
+    const confirmed = getPayloadPostById(payload, postId);
+    mutation.confirmedFavorited = Array.isArray(payload?.favoritePostIds)
+      ? payload.favoritePostIds.includes(postId)
+      : !mutation.confirmedFavorited;
+    if (confirmed) {
+      updatePostCollections(postId, (post) => ({
+        ...post,
+        favoriteCount: Math.max(0, Number(confirmed.favoriteCount || 0))
+      }));
+    }
     if (mutation.queued > 0) {
       applyPostFavoriteState(postId, mutation.desiredFavorited);
+    } else {
+      applyPostFavoriteState(postId, mutation.confirmedFavorited);
     }
   } catch (error) {
     failed = error;
@@ -5210,15 +5345,11 @@ function renderPostActionGlyph(kind, active = false) {
   const common = 'class="post-action-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"';
   if (kind === "like") {
     const heartPath = "M12 20.6l-.72-.66C5.72 14.87 2.4 11.83 2.4 8.09 2.4 5.19 4.63 3 7.45 3c1.61 0 3.15.75 4.15 1.94C12.6 3.75 14.14 3 15.75 3 18.57 3 20.8 5.19 20.8 8.09c0 3.74-3.32 6.78-8.88 11.85l-.72.66z";
-    return active
-      ? `<svg ${common}><path d="${heartPath}" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`
-      : `<svg ${common}><path d="${heartPath}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    return `<svg ${common}><path d="${heartPath}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   }
 
   if (kind === "favorite") {
-    return active
-      ? `<svg ${common}><path d="M12 3.8l2.54 5.14 5.67.82-4.11 4 0.97 5.64L12 16.78l-5.07 2.62 0.97-5.64-4.11-4 5.67-.82L12 3.8z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>`
-      : `<svg ${common}><path d="M12 3.8l2.54 5.14 5.67.82-4.11 4 0.97 5.64L12 16.78l-5.07 2.62 0.97-5.64-4.11-4 5.67-.82L12 3.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+    return `<svg ${common}><path d="M12 3.8l2.54 5.14 5.67.82-4.11 4 0.97 5.64L12 16.78l-5.07 2.62 0.97-5.64-4.11-4 5.67-.82L12 3.8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
   }
 
   return `<svg ${common}><path d="M6 7.2h12a3 3 0 0 1 3 3v5.1a3 3 0 0 1-3 3H9.8l-4.6 3v-3H6a3 3 0 0 1-3-3v-5.1a3 3 0 0 1 3-3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -5278,7 +5409,7 @@ function renderPostCard(profile, post, options = {}) {
         </button>
         ${
           canFavorite
-            ? `<button class="post-action-button post-action-button--icon post-action-button--favorite ${favorited ? "is-active" : ""}" data-favorite-post="${post.id}" type="button" aria-label="${favorited ? "取消收藏" : "收藏"}">${renderPostActionGlyph("favorite", favorited)}<span class="post-action-number">${post.favoriteCount || 0}</span></button>`
+            ? `<button class="post-action-button post-action-button--icon post-action-button--favorite ${favorited ? "is-active" : ""}" data-favorite-post="${post.id}" type="button" aria-label="${favorited ? "取消收藏" : "收藏"}">${renderPostActionGlyph("favorite", favorited)}<span class="post-action-number">${getPostFavoriteDisplayCount(post)}</span></button>`
             : ""
         }
         <span class="post-action-button post-action-button--icon post-action-button--count">${renderPostActionGlyph("comment", false)}<span class="post-action-number">${post.comments?.length || 0}</span></span>
@@ -10176,7 +10307,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260424-1`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260424-2`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

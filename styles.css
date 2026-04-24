@@ -3541,6 +3541,15 @@ body.is-workout-live .app {
   color: currentColor;
 }
 
+.post-action-glyph path {
+  transition: fill 120ms ease, stroke 120ms ease;
+}
+
+.post-action-button.is-active .post-action-glyph path {
+  fill: currentColor;
+  stroke: currentColor;
+}
+
 .post-action-count {
   padding: 8px 12px;
   border-radius: 999px;
