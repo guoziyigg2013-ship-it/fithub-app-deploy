@@ -211,6 +211,7 @@ class FitHubApiTestCase(unittest.TestCase):
                 "FITHUB_SMS_DEV_MODE": "true",
                 "SUPABASE_URL": "",
                 "SUPABASE_SERVICE_ROLE_KEY": "",
+                "FITHUB_MEDIA_MAINTENANCE_TOKEN": "test-maintenance-token",
                 "PYTHONUNBUFFERED": "1",
             }
         )

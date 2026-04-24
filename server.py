@@ -54,6 +54,8 @@ SUPABASE_MEDIA_BUCKET = (os.getenv("FITHUB_MEDIA_BUCKET") or "fithub-media").str
 MEDIA_IMAGE_LIMIT_BYTES = int(os.getenv("FITHUB_IMAGE_UPLOAD_LIMIT_BYTES") or str(10 * 1024 * 1024))
 MEDIA_VIDEO_LIMIT_BYTES = int(os.getenv("FITHUB_VIDEO_UPLOAD_LIMIT_BYTES") or str(8 * 1024 * 1024))
 MEDIA_THUMB_LIMIT_BYTES = int(os.getenv("FITHUB_THUMB_UPLOAD_LIMIT_BYTES") or str(2 * 1024 * 1024))
+MEDIA_MAINTENANCE_TOKEN = (os.getenv("FITHUB_MEDIA_MAINTENANCE_TOKEN") or "").strip()
+PUBLIC_API_ORIGIN = (os.getenv("FITHUB_PUBLIC_API_ORIGIN") or "").strip().rstrip("/")
 SMS_PROVIDER = (os.getenv("FITHUB_SMS_PROVIDER") or "").strip().lower()
 SMS_CODE_LENGTH = int(os.getenv("FITHUB_SMS_CODE_LENGTH") or "6")
 SMS_CODE_TTL_SECONDS = int(os.getenv("FITHUB_SMS_CODE_TTL_SECONDS") or "300")
@@ -111,6 +113,12 @@ def runtime_config():
         "smsEnabled": sms_verification_enabled(),
         "smsProvider": SMS_PROVIDER if sms_provider_configured() else ("debug" if SMS_DEV_MODE else ""),
     }
+
+
+def client_runtime_config():
+    config = {"apiOrigin": PUBLIC_API_ORIGIN}
+    config.update(runtime_config())
+    return config
 
 DEFAULT_POSITION = {
     "key": "xiamen",
@@ -919,6 +927,111 @@ def collect_session_draft_media_paths(state):
             if path:
                 paths.add(path)
     return paths
+
+
+def derive_media_object_timestamp(path, entry):
+    for key in ("updated_at", "created_at", "last_accessed_at"):
+        parsed = parse_optional_iso_datetime(entry.get(key))
+        if parsed:
+            return parsed
+
+    parts = [segment for segment in str(path or "").split("/") if segment]
+    if len(parts) >= 4 and all(part.isdigit() for part in parts[1:4]):
+        try:
+            year, month, day = (int(parts[1]), int(parts[2]), int(parts[3]))
+            return now_utc().replace(year=year, month=month, day=day, hour=0, minute=0, second=0, microsecond=0)
+        except ValueError:
+            return None
+    return None
+
+
+def collect_media_bucket_inventory():
+    inventory = []
+    for entry in iter_media_bucket_objects():
+        path = str(entry.get("path") or "").strip().lstrip("/")
+        if not path:
+            continue
+        inventory.append(
+            {
+                "path": path,
+                "createdAt": derive_media_object_timestamp(path, entry),
+                "sizeBytes": int((entry.get("metadata") or {}).get("size") or entry.get("size") or 0),
+            }
+        )
+    return inventory
+
+
+def classify_media_bucket_objects(state, stale_after_hours=24):
+    referenced = collect_referenced_media_paths(state)
+    draft_paths = collect_session_draft_media_paths(state)
+    cutoff = now_utc() - timedelta(hours=max(1, int(stale_after_hours or 24)))
+    report = {
+        "referenced": [],
+        "activeDrafts": [],
+        "recentUnreferenced": [],
+        "orphanCandidates": [],
+    }
+
+    for item in collect_media_bucket_inventory():
+        path = item["path"]
+        created_at = item["createdAt"]
+        serialized = {
+            **item,
+            "createdAt": created_at.isoformat() if created_at else "",
+        }
+        if path in referenced:
+            report["referenced"].append(serialized)
+        elif path in draft_paths:
+            report["activeDrafts"].append(serialized)
+        elif created_at and created_at >= cutoff:
+            report["recentUnreferenced"].append(serialized)
+        else:
+            report["orphanCandidates"].append(serialized)
+    return report
+
+
+def summarize_media_report(report):
+    summary = {}
+    for key, items in report.items():
+        total_bytes = sum(int(item.get("sizeBytes") or 0) for item in items)
+        by_category = {}
+        for item in items:
+            category = str(item.get("path") or "unknown").split("/", 1)[0] or "unknown"
+            by_category[category] = by_category.get(category, 0) + 1
+        summary[key] = {
+            "count": len(items),
+            "sizeBytes": total_bytes,
+            "byCategory": by_category,
+        }
+    return summary
+
+
+def build_media_maintenance_report(state, *, stale_after_hours=24, delete=False):
+    if not supabase_media_storage_enabled():
+        return {
+            "enabled": False,
+            "deletedPaths": [],
+            "summary": {},
+            "report": {
+                "referenced": [],
+                "activeDrafts": [],
+                "recentUnreferenced": [],
+                "orphanCandidates": [],
+            },
+        }
+
+    report = classify_media_bucket_objects(state, stale_after_hours)
+    deleted_paths = []
+    if delete:
+        for item in report["orphanCandidates"]:
+            deleted_paths.extend(delete_media_asset({"storagePath": item["path"]}))
+
+    return {
+        "enabled": True,
+        "deletedPaths": deleted_paths,
+        "summary": summarize_media_report(report),
+        "report": report,
+    }
 
 
 def is_demo_profile_id(profile_id):
@@ -2707,8 +2820,8 @@ def initial_state():
         {
             "name": "模拟健身房 A · 万象燃炼馆",
             "avatar": "万",
-            "avatarImage": "https://images.pexels.com/photos/6046979/pexels-photo-6046979.png?auto=compress&cs=tinysrgb&fit=crop&w=160&h=160&dpr=1",
-            "coverImage": "https://images.pexels.com/photos/6046979/pexels-photo-6046979.png?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+            "avatarImage": gym_avatar(bg_a="#1f2a34", bg_b="#748ca2", accent="#f28c28"),
+            "coverImage": demo_image("万象燃炼馆", "#1f2a34", "#f28c28"),
             "bio": "模拟门店，位于厦门万象城商圈，用于测试真实场馆照片、定价、预约、评分和主页展示。",
             "shortDesc": "万象城商圈器械馆，支持月卡、次卡和团课测试。",
             "price": "¥169/月起",
@@ -2726,8 +2839,8 @@ def initial_state():
         {
             "name": "模拟健身房 B · 轻氧塑能馆",
             "avatar": "氧",
-            "avatarImage": "https://images.pexels.com/photos/35215412/pexels-photo-35215412.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=160&h=160&dpr=1",
-            "coverImage": "https://images.pexels.com/photos/35215412/pexels-photo-35215412.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+            "avatarImage": gym_avatar(bg_a="#214d64", bg_b="#76aeca", accent="#59d4ff"),
+            "coverImage": demo_image("轻氧塑能馆", "#214d64", "#59d4ff"),
             "bio": "模拟精品训练馆，主打轻氧有氧和恢复类课程，适合测试价格展示和课程预约。",
             "shortDesc": "精品有氧空间，适合恢复训练和轻团课测试。",
             "tags": ["模拟场馆", "精品馆", "恢复"],
@@ -2742,8 +2855,8 @@ def initial_state():
     profiles["coach-demo-a"].update(
         {
             "name": "模拟教练 A · 林燃",
-            "avatarImage": "https://images.pexels.com/photos/28455437/pexels-photo-28455437.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=180&h=180&dpr=1",
-            "coverImage": "https://images.pexels.com/photos/28455437/pexels-photo-28455437.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+            "avatarImage": portrait_avatar(skin="#efc3a4", hair="#281d17", shirt="#17181d", bg_a="#d9e0ea", bg_b="#8b98ad"),
+            "coverImage": demo_image("力量私教", "#293b72", "#6a82fb"),
             "bio": "模拟私教，擅长力量提升和减脂塑形，用于测试真实头像、课时定价、预约和私信。",
             "shortDesc": "力量提升、减脂塑形，适合测试私教预约。",
             "price": "¥299/小时",
@@ -2759,8 +2872,8 @@ def initial_state():
     profiles["coach-demo-b"].update(
         {
             "name": "模拟教练 B · 周芮",
-            "avatarImage": "https://images.pexels.com/photos/14055666/pexels-photo-14055666.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=180&h=180&dpr=1",
-            "coverImage": "https://images.pexels.com/photos/14055666/pexels-photo-14055666.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+            "avatarImage": portrait_avatar(skin="#f2c8ad", hair="#5c3e2e", shirt="#5f7fa0", bg_a="#f3dbc9", bg_b="#d2a48d"),
+            "coverImage": demo_image("普拉提恢复", "#a679c7", "#f0a36f"),
             "bio": "模拟女教练，主打体态改善和普拉提恢复，方便测试女性教练主页、评分和动态流。",
             "shortDesc": "体态改善、核心激活，适合恢复和普拉提测试。",
             "price": "¥268/小时",
@@ -2779,8 +2892,8 @@ def initial_state():
         name="模拟健身房 C · Skyline Strength",
         handle="@demo.gym.c",
         avatar="天",
-        avatarImage="https://images.pexels.com/photos/29149075/pexels-photo-29149075.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=160&h=160&dpr=1",
-        coverImage="https://images.pexels.com/photos/29149075/pexels-photo-29149075.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+        avatarImage=gym_avatar(bg_a="#283745", bg_b="#8fb2cf", accent="#66d0b8"),
+        coverImage=demo_image("Skyline Strength", "#283745", "#66d0b8"),
         city="厦门",
         locationLabel="厦门 · 思明区 · 环岛路",
         lat=24.4576,
@@ -2807,8 +2920,8 @@ def initial_state():
         name="模拟健身房 D · 城市力量馆",
         handle="@demo.gym.d",
         avatar="城",
-        avatarImage="https://images.pexels.com/photos/4716817/pexels-photo-4716817.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=160&h=160&dpr=1",
-        coverImage="https://images.pexels.com/photos/4716817/pexels-photo-4716817.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+        avatarImage=gym_avatar(bg_a="#30323b", bg_b="#c0a16b", accent="#f28c28"),
+        coverImage=demo_image("城市力量馆", "#30323b", "#c0a16b"),
         city="厦门",
         locationLabel="厦门 · 湖里区 · SM 商圈",
         lat=24.5088,
@@ -2835,8 +2948,8 @@ def initial_state():
         name="模拟教练 C · 陈拓",
         handle="@demo.coach.c",
         avatar="陈",
-        avatarImage="https://images.pexels.com/photos/11327778/pexels-photo-11327778.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=180&h=180&dpr=1",
-        coverImage="https://images.pexels.com/photos/11327778/pexels-photo-11327778.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+        avatarImage=portrait_avatar(skin="#efc1a1", hair="#30221a", shirt="#243247", bg_a="#d9e4ef", bg_b="#849bb5"),
+        coverImage=demo_image("进阶力量课", "#243247", "#6a82fb"),
         city="厦门",
         locationLabel="厦门 · 湖里区 · 五缘湾",
         lat=24.5223,
@@ -2862,8 +2975,8 @@ def initial_state():
         name="模拟教练 D · Mia 沈",
         handle="@demo.coach.d",
         avatar="M",
-        avatarImage="https://images.pexels.com/photos/20418608/pexels-photo-20418608.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=180&h=180&dpr=1",
-        coverImage="https://images.pexels.com/photos/20418608/pexels-photo-20418608.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+        avatarImage=portrait_avatar(skin="#f1c4a7", hair="#4d3328", shirt="#6f4ea1", bg_a="#f1dfef", bg_b="#c99ad8"),
+        coverImage=demo_image("晚间塑形", "#6f4ea1", "#f0a36f"),
         city="厦门",
         locationLabel="厦门 · 思明区 · 明发商业广场",
         lat=24.4714,
@@ -2909,8 +3022,8 @@ def initial_state():
             "模拟健身房 A 新到一批力量器械，方便测试场馆动态展示。",
             "模拟动态 · 设备更新",
             media=[
-                {"type": "image", "url": "https://images.pexels.com/photos/6046979/pexels-photo-6046979.png?auto=compress&cs=tinysrgb&fit=crop&w=640&h=640&dpr=1", "name": "demo-gym-a-1.jpg"},
-                {"type": "image", "url": "https://images.pexels.com/photos/6050745/pexels-photo-6050745.png?auto=compress&cs=tinysrgb&fit=crop&w=640&h=640&dpr=1", "name": "demo-gym-a-2.jpg"},
+                {"type": "image", "url": demo_image("器械上新", "#f19a3e", "#2f8c88"), "name": "demo-gym-a-1.jpg"},
+                {"type": "image", "url": demo_image("团课教室", "#3a8fd1", "#6cc3a0"), "name": "demo-gym-a-2.jpg"},
             ],
             likes=["enthusiast-demo-a", "enthusiast-demo-b"],
         ),
@@ -2921,7 +3034,7 @@ def initial_state():
             75,
             "海景跑步区今晚延长到 23:30，适合测试夜间训练场景。",
             "模拟动态 · 夜场开放",
-            media=[{"type": "image", "url": "https://images.pexels.com/photos/29149075/pexels-photo-29149075.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=640&dpr=1", "name": "demo-gym-c.jpg"}],
+            media=[{"type": "image", "url": demo_image("海景夜训", "#283745", "#66d0b8"), "name": "demo-gym-c.jpg"}],
             likes=["enthusiast-demo-a"],
         ),
         "post-gym-d-1": make_post(
@@ -2930,7 +3043,7 @@ def initial_state():
             160,
             "自由重量区新调了灯光和动线，方便测试真实门店展示效果。",
             "模拟动态 · 场馆升级",
-            media=[{"type": "image", "url": "https://images.pexels.com/photos/4716817/pexels-photo-4716817.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=640&dpr=1", "name": "demo-gym-d.jpg"}],
+            media=[{"type": "image", "url": demo_image("力量区升级", "#30323b", "#c0a16b"), "name": "demo-gym-d.jpg"}],
         ),
         "post-coach-a-1": make_post("post-coach-a-1", "coach-demo-a", 30, "模拟教练 A 今晚开放两个私教档期，方便测试即时预约。", "模拟动态 · 即时空闲", likes=["enthusiast-demo-a"]),
         "post-coach-a-2": make_post(
@@ -2939,7 +3052,7 @@ def initial_state():
             24 * 60,
             "整理了一份模拟学员常见动作错误清单。",
             "模拟动态 · 训练干货",
-            media=[{"type": "image", "url": "https://images.pexels.com/photos/28455437/pexels-photo-28455437.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=640&dpr=1", "name": "demo-coach-a.jpg"}],
+            media=[{"type": "image", "url": demo_image("动作纠正", "#293b72", "#6a82fb"), "name": "demo-coach-a.jpg"}],
             comments=[{"id": "comment-coach-a-1", "authorProfileId": "enthusiast-demo-a", "text": "这个清单很实用，已收藏。", "createdAt": iso_at(20 * 60)}],
         ),
         "post-coach-b-1": make_post("post-coach-b-1", "coach-demo-b", 6 * 60, "今天新增了两个康复评估时段，可以直接预约。", "模拟动态 · 档期开放"),
@@ -4301,7 +4414,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
     def _read_json(self):
@@ -4926,6 +5039,26 @@ class FitHubHandler(BaseHTTPRequestHandler):
             self._write_json(self._with_state(action))
             return
 
+        if parsed.path == f"{API_PREFIX}/media/maintenance":
+            expected_token = MEDIA_MAINTENANCE_TOKEN
+            provided_token = str(payload.get("token") or "").strip()
+            auth_header = str(self.headers.get("Authorization") or "").strip()
+            if auth_header.lower().startswith("bearer "):
+                provided_token = auth_header[7:].strip()
+            if not expected_token or provided_token != expected_token:
+                self._write_json({"error": "没有权限执行媒体维护。"}, status=HTTPStatus.FORBIDDEN)
+                return
+
+            def action(state):
+                return build_media_maintenance_report(
+                    state,
+                    stale_after_hours=int(payload.get("ageHours") or 24),
+                    delete=bool(payload.get("delete")),
+                )
+
+            self._write_json(self._with_state(action))
+            return
+
         if parsed.path == f"{API_PREFIX}/checkin/create":
             def action(state):
                 session = ensure_session(state, session_id)
@@ -5182,6 +5315,22 @@ class FitHubHandler(BaseHTTPRequestHandler):
             requested = Path(unquote(relative))
             safe_parts = [part for part in requested.parts if part not in ("..", "")]
             file_path = ROOT.joinpath(*safe_parts)
+
+        if relative == "config.js":
+            encoded_config = json.dumps(client_runtime_config(), ensure_ascii=False, indent=2)
+            data = (
+                "window.__FITHUB_CONFIG__ = Object.assign(\n"
+                f"  {encoded_config},\n"
+                "  window.__FITHUB_CONFIG__ || {}\n"
+                ");\n"
+            ).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self._send_common_headers("application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            if not head_only:
+                self.wfile.write(data)
+            return
 
         if not file_path.exists() or file_path.is_dir():
             self.send_error(HTTPStatus.NOT_FOUND)

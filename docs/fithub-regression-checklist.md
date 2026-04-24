@@ -395,6 +395,9 @@ tests/
 - 媒体详情页补充了更完整的查看动作和媒体信息标签
 - 已新增对象存储巡检/清理脚本：
   - `/Users/guoziyi/Documents/gpt/fithub-app-deploy/scripts/media_maintenance.py`
+- 已新增线上媒体维护接口：
+  - `POST /api/media/maintenance`
+  - 通过 `FITHUB_MEDIA_MAINTENANCE_TOKEN` 控制调用权限
 - 脚本会区分：
   - 已被引用的对象
   - 会话中的草稿对象
@@ -404,3 +407,4 @@ tests/
   - `npm run media:report`
   - `npm run media:clean`
   做媒体桶巡检与清理
+- 模拟头像和探索页模拟图片已去掉外部 Pexels 依赖，改为内置轻量素材；旧状态中残留的 Pexels 图片也会在客户端兜底替换，降低中国大陆用户首屏图片等待时间

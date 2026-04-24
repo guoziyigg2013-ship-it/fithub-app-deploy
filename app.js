@@ -377,10 +377,8 @@ const DEMO_PROFILE_PATCHES = {
   "gym-demo-a": {
     name: "模拟健身房 A · 万象燃炼馆",
     avatar: "万",
-    avatarImage:
-      "https://images.pexels.com/photos/6046979/pexels-photo-6046979.png?auto=compress&cs=tinysrgb&fit=crop&w=160&h=160&dpr=1",
-    coverImage:
-      "https://images.pexels.com/photos/6046979/pexels-photo-6046979.png?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+    avatarImage: createGymAvatar({ bgA: "#1f2a34", bgB: "#748ca2", accent: "#f28c28" }),
+    coverImage: createDemoImage("万象燃炼馆", "#1f2a34", "#f28c28"),
     bio: "模拟门店，位于厦门万象城商圈，用于测试真实场馆照片、定价、预约、评分和主页展示。",
     shortDesc: "万象城商圈器械馆，支持月卡、次卡和团课测试。",
     price: "¥169/月起",
@@ -396,10 +394,8 @@ const DEMO_PROFILE_PATCHES = {
   "gym-demo-b": {
     name: "模拟健身房 B · 轻氧塑能馆",
     avatar: "氧",
-    avatarImage:
-      "https://images.pexels.com/photos/35215412/pexels-photo-35215412.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=160&h=160&dpr=1",
-    coverImage:
-      "https://images.pexels.com/photos/35215412/pexels-photo-35215412.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+    avatarImage: createGymAvatar({ bgA: "#214d64", bgB: "#76aeca", accent: "#59d4ff" }),
+    coverImage: createDemoImage("轻氧塑能馆", "#214d64", "#59d4ff"),
     bio: "模拟精品训练馆，主打轻氧有氧和恢复类课程，适合测试价格展示和课程预约。",
     shortDesc: "精品有氧空间，适合恢复训练和轻团课测试。",
     price: "¥138/月起",
@@ -415,10 +411,8 @@ const DEMO_PROFILE_PATCHES = {
   "coach-demo-a": {
     name: "模拟教练 A · 林燃",
     avatar: "林",
-    avatarImage:
-      "https://images.pexels.com/photos/28455437/pexels-photo-28455437.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=180&h=180&dpr=1",
-    coverImage:
-      "https://images.pexels.com/photos/28455437/pexels-photo-28455437.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+    avatarImage: createPortraitAvatar({ skin: "#efc3a4", hair: "#281d17", shirt: "#17181d", bgA: "#d9e0ea", bgB: "#8b98ad" }),
+    coverImage: createDemoImage("力量私教", "#293b72", "#6a82fb"),
     bio: "模拟私教，擅长力量提升和减脂塑形，用于测试真实头像、课时定价、预约和私信。",
     shortDesc: "力量提升、减脂塑形，适合测试私教预约。",
     price: "¥299/小时",
@@ -434,10 +428,8 @@ const DEMO_PROFILE_PATCHES = {
   "coach-demo-b": {
     name: "模拟教练 B · 周芮",
     avatar: "周",
-    avatarImage:
-      "https://images.pexels.com/photos/14055666/pexels-photo-14055666.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=180&h=180&dpr=1",
-    coverImage:
-      "https://images.pexels.com/photos/14055666/pexels-photo-14055666.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+    avatarImage: createPortraitAvatar({ skin: "#f2c8ad", hair: "#5c3e2e", shirt: "#5f7fa0", bgA: "#f3dbc9", bgB: "#d2a48d" }),
+    coverImage: createDemoImage("普拉提恢复", "#a679c7", "#f0a36f"),
     bio: "模拟女教练，主打体态改善和普拉提恢复，方便测试女性教练主页、评分和动态流。",
     shortDesc: "体态改善、核心激活，适合恢复和普拉提测试。",
     price: "¥268/小时",
@@ -744,10 +736,8 @@ function createSupplementalDemoProfiles() {
       name: "模拟健身房 C · Skyline Strength",
       handle: "@demo.gym.c",
       avatar: "天",
-      avatarImage:
-        "https://images.pexels.com/photos/29149075/pexels-photo-29149075.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=160&h=160&dpr=1",
-      coverImage:
-        "https://images.pexels.com/photos/29149075/pexels-photo-29149075.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+      avatarImage: createGymAvatar({ bgA: "#283745", bgB: "#8fb2cf", accent: "#66d0b8" }),
+      coverImage: createDemoImage("Skyline Strength", "#283745", "#66d0b8"),
       city: "厦门",
       locationLabel: "厦门 · 思明区 · 环岛路",
       lat: 24.4576,
@@ -777,7 +767,7 @@ function createSupplementalDemoProfiles() {
           media: [
             {
               type: "image",
-              url: "https://images.pexels.com/photos/29149075/pexels-photo-29149075.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=640&dpr=1",
+              url: createDemoImage("海景夜训", "#283745", "#66d0b8"),
               name: "demo-gym-c.jpg"
             }
           ]
@@ -793,10 +783,8 @@ function createSupplementalDemoProfiles() {
       name: "模拟健身房 D · 城市力量馆",
       handle: "@demo.gym.d",
       avatar: "城",
-      avatarImage:
-        "https://images.pexels.com/photos/4716817/pexels-photo-4716817.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=160&h=160&dpr=1",
-      coverImage:
-        "https://images.pexels.com/photos/4716817/pexels-photo-4716817.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+      avatarImage: createGymAvatar({ bgA: "#30323b", bgB: "#c0a16b", accent: "#f28c28" }),
+      coverImage: createDemoImage("城市力量馆", "#30323b", "#c0a16b"),
       city: "厦门",
       locationLabel: "厦门 · 湖里区 · SM 商圈",
       lat: 24.5088,
@@ -826,7 +814,7 @@ function createSupplementalDemoProfiles() {
           media: [
             {
               type: "image",
-              url: "https://images.pexels.com/photos/4716817/pexels-photo-4716817.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=640&dpr=1",
+              url: createDemoImage("力量区升级", "#30323b", "#c0a16b"),
               name: "demo-gym-d.jpg"
             }
           ]
@@ -842,10 +830,8 @@ function createSupplementalDemoProfiles() {
       name: "模拟教练 C · 陈拓",
       handle: "@demo.coach.c",
       avatar: "陈",
-      avatarImage:
-        "https://images.pexels.com/photos/11327778/pexels-photo-11327778.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=180&h=180&dpr=1",
-      coverImage:
-        "https://images.pexels.com/photos/11327778/pexels-photo-11327778.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+      avatarImage: createPortraitAvatar({ skin: "#efc1a1", hair: "#30221a", shirt: "#243247", bgA: "#d9e4ef", bgB: "#849bb5" }),
+      coverImage: createDemoImage("进阶力量课", "#243247", "#6a82fb"),
       city: "厦门",
       locationLabel: "厦门 · 湖里区 · 五缘湾",
       lat: 24.5223,
@@ -883,10 +869,8 @@ function createSupplementalDemoProfiles() {
       name: "模拟教练 D · Mia 沈",
       handle: "@demo.coach.d",
       avatar: "M",
-      avatarImage:
-        "https://images.pexels.com/photos/20418608/pexels-photo-20418608.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=180&h=180&dpr=1",
-      coverImage:
-        "https://images.pexels.com/photos/20418608/pexels-photo-20418608.jpeg?auto=compress&cs=tinysrgb&fit=crop&w=640&h=360&dpr=1",
+      avatarImage: createPortraitAvatar({ skin: "#f1c4a7", hair: "#4d3328", shirt: "#6f4ea1", bgA: "#f1dfef", bgB: "#c99ad8" }),
+      coverImage: createDemoImage("晚间塑形", "#6f4ea1", "#f0a36f"),
       city: "厦门",
       locationLabel: "厦门 · 思明区 · 明发商业广场",
       lat: 24.4714,
@@ -931,21 +915,11 @@ function optimizeRemoteImageUrl(url, kind = "avatar") {
   try {
     const remoteUrl = new URL(url);
     if (remoteUrl.hostname !== "images.pexels.com") return url;
+    if (kind === "avatar") {
+      return createPortraitAvatar({ skin: "#f0c4a8", hair: "#3c2b21", shirt: "#20242b", bgA: "#f2e0d0", bgB: "#d2a16e" });
+    }
+    return createDemoImage("FitHub 训练瞬间", "#f4efe7", "#f28c28");
 
-    const presets = {
-      avatar: { w: "160", h: "160" },
-      cover: { w: "640", h: "360" },
-      feed: { w: "720", h: "720" }
-    };
-    const preset = presets[kind] || presets.avatar;
-
-    remoteUrl.searchParams.set("auto", "compress");
-    remoteUrl.searchParams.set("cs", "tinysrgb");
-    remoteUrl.searchParams.set("fit", "crop");
-    remoteUrl.searchParams.set("dpr", "1");
-    remoteUrl.searchParams.set("w", preset.w);
-    remoteUrl.searchParams.set("h", preset.h);
-    return remoteUrl.toString();
   } catch (_error) {
     return url;
   }

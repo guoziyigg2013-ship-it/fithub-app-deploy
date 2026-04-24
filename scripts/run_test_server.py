@@ -24,6 +24,7 @@ def main():
     env.update(
         {
             "FITHUB_DATA_DIR": str(data_dir),
+            "FITHUB_PUBLIC_API_ORIGIN": "",
             "FITHUB_SMS_DEV_MODE": "true",
             "SUPABASE_URL": "",
             "SUPABASE_SERVICE_ROLE_KEY": "",

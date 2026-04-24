@@ -1,4 +1,4 @@
-from server import build_supabase_public_media_url, collect_referenced_media_paths, extract_storage_path_from_public_url
+from server import build_supabase_public_media_url, collect_referenced_media_paths, extract_storage_path_from_public_url, initial_state
 from tests.api.support import FitHubApiTestCase
 
 
@@ -86,6 +86,26 @@ class ContentRegressionTests(FitHubApiTestCase):
             extract_storage_path_from_public_url(build_supabase_public_media_url("posts/2026/04/23/post-test.png")),
             "posts/2026/04/23/post-test.png",
         )
+
+    def test_demo_media_does_not_depend_on_external_pexels_assets(self):
+        encoded_state = str(initial_state())
+        self.assertNotIn("images.pexels.com", encoded_state)
+
+    def test_media_maintenance_endpoint_is_token_protected(self):
+        client = self.make_client()
+        denied = client.post(
+            "/api/media/maintenance",
+            {"token": "wrong-token", "ageHours": 24},
+            expected_status=403,
+        )
+        self.assertIn("error", denied)
+
+        report = client.post(
+            "/api/media/maintenance",
+            {"token": "test-maintenance-token", "ageHours": 24, "delete": False},
+        )
+        self.assertFalse(report["enabled"])
+        self.assertIn("summary", report)
 
     def test_post_checkin_and_message_surface_in_bootstrap(self):
         phone = self.make_phone(4)

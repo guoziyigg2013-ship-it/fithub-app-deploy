@@ -130,6 +130,16 @@ npm run media:report
 npm run media:clean
 ```
 
+如果要让外部定时任务触发线上清理，可以在 Render 设置：
+
+- `FITHUB_MEDIA_MAINTENANCE_TOKEN`
+
+然后用 `POST /api/media/maintenance` 调用，传入：
+
+```json
+{ "token": "同一个维护 token", "ageHours": 24, "delete": true }
+```
+
 ## 验证码登录
 
 当前已经支持手机号验证码登录/注册校验。
