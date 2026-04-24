@@ -131,12 +131,15 @@ async function loginWithPhone(page, { phone, role = "enthusiast" }) {
   await waitForBootstrapToSettle(page);
   if (await page.locator("#authForm").isVisible().catch(() => false)) {
     // already open
-  } else if (await page.locator(`[data-auth-role="${role}"]`).isVisible().catch(() => false)) {
-    // auth overlay already open without the form being fully hydrated yet
   } else {
-    await page.locator('[data-open-role-picker="1"]').click();
+    const existingLoginButton = page.getByRole("button", { name: "登录已有账户" });
+    if (await existingLoginButton.isVisible().catch(() => false)) {
+      await existingLoginButton.click();
+    } else if (!(await page.locator(`[data-auth-role="${role}"]`).isVisible().catch(() => false))) {
+      await page.locator('[data-open-role-picker="1"]').click();
+      await page.getByRole("button", { name: "登录已有账户" }).click();
+    }
   }
-  await page.getByRole("button", { name: "登录已有账户" }).click();
   await expect(page.locator("#authForm")).toBeVisible();
   await page.locator(`[data-auth-role="${role}"]`).click();
   const code = await sendAuthCode(page, phone);
