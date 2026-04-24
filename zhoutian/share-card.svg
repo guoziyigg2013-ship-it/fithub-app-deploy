@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">周天引导</title>
+  <desc id="desc">小周天与大周天图谱、呼吸训练和每日打卡</desc>
+  <rect width="1200" height="630" fill="#f4ead8"/>
+  <path d="M0 0h1200v630H0z" fill="#f4ead8"/>
+  <path d="M72 78h1056v474H72z" fill="none" stroke="#7c5a36" stroke-width="8"/>
+  <path d="M116 122h968v386H116z" fill="none" stroke="#b8925f" stroke-width="2"/>
+  <circle cx="290" cy="315" r="150" fill="#fff8e8" stroke="#ceb88d" stroke-width="4"/>
+  <path d="M290 160c72 34 72 108 0 144s-72 108 0 166" fill="none" stroke="#0d6975" stroke-width="20" stroke-linecap="round"/>
+  <path d="M290 160c-72 34-72 108 0 144s72 108 0 166" fill="none" stroke="#8a351f" stroke-width="20" stroke-linecap="round" opacity=".88"/>
+  <circle cx="290" cy="176" r="17" fill="#0d6975" stroke="#fff8e8" stroke-width="7"/>
+  <circle cx="290" cy="454" r="17" fill="#8a351f" stroke="#fff8e8" stroke-width="7"/>
+  <text x="510" y="252" fill="#211810" font-family="Songti SC, Noto Serif SC, serif" font-size="92" font-weight="800">周天引导</text>
+  <text x="514" y="334" fill="#805233" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="36">小周天 · 大周天 · 呼吸训练 · 每日打卡</text>
+  <text x="516" y="410" fill="#2d656c" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30">点按穴位查看说明，跟随气息逐点点亮</text>
+</svg>
