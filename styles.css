@@ -473,7 +473,10 @@ body.is-workout-live .app {
 .image-shell {
   position: relative;
   isolation: isolate;
-  background: linear-gradient(180deg, #ececec, #f6f6f6);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 24% 22%, rgba(255, 255, 255, 0.72), transparent 34%),
+    linear-gradient(135deg, #eef3f6 0%, #f7f5ef 52%, #e7eef2 100%);
 }
 
 .image-shell::before,
@@ -487,10 +490,8 @@ body.is-workout-live .app {
 .image-shell::before {
   inset: 0;
   background:
-    linear-gradient(110deg, rgba(255, 255, 255, 0) 22%, rgba(255, 255, 255, 0.72) 34%, rgba(255, 255, 255, 0) 46%),
-    linear-gradient(180deg, #ebebeb, #f5f5f5);
-  background-size: 180% 100%, 100% 100%;
-  animation: image-shell-shimmer 1.4s linear infinite;
+    radial-gradient(circle at 72% 28%, rgba(255, 255, 255, 0.78), transparent 30%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.34), rgba(210, 222, 230, 0.18));
 }
 
 .image-shell::after {
@@ -501,10 +502,10 @@ body.is-workout-live .app {
   height: 42px;
   border-radius: 50%;
   background:
-    radial-gradient(circle at 50% 34%, #c7c7c7 0 18%, transparent 19%),
-    linear-gradient(180deg, transparent 0 40%, #c7c7c7 41% 72%, transparent 73%),
-    linear-gradient(180deg, #f6f6f6, #e7e7e7);
-  box-shadow: 0 10px 22px rgba(20, 20, 20, 0.06);
+    radial-gradient(circle at 50% 34%, #b9c4cc 0 16%, transparent 17%),
+    linear-gradient(180deg, transparent 0 42%, #b9c4cc 43% 68%, transparent 69%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(232, 238, 242, 0.86));
+  box-shadow: 0 10px 22px rgba(56, 69, 81, 0.08);
 }
 
 .image-shell--avatar::after {
@@ -1541,7 +1542,9 @@ body.is-workout-live .app {
 }
 
 .avatar--photo {
-  background: transparent;
+  background:
+    radial-gradient(circle at 68% 22%, rgba(255, 255, 255, 0.74), transparent 28%),
+    linear-gradient(145deg, #e9f0f4, #cfdbe4);
 }
 
 .avatar-image {
@@ -4723,15 +4726,6 @@ body.is-workout-live .app {
   margin: 0;
   font-size: 12px;
   line-height: 1.5;
-}
-
-@keyframes image-shell-shimmer {
-  from {
-    background-position: 160% 0, 0 0;
-  }
-  to {
-    background-position: -40% 0, 0 0;
-  }
 }
 
 .helper-note {

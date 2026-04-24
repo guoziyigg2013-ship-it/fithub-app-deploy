@@ -1078,36 +1078,87 @@ function createNeutralAvatar(role = "enthusiast") {
 function hydrateAsyncImages(root = document) {
   root.querySelectorAll(".image-shell").forEach((shell) => {
     const image = shell.querySelector("img");
-    if (!image || shell.dataset.imageHydrated === "1") return;
-    shell.dataset.imageHydrated = "1";
-
-    const markLoaded = () => {
-      shell.classList.remove("is-failed");
-      shell.classList.add("is-loaded");
-    };
-
-    const markFailed = () => {
-      shell.classList.remove("is-loaded");
-      shell.classList.add("is-failed");
-    };
-
-    if (image.complete && image.naturalWidth > 0) {
-      markLoaded();
+    if (!image || shell.dataset.imageHydrated === "1" || shell.dataset.imageObserved === "1") return;
+    if (image.complete || root !== appView) {
+      bindImageShell(shell);
       return;
     }
-
-    if (image.complete && !image.naturalWidth) {
-      markFailed();
+    const observer = getImageHydrationObserver();
+    if (!observer) {
+      bindImageShell(shell);
       return;
     }
-
-    image.addEventListener("load", markLoaded, { once: true });
-    image.addEventListener("error", markFailed, { once: true });
+    shell.dataset.imageObserved = "1";
+    observer.observe(shell);
   });
 }
 
 function createDefaultAvatar(role, name) {
   return createNeutralAvatar(role || "enthusiast");
+}
+
+const imageShellStateQueue = new Map();
+let imageShellStateFrame = 0;
+let imageHydrationObserver = null;
+
+function flushImageShellStates() {
+  imageShellStateFrame = 0;
+  imageShellStateQueue.forEach((status, shell) => {
+    shell.classList.remove("is-loaded", "is-failed");
+    if (status === "loaded") shell.classList.add("is-loaded");
+    if (status === "failed") shell.classList.add("is-failed");
+  });
+  imageShellStateQueue.clear();
+}
+
+function scheduleImageShellState(shell, status) {
+  imageShellStateQueue.set(shell, status);
+  if (imageShellStateFrame) return;
+  imageShellStateFrame = window.requestAnimationFrame
+    ? window.requestAnimationFrame(flushImageShellStates)
+    : window.setTimeout(flushImageShellStates, 16);
+}
+
+function bindImageShell(shell) {
+  const image = shell.querySelector("img");
+  if (!image || shell.dataset.imageHydrated === "1") return;
+  shell.dataset.imageHydrated = "1";
+
+  const markLoaded = () => {
+    scheduleImageShellState(shell, "loaded");
+  };
+
+  const markFailed = () => {
+    scheduleImageShellState(shell, "failed");
+  };
+
+  if (image.complete) {
+    if (image.naturalWidth > 0) {
+      markLoaded();
+    } else {
+      markFailed();
+    }
+    return;
+  }
+
+  image.addEventListener("load", markLoaded, { once: true });
+  image.addEventListener("error", markFailed, { once: true });
+}
+
+function getImageHydrationObserver() {
+  if (!("IntersectionObserver" in window)) return null;
+  if (imageHydrationObserver) return imageHydrationObserver;
+  imageHydrationObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting && entry.intersectionRatio <= 0) return;
+        imageHydrationObserver.unobserve(entry.target);
+        bindImageShell(entry.target);
+      });
+    },
+    { rootMargin: "520px 0px", threshold: 0.01 }
+  );
+  return imageHydrationObserver;
 }
 
 function createInitialProfiles() {
@@ -3030,23 +3081,19 @@ async function runTask(task) {
 
 function renderAvatarMarkup(profile, className = "avatar") {
   const safeClassName = escapeHtml(className);
-  const avatarText = escapeHtml(profile?.avatar || getInitialCharacter(profile?.name || "?"));
   const avatarAlt = escapeHtml(`${profile?.name || "用户"}头像`);
   const unreadCount = Math.max(0, Number(profile?.unreadCount || 0));
   const unreadBadge = unreadCount
     ? `<span class="avatar-unread-badge">${escapeHtml(unreadCount > 99 ? "99+" : String(unreadCount))}</span>`
     : "";
+  const avatarSrc = profile?.avatarImage || createDefaultAvatar(profile?.role, profile?.name);
 
-  if (profile?.avatarImage) {
-    return `
-      <div class="${safeClassName} avatar--photo">
-        <img class="avatar-image" src="${optimizeRemoteImageUrl(profile.avatarImage, "avatar")}" alt="${avatarAlt}" decoding="async">
-        ${unreadBadge}
-      </div>
-    `;
-  }
-
-  return `<div class="${safeClassName}">${avatarText}${unreadBadge}</div>`;
+  return `
+    <div class="${safeClassName} avatar--photo">
+      <img class="avatar-image" src="${optimizeRemoteImageUrl(avatarSrc, "avatar")}" alt="${avatarAlt}" loading="lazy" decoding="async">
+      ${unreadBadge}
+    </div>
+  `;
 }
 
 function toRadians(value) {
@@ -10407,7 +10454,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260424-4`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260424-5`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
