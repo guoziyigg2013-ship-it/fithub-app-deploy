@@ -3563,6 +3563,13 @@ def serialize_post(state, post, current_actor_profile_id):
         "meta": post["meta"],
         "media": [compact_media_item(item) for item in post.get("media", [])],
         "likeCount": len(post.get("likes", [])),
+        "favoriteCount": len(
+            [
+                item
+                for item in state.get("postFavorites", [])
+                if item.get("postId") == post["id"]
+            ]
+        ),
         "likedByCurrentActor": any(item in current_actor_alias_ids for item in post.get("likes", [])),
         "comments": [serialize_comment(state, item) for item in sorted(post.get("comments", []), key=lambda value: value["createdAt"])],
         "checkin": serialize_checkin(post["checkin"]) if post.get("checkin") else None,

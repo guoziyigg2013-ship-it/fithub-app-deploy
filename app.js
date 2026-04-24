@@ -1363,6 +1363,7 @@ const state = {
   favoritePosts: [],
   notifications: [],
   likeMutationQueue: new Map(),
+  favoriteMutationQueue: new Map(),
   pendingMessageProfileIds: new Set(),
   ratingDrafts: {},
   reviewDrafts: {},
@@ -2999,8 +3000,11 @@ function getPostById(postId) {
       return { profile, post };
     }
   }
-  const favoritePost = (state.favoritePosts || []).find((item) => item.id === postId);
-  return favoritePost ? { profile: null, post: favoritePost } : null;
+  const favoriteEntry = (state.favoritePosts || []).find((item) => item?.post?.id === postId || item?.id === postId);
+  if (!favoriteEntry) return null;
+  return favoriteEntry.post
+    ? { profile: favoriteEntry.profile || null, post: favoriteEntry.post }
+    : { profile: null, post: favoriteEntry };
 }
 
 function updatePostCollections(postId, updater) {
@@ -3012,8 +3016,19 @@ function updatePostCollections(postId, updater) {
     };
   });
 
-  if (Array.isArray(state.favoritePosts) && state.favoritePosts.some((post) => post.id === postId)) {
-    state.favoritePosts = state.favoritePosts.map((post) => (post.id === postId ? updater({ ...post }) : post));
+  if (Array.isArray(state.favoritePosts)) {
+    state.favoritePosts = state.favoritePosts.map((entry) => {
+      if (entry?.post?.id === postId) {
+        return {
+          ...entry,
+          post: updater({ ...entry.post })
+        };
+      }
+      if (entry?.id === postId) {
+        return updater({ ...entry });
+      }
+      return entry;
+    });
   }
 }
 
@@ -3036,6 +3051,49 @@ function refreshPostLikeButtons(postId) {
     button.innerHTML = `
       ${renderPostActionGlyph("like", liked)}
       <span class="post-action-number">${found.post.likeCount || 0}</span>
+    `;
+  });
+}
+
+function applyPostFavoriteState(postId, favorited) {
+  const wasFavorited = state.favoritePostIds.has(postId);
+  if (wasFavorited !== Boolean(favorited)) {
+    updatePostCollections(postId, (post) => ({
+      ...post,
+      favoriteCount: Math.max(0, Number(post.favoriteCount || 0) + (favorited ? 1 : -1))
+    }));
+  }
+
+  if (favorited) {
+    state.favoritePostIds.add(postId);
+    const hasEntry = (state.favoritePosts || []).some((item) => item?.post?.id === postId || item?.id === postId);
+    const found = getAllPostEntries().find((item) => item.post?.id === postId);
+    if (!hasEntry && found?.profile && found?.post) {
+      state.favoritePosts = [
+        {
+          profile: found.profile,
+          post: found.post,
+          favoritedAt: new Date().toISOString()
+        },
+        ...(state.favoritePosts || [])
+      ];
+    }
+    return;
+  }
+
+  state.favoritePostIds.delete(postId);
+  state.favoritePosts = (state.favoritePosts || []).filter((item) => item?.post?.id !== postId && item?.id !== postId);
+}
+
+function refreshPostFavoriteButtons(postId) {
+  document.querySelectorAll("[data-favorite-post]").forEach((button) => {
+    if (button.dataset.favoritePost !== postId) return;
+    const favorited = state.favoritePostIds.has(postId);
+    button.classList.toggle("is-active", favorited);
+    button.setAttribute("aria-label", favorited ? "取消收藏" : "收藏");
+    button.innerHTML = `
+      ${renderPostActionGlyph("favorite", favorited)}
+      <span class="post-action-number">${getPostById(postId)?.post?.favoriteCount || 0}</span>
     `;
   });
 }
@@ -3083,6 +3141,47 @@ async function flushPostLikeQueue(postId) {
 
   state.likeMutationQueue.delete(postId);
   refreshPostLikeButtons(postId);
+}
+
+async function flushPostFavoriteQueue(postId) {
+  const mutation = state.favoriteMutationQueue.get(postId);
+  if (!mutation || mutation.inFlight || mutation.queued <= 0) return;
+
+  mutation.inFlight = true;
+  mutation.queued -= 1;
+
+  let failed = null;
+  try {
+    await postAndSync(`${API_BASE}/post/favorite-toggle`, { postId }, { keepOverlay: Boolean(state.overlayMode) });
+    mutation.confirmedFavorited = state.favoritePostIds.has(postId);
+    if (mutation.queued > 0) {
+      applyPostFavoriteState(postId, mutation.desiredFavorited);
+    }
+  } catch (error) {
+    failed = error;
+  }
+
+  mutation.inFlight = false;
+
+  if (failed && mutation.queued <= 0) {
+    applyPostFavoriteState(postId, mutation.confirmedFavorited);
+    state.favoriteMutationQueue.delete(postId);
+    refreshPostFavoriteButtons(postId);
+    showError(failed?.message || "收藏同步失败，请稍后再试。");
+    return;
+  }
+
+  refreshPostFavoriteButtons(postId);
+
+  if (mutation.queued > 0) {
+    window.setTimeout(() => {
+      flushPostFavoriteQueue(postId);
+    }, 0);
+    return;
+  }
+
+  state.favoriteMutationQueue.delete(postId);
+  refreshPostFavoriteButtons(postId);
 }
 
 function insertOptimisticMessage(profileId, text) {
@@ -4710,8 +4809,27 @@ async function togglePostLike(postId) {
 }
 
 async function togglePostFavorite(postId) {
-  await postAndSync(`${API_BASE}/post/favorite-toggle`, { postId }, { keepOverlay: Boolean(state.overlayMode) });
-  renderPage();
+  const found = getPostById(postId);
+  if (!found?.post || !isMediaPost(found.post)) return;
+
+  const previousFavorited = state.favoritePostIds.has(postId);
+  const nextFavorited = !previousFavorited;
+  const mutation =
+    state.favoriteMutationQueue.get(postId) ||
+    {
+      queued: 0,
+      inFlight: false,
+      confirmedFavorited: previousFavorited,
+      desiredFavorited: previousFavorited
+    };
+
+  mutation.queued += 1;
+  mutation.desiredFavorited = nextFavorited;
+  state.favoriteMutationQueue.set(postId, mutation);
+
+  applyPostFavoriteState(postId, nextFavorited);
+  refreshPostFavoriteButtons(postId);
+  flushPostFavoriteQueue(postId);
 }
 
 async function submitPostComment(postId) {
