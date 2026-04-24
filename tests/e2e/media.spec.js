@@ -1,0 +1,119 @@
+const { test, expect } = require("@playwright/test");
+const { gotoApp, registerEnthusiast, openMyPage } = require("./helpers");
+
+const TINY_PNG_BUFFER = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn0n8kAAAAASUVORK5CYII=",
+  "base64"
+);
+
+async function expectOk(response, label) {
+  expect(response.ok(), `${label}: ${response.status()} ${await response.text()}`).toBeTruthy();
+  return response.json();
+}
+
+async function postJson(request, path, sessionId, data = {}) {
+  return expectOk(
+    await request.post(path, {
+      data: {
+        sessionId,
+        ...data,
+      },
+    }),
+    path
+  );
+}
+
+async function seedAuthorWithMediaPost(request) {
+  const bootstrap = await expectOk(await request.get("/api/bootstrap"), "bootstrap");
+  const sessionId = bootstrap.session.id;
+  const phone = `132${String(Date.now()).slice(-8)}`;
+  const codePayload = await postJson(request, "/api/auth/send-code", sessionId, {
+    phone,
+    purpose: "register",
+  });
+  const registered = await postJson(request, "/api/register", sessionId, {
+    role: "enthusiast",
+    verificationCode: codePayload.debugCode,
+    profile: {
+      name: "媒体作者",
+      phone,
+      gender: "女",
+      heightCm: 168,
+      weightKg: 55,
+      goal: "分享训练动作",
+      intro: "用于媒体流回归的作者账号",
+    },
+  });
+  const authorProfileId = registered.session.currentActorProfileId;
+  const dataUrl = `data:image/png;base64,${TINY_PNG_BUFFER.toString("base64")}`;
+  const uploaded = await postJson(request, "/api/media/upload", sessionId, {
+    dataUrl,
+    fileName: "seeded-media.png",
+    assetType: "image",
+    category: "posts",
+    thumbnailDataUrl: dataUrl,
+    thumbnailName: "seeded-media-thumb.png",
+  });
+  const postText = `关注媒体动态 ${Date.now()}`;
+  await postJson(request, "/api/post/create", sessionId, {
+    profileId: authorProfileId,
+    content: postText,
+    meta: "媒体作者 · 厦门 · 思明区",
+    media: [uploaded.media],
+  });
+  return { authorProfileId, postText };
+}
+
+test("训练者可以发布图片动态、收藏媒体，并在刷新后继续打开", async ({ page, request }) => {
+  const ownPostText = `媒体回归动态 ${Date.now()}`;
+  await registerEnthusiast(page, { name: "媒体测试用户" });
+
+  await page.locator("#fabButton").click();
+  await expect(page.locator("#composeForm")).toBeVisible();
+  await page.locator('[data-compose-content="1"]').fill(ownPostText);
+  await page.locator('input[data-compose-media-input][accept="image/*"]').setInputFiles({
+    name: "media-regression.png",
+    mimeType: "image/png",
+    buffer: TINY_PNG_BUFFER,
+  });
+  await expect(page.locator(".compose-preview-card")).toBeVisible({ timeout: 10000 });
+  await page.locator('#composeForm button[type="submit"]').click();
+
+  const ownMoment = page.locator(".moment-card", { hasText: ownPostText }).first();
+  await expect(ownMoment).toBeVisible({ timeout: 10000 });
+  await expect(ownMoment.locator(".timeline-media-card")).toBeVisible();
+
+  const seeded = await seedAuthorWithMediaPost(request);
+  await page.evaluate(async ({ targetProfileId }) => {
+    const sessionId = window.localStorage.getItem("fithub_trial_session_id") || "";
+    const response = await fetch("/api/follow/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, targetProfileId }),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+  }, { targetProfileId: seeded.authorProfileId });
+
+  await gotoApp(page);
+  await page.locator('.bottom-nav [data-page="discover"]').evaluate((element) => element.click());
+  const postCard = page.locator(".timeline-card", { hasText: seeded.postText }).first();
+  await expect(postCard).toBeVisible({ timeout: 10000 });
+  await postCard.locator("[data-favorite-post]").click();
+  await expect(postCard.locator("[data-favorite-post]")).toHaveClass(/is-active/);
+
+  await openMyPage(page);
+  await page.locator('[data-open-my-feature="collections"]').click();
+  const collectionCard = page.locator(".timeline-card", { hasText: seeded.postText }).first();
+  await expect(collectionCard).toBeVisible();
+  await collectionCard.locator("[data-open-media-detail]").first().click();
+  await expect(page.getByText("媒体详情")).toBeVisible();
+  await expect(page.getByText("图片", { exact: true })).toBeVisible();
+  await page.locator(".close-button").click();
+
+  await gotoApp(page);
+  await openMyPage(page);
+  await page.locator('[data-open-my-feature="collections"]').click();
+  await expect(page.locator(".timeline-card", { hasText: seeded.postText }).first()).toBeVisible();
+});
