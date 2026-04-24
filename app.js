@@ -3200,6 +3200,63 @@ function applyPostFavoriteState(postId, favorited) {
   state.favoritePosts = (state.favoritePosts || []).filter((item) => item?.post?.id !== postId && item?.id !== postId);
 }
 
+function insertOptimisticComment(postId, text) {
+  const actor = getCurrentActor();
+  const optimisticId = `optimistic-comment-${postId}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const optimisticComment = {
+    id: optimisticId,
+    authorProfileId: actor?.id || "",
+    authorName: actor?.name || "我",
+    authorAvatarImage: actor?.avatarImage || "",
+    text,
+    createdAt: new Date().toISOString(),
+    time: "刚刚",
+    optimistic: true
+  };
+
+  updatePostCollections(postId, (post) => ({
+    ...post,
+    comments: [...(post.comments || []), optimisticComment]
+  }));
+
+  return optimisticId;
+}
+
+function removeOptimisticComment(postId, commentId) {
+  updatePostCollections(postId, (post) => ({
+    ...post,
+    comments: (post.comments || []).filter((comment) => comment.id !== commentId)
+  }));
+}
+
+function applyConfirmedPostState(postId, confirmedPost) {
+  if (!confirmedPost) return;
+  updatePostCollections(postId, (post) => ({
+    ...post,
+    ...confirmedPost
+  }));
+}
+
+function refreshPostCommentViews(postId) {
+  const found = getPostById(postId);
+  if (!found?.post) return;
+  document.querySelectorAll("[data-post-card]").forEach((card) => {
+    if (card.dataset.postCard !== postId) return;
+    const commentList = card.querySelector(".post-comment-list");
+    if (commentList) {
+      commentList.outerHTML = renderPostComments(found.post);
+    }
+    const count = card.querySelector(".post-action-button--count .post-action-number");
+    if (count) {
+      count.textContent = String(found.post.comments?.length || 0);
+    }
+    const input = card.querySelector(`[data-comment-input="${postId}"]`);
+    if (input) {
+      input.value = state.commentDrafts[postId] || "";
+    }
+  });
+}
+
 function refreshPostFavoriteButtons(postId) {
   const found = getPostById(postId);
   document.querySelectorAll("[data-favorite-post]").forEach((button) => {
@@ -3357,6 +3414,33 @@ function insertOptimisticMessage(profileId, text) {
   }
 
   return optimisticId;
+}
+
+function mergeConfirmedThread(profileId, confirmedThread, optimisticMessageId) {
+  if (!confirmedThread) return;
+  const localThread = getThreadForProfile(profileId);
+  const remainingOptimisticMessages = (localThread?.messages || []).filter(
+    (message) => message.optimistic && message.id !== optimisticMessageId
+  );
+  const confirmedMessages = confirmedThread.messages || [];
+  const mergedMessages = [...confirmedMessages, ...remainingOptimisticMessages].sort((left, right) =>
+    String(left.createdAt || "").localeCompare(String(right.createdAt || ""))
+  );
+  const lastMessage = mergedMessages[mergedMessages.length - 1] || confirmedThread.lastMessage || null;
+  const nextThread = {
+    ...confirmedThread,
+    messages: mergedMessages,
+    lastMessage
+  };
+  const existingIndex = state.threads.findIndex((thread) => thread.withProfileId === profileId || thread.id === confirmedThread.id);
+  if (existingIndex >= 0) {
+    state.threads[existingIndex] = nextThread;
+  } else {
+    state.threads = [nextThread, ...(state.threads || [])];
+  }
+  state.threads = [...state.threads].sort((left, right) =>
+    String(right.lastMessage?.createdAt || "").localeCompare(String(left.lastMessage?.createdAt || ""))
+  );
 }
 
 function removeOptimisticMessage(profileId, messageId) {
@@ -4970,37 +5054,50 @@ async function togglePostFavorite(postId) {
 async function submitPostComment(postId) {
   const text = (state.commentDrafts[postId] || "").trim();
   if (!text) return;
-  await postAndSync(`${API_BASE}/post/comment`, { postId, text }, { keepOverlay: Boolean(state.overlayMode) });
+
+  const previousDraft = state.commentDrafts[postId] || "";
+  const optimisticCommentId = insertOptimisticComment(postId, text);
   state.commentDrafts[postId] = "";
-  renderPage();
+  refreshPostCommentViews(postId);
+
+  try {
+    const payload = await postWithoutStateSync(`${API_BASE}/post/comment`, { postId, text });
+    applyConfirmedPostState(postId, getPayloadPostById(payload, postId));
+  } catch (error) {
+    removeOptimisticComment(postId, optimisticCommentId);
+    if (!state.commentDrafts[postId]) {
+      state.commentDrafts[postId] = previousDraft;
+    }
+    refreshPostCommentViews(postId);
+    throw error;
+  }
+
+  refreshPostCommentViews(postId);
 }
 
 async function sendDirectMessage(profileId) {
   const text = state.chatDraft.trim();
-  if (!text || state.pendingMessageProfileIds.has(profileId)) return;
+  if (!text) return;
 
   const previousDraft = state.chatDraft;
-  state.pendingMessageProfileIds.add(profileId);
   state.chatDraft = "";
   const optimisticMessageId = insertOptimisticMessage(profileId, text);
   state.overlayMode = "chat";
   renderOverlay();
 
   try {
-    await postAndSync(
-      `${API_BASE}/message/send`,
-      {
-        targetProfileId: profileId,
-        text
-      },
-      { keepOverlay: true }
-    );
+    const payload = await postWithoutStateSync(`${API_BASE}/message/send`, {
+      targetProfileId: profileId,
+      text
+    });
+    mergeConfirmedThread(profileId, payload?.thread, optimisticMessageId);
   } catch (error) {
     removeOptimisticMessage(profileId, optimisticMessageId);
-    state.chatDraft = previousDraft;
+    if (!state.chatDraft) {
+      state.chatDraft = previousDraft;
+    }
     throw error;
   } finally {
-    state.pendingMessageProfileIds.delete(profileId);
     state.overlayMode = "chat";
     renderOverlay();
   }
@@ -5373,7 +5470,7 @@ function renderPostCard(profile, post, options = {}) {
     : "";
 
   return `
-    <article class="timeline-card ${compact ? "timeline-card--compact" : ""}">
+    <article class="timeline-card ${compact ? "timeline-card--compact" : ""}" data-post-card="${escapeHtml(post.id)}">
       <div class="timeline-head">
         ${
           showProfileButton
@@ -9305,7 +9402,7 @@ function renderChatOverlay() {
   const targetProfile = getProfile(state.chatTargetProfileId);
   const thread = getThreadForProfile(state.chatTargetProfileId);
   const isSendingChat = state.pendingMessageProfileIds.has(state.chatTargetProfileId);
-  const canSendChat = Boolean(state.chatDraft.trim()) && !isSendingChat;
+  const canSendChat = Boolean(state.chatDraft.trim());
 
   if (!targetProfile) {
     return `
@@ -9364,8 +9461,8 @@ function renderChatOverlay() {
       </section>
 
       <form class="chat-form ${isSendingChat ? "is-sending" : ""}" id="chatForm">
-        <input data-chat-input="1" type="text" value="${escapeHtml(state.chatDraft)}" placeholder="输入私信内容，约课或咨询都可以" ${isSendingChat ? "disabled" : ""}>
-        <button class="compose-submit-top" type="submit" ${canSendChat ? "" : "disabled"}>${isSendingChat ? "发送中…" : "发送"}</button>
+        <input data-chat-input="1" type="text" value="${escapeHtml(state.chatDraft)}" placeholder="输入私信内容，约课或咨询都可以">
+        <button class="compose-submit-top" type="submit" ${canSendChat ? "" : "disabled"}>发送</button>
       </form>
     </div>
   `;
@@ -9472,13 +9569,13 @@ function syncChatComposerState() {
   const input = chatForm.querySelector('[data-chat-input="1"]');
   const submit = chatForm.querySelector('button[type="submit"]');
   const isSendingChat = state.pendingMessageProfileIds.has(state.chatTargetProfileId);
-  const canSendChat = Boolean((state.chatDraft || "").trim()) && !isSendingChat;
+  const canSendChat = Boolean((state.chatDraft || "").trim());
   if (input) {
-    input.disabled = isSendingChat;
+    input.disabled = false;
   }
   if (submit) {
     submit.disabled = !canSendChat;
-    submit.textContent = isSendingChat ? "发送中…" : "发送";
+    submit.textContent = "发送";
   }
   if (chatForm) {
     chatForm.classList.toggle("is-sending", isSendingChat);
@@ -10307,7 +10404,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260424-2`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260424-3`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

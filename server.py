@@ -3919,6 +3919,20 @@ def compact_post_interaction_response(state, session, post):
     }
 
 
+def compact_message_response(state, session, target_profile_id):
+    current_actor_profile_id = session.get("currentActorProfileId")
+    target_profile_id = resolve_canonical_profile_id(state, target_profile_id) or target_profile_id
+    thread = next(
+        (item for item in serialize_threads(state, current_actor_profile_id) if item.get("withProfileId") == target_profile_id),
+        None,
+    )
+    return {
+        "ok": True,
+        "sessionId": session["id"],
+        "thread": thread,
+    }
+
+
 def build_profile_payload(role, payload, existing_profile, session):
     base_position = session["userPosition"]
     avatar_image = payload.get("avatarImage") or (existing_profile or {}).get("avatarImage") or default_avatar_for_role(role)
@@ -5327,6 +5341,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         "createdAt": iso_at(),
                     }
                 )
+                if payload.get("compact"):
+                    return compact_post_interaction_response(state, session, post)
                 return bootstrap_response(state, session)
             try:
                 self._write_json(self._with_state(action))
@@ -5355,6 +5371,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         "createdAt": iso_at(),
                     }
                 )
+                if payload.get("compact"):
+                    return compact_message_response(state, session, target_profile_id)
                 return bootstrap_response(state, session)
             try:
                 self._write_json(self._with_state(action))

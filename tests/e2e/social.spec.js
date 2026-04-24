@@ -56,3 +56,50 @@ test("动态点赞和取消点赞会立即反馈，连续点击不锁按钮", as
   await expect(likeNumber).toHaveText(String(initialCount + 1));
   await expect(likeButton).toBeEnabled();
 });
+
+test("动态评论在网络确认前也会立即出现", async ({ page }) => {
+  await registerEnthusiast(page, { name: "评论反馈测试用户" });
+
+  await page.evaluate(async () => {
+    const sessionId = window.localStorage.getItem("fithub_trial_session_id") || "";
+    const response = await fetch("/api/follow/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, targetProfileId: "gym-demo-a" }),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+  });
+
+  await gotoApp(page);
+  await page.locator('.bottom-nav [data-page="discover"]').evaluate((element) => element.click());
+
+  let releaseComment;
+  let markCommentRequestStarted;
+  const commentCanContinue = new Promise((resolve) => {
+    releaseComment = resolve;
+  });
+  const commentRequestStarted = new Promise((resolve) => {
+    markCommentRequestStarted = resolve;
+  });
+
+  await page.route("**/api/post/comment", async (route) => {
+    markCommentRequestStarted();
+    await commentCanContinue;
+    await route.continue();
+  });
+
+  const firstPost = page.locator(".timeline-card", { hasText: "模拟健身房 A" }).first();
+  await expect(firstPost).toBeVisible();
+  const commentText = `即时评论 ${Date.now()}`;
+  await firstPost.locator("[data-comment-input]").fill(commentText);
+  await firstPost.locator("[data-comment-post]").click();
+  await commentRequestStarted;
+
+  await expect(firstPost.locator(".post-comment-list")).toContainText(commentText, { timeout: 300 });
+  await expect(firstPost.locator(".post-action-button--count .post-action-number")).toContainText(/[1-9]/);
+
+  releaseComment();
+  await expect(firstPost.locator(".post-comment-list")).toContainText(commentText);
+});
