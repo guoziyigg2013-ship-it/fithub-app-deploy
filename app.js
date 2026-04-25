@@ -4059,6 +4059,7 @@ function openOverlay(mode) {
 }
 
 function closeOverlay() {
+  const closingMode = state.overlayMode;
   if (state.overlayMode === "compose" && state.composeMedia.length) {
     const draftMedia = [...state.composeMedia];
     runTask(() => cleanupComposeDraftMedia(draftMedia));
@@ -4077,6 +4078,9 @@ function closeOverlay() {
   state.registerSuccess = "";
   state.authMessage = "";
   renderOverlay();
+  if (closingMode === "chat" && state.activePage === "profile" && state.profileSubpage === "messages") {
+    renderProfile();
+  }
 }
 
 function openRegister(role = state.selectedRole) {
@@ -10628,7 +10632,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-3`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-4`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

@@ -160,4 +160,12 @@ test("消息中心能集中显示赞、评论和私信咨询", async ({ page, re
 
   await messageThread.locator("[data-open-chat]").click();
   await expect(page.locator(".chat-thread")).toContainText(scenario.directMessage);
+  await page.locator(".overlay-panel--chat .close-button").click();
+  await expect(page.locator(".overlay-panel--chat")).toHaveCount(0);
+
+  const readMessageThread = page
+    .locator(".feature-follow-item", { hasText: scenario.directMessage })
+    .filter({ hasText: scenario.actor.name })
+    .first();
+  await expect(readMessageThread.locator(".avatar-unread-badge")).toHaveCount(0);
 });
