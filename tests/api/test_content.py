@@ -188,6 +188,57 @@ class ContentRegressionTests(FitHubApiTestCase):
         self.assertIn("like", notification_types)
         self.assertIn("comment", notification_types)
 
+    def test_post_and_comment_mentions_surface_as_notifications(self):
+        phone_target = self.make_phone(64)
+        phone_actor = self.make_phone(65)
+
+        target_client = self.make_client()
+        target_code = target_client.send_code(phone_target, purpose="register")["debugCode"]
+        target_payload = target_client.register_enthusiast(phone_target, "被提及用户", target_code)
+        target_profile = self.current_profile(target_payload)
+
+        actor_client = self.make_client()
+        actor_code = actor_client.send_code(phone_actor, purpose="register")["debugCode"]
+        actor_payload = actor_client.register_enthusiast(phone_actor, "提及发起者", actor_code)
+        actor_profile = self.current_profile(actor_payload)
+
+        mention_post_text = f"{target_profile['handle']} 今天一起练背吗？"
+        mention_post_payload = actor_client.create_post(
+            actor_profile["id"],
+            mention_post_text,
+            meta="@我回归测试 · 厦门 · 思明区",
+            media=[],
+        )
+        mention_post = next(
+            item for item in self.current_profile(mention_post_payload).get("posts", [])
+            if item["content"] == mention_post_text
+        )
+
+        target_after_post = target_client.bootstrap()
+        post_mention = next(
+            (
+                item for item in target_after_post.get("notifications", [])
+                if item.get("type") == "mention"
+                and item.get("actorProfileId") == actor_profile["id"]
+                and item.get("postId") == mention_post["id"]
+            ),
+            None,
+        )
+        self.assertIsNotNone(post_mention)
+        self.assertIn("动态里 @ 了你", post_mention["text"])
+
+        comment_text = f"{target_profile['handle']} 评论里也提醒你一下。"
+        actor_client.comment_post(mention_post["id"], comment_text)
+
+        target_after_comment = target_client.bootstrap()
+        comment_mentions = [
+            item for item in target_after_comment.get("notifications", [])
+            if item.get("type") == "mention"
+            and item.get("actorProfileId") == actor_profile["id"]
+            and item.get("postId") == mention_post["id"]
+        ]
+        self.assertTrue(any("评论里 @ 了你" in item.get("text", "") for item in comment_mentions))
+
     def test_text_post_can_be_favorited_and_serialized(self):
         phone_a = self.make_phone(48)
         phone_b = self.make_phone(49)

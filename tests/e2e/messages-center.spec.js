@@ -49,6 +49,8 @@ async function registerApiEnthusiast(request, { name, phone }) {
     phone,
     sessionId,
     profileId: registered.session.currentActorProfileId,
+    handle:
+      registered.profiles.find((profile) => profile.id === registered.session.currentActorProfileId)?.handle || "",
   };
 }
 
@@ -85,6 +87,14 @@ async function seedMessageCenterScenario(request) {
     text: commentText,
   });
 
+  const mentionText = `${author.handle} 今天一起练肩吗 ${String(unique).slice(-5)}`;
+  await postJson(request, "/api/post/create", actor.sessionId, {
+    profileId: actor.profileId,
+    content: mentionText,
+    meta: "@我回归 · 厦门 · 思明区",
+    media: [],
+  });
+
   await postJson(request, "/api/follow/toggle", actor.sessionId, {
     targetProfileId: author.profileId,
   });
@@ -100,6 +110,7 @@ async function seedMessageCenterScenario(request) {
     actor,
     postText,
     commentText,
+    mentionText,
     directMessage,
   };
 }
@@ -132,6 +143,13 @@ test("消息中心能集中显示赞、评论和私信咨询", async ({ page, re
     .first();
   await expect(commentNotification).toBeVisible();
   await expect(commentNotification.locator(".status-pill")).toContainText("评论");
+
+  const mentionNotification = page
+    .locator(".feature-follow-item", { hasText: scenario.mentionText })
+    .filter({ hasText: scenario.actor.name })
+    .first();
+  await expect(mentionNotification).toBeVisible();
+  await expect(mentionNotification.locator(".status-pill")).toContainText("@我");
 
   const messageThread = page
     .locator(".feature-follow-item", { hasText: scenario.directMessage })
