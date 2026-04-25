@@ -3339,8 +3339,8 @@ function renderAvatarMarkup(profile, className = "avatar") {
   const avatarSrc = profile?.avatarImage || createDefaultAvatar(profile?.role, profile?.name);
 
   return `
-    <div class="${safeClassName} avatar--photo">
-      <img class="avatar-image" src="${optimizeRemoteImageUrl(avatarSrc, "avatar")}" alt="${avatarAlt}" decoding="async">
+    <div class="${safeClassName} avatar--photo image-shell image-shell--avatar">
+      <img class="avatar-image" src="${optimizeRemoteImageUrl(avatarSrc, "avatar")}" alt="${avatarAlt}" width="160" height="160" decoding="async">
       ${unreadBadge}
     </div>
   `;
@@ -3789,7 +3789,7 @@ function renderCardCover(profile) {
   }
   return `
     <div class="card-cover ${profile.role} image-shell image-shell--cover">
-      <img class="card-cover-image" src="${optimizeRemoteImageUrl(coverImage, "cover")}" alt="${escapeHtml(profile.name || "封面图")}" loading="lazy" decoding="async">
+      <img class="card-cover-image" src="${optimizeRemoteImageUrl(coverImage, "cover")}" alt="${escapeHtml(profile.name || "封面图")}" width="720" height="360" loading="lazy" decoding="async">
       <span class="card-cover-overlay"></span>
     </div>
   `;
@@ -5711,12 +5711,13 @@ function renderPostMedia(post, options = {}) {
           `;
           if (item.type === "video") {
             const posterUrl = getMediaPosterUrl(item, "feed");
+            const videoShellState = posterUrl ? "" : " is-loaded";
             return `
-              <div class="timeline-media-card timeline-media-card--video image-shell image-shell--cover is-loaded">
+              <div class="timeline-media-card timeline-media-card--video image-shell image-shell--cover${videoShellState}">
                 ${openButton}
                 ${
                   posterUrl
-                    ? `<img class="timeline-media-image timeline-media-video-poster" src="${escapeHtml(posterUrl)}" alt="${escapeHtml(item.name || "动态视频封面")}" ${loadingAttrs} decoding="async">`
+                    ? `<img class="timeline-media-image timeline-media-video-poster" src="${escapeHtml(posterUrl)}" alt="${escapeHtml(item.name || "动态视频封面")}" width="720" height="540" ${loadingAttrs} decoding="async">`
                     : `<div class="timeline-media-fallback"><span>视频</span></div>`
                 }
                 <span class="timeline-video-play" aria-hidden="true"></span>
@@ -5728,7 +5729,7 @@ function renderPostMedia(post, options = {}) {
           return `
             <div class="timeline-media-card image-shell image-shell--cover">
               ${openButton}
-              <img class="timeline-media-image" src="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" alt="${escapeHtml(item.name || "动态图片")}" ${loadingAttrs} decoding="async">
+              <img class="timeline-media-image" src="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" alt="${escapeHtml(item.name || "动态图片")}" width="720" height="540" ${loadingAttrs} decoding="async">
             </div>
           `;
         })
@@ -9181,7 +9182,7 @@ function renderProfilePage(profile) {
       <div class="profile-cover image-shell image-shell--cover">
         ${
           getProfileCoverImage(profile)
-            ? `<img class="profile-cover-image" src="${optimizeRemoteImageUrl(getProfileCoverImage(profile), "cover")}" alt="${escapeHtml(profile.name)}封面图" loading="lazy" decoding="async">`
+            ? `<img class="profile-cover-image" src="${optimizeRemoteImageUrl(getProfileCoverImage(profile), "cover")}" alt="${escapeHtml(profile.name)}封面图" width="720" height="360" loading="lazy" decoding="async">`
             : ""
         }
       </div>
@@ -10743,7 +10744,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-1`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-2`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

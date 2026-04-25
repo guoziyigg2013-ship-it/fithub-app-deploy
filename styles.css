@@ -525,13 +525,15 @@ body.is-workout-live .app {
 
 .image-shell .avatar-image,
 .image-shell .card-cover-image,
-.image-shell .profile-cover-image {
+.image-shell .profile-cover-image,
+.image-shell .timeline-media-image {
   opacity: 0;
 }
 
 .image-shell.is-loaded .avatar-image,
 .image-shell.is-loaded .card-cover-image,
-.image-shell.is-loaded .profile-cover-image {
+.image-shell.is-loaded .profile-cover-image,
+.image-shell.is-loaded .timeline-media-image {
   opacity: 1;
 }
 
@@ -1552,6 +1554,7 @@ body.is-workout-live .app {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: opacity 140ms ease;
 }
 
 .avatar-unread-badge {
@@ -3487,6 +3490,7 @@ body.is-workout-live .app {
   width: 100%;
   height: 188px;
   object-fit: cover;
+  transition: opacity 140ms ease;
 }
 
 .timeline-media-card--video {
