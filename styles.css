@@ -3797,6 +3797,26 @@ body.is-workout-live .app {
   display: none;
 }
 
+.connection-notice {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: calc(var(--bottom-nav-height) + 24px);
+  z-index: 28;
+  padding: 11px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(242, 140, 40, 0.2);
+  background: rgba(255, 251, 246, 0.92);
+  color: #9a5a12;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: 0 16px 34px rgba(62, 42, 20, 0.12);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  pointer-events: none;
+}
+
 .overlay-backdrop {
   position: absolute;
   inset: 0;

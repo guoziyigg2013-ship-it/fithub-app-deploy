@@ -1674,7 +1674,8 @@ const state = {
   shopCategory: "all",
   sessionId: "",
   runtimeConfig: { ...DEFAULT_RUNTIME_CONFIG },
-  isBootstrapping: false
+  isBootstrapping: false,
+  connectionNotice: ""
 };
 
 const profileSwipe = {
@@ -1693,6 +1694,10 @@ let lastSuccessfulSyncAt = 0;
 let authLookupTimeout = null;
 let mapSdkPromise = null;
 let mapSdkProvider = "";
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 const routeMapRegistry = new Map();
 
 function escapeHtml(value = "") {
@@ -2592,18 +2597,61 @@ function shouldRetryAfterRestore(error) {
   );
 }
 
-async function apiRequest(path, { method = "GET", body } = {}) {
-  const response = await fetch(path, {
-    method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined
-  });
+async function apiRequest(
+  path,
+  {
+    method = "GET",
+    body,
+    timeoutMs = 15000,
+    retries = 0,
+    retryDelayMs = 900,
+    slowAfterMs = 0,
+    onSlow,
+    onRetry
+  } = {}
+) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+    const slowId = slowAfterMs && typeof onSlow === "function"
+      ? window.setTimeout(() => onSlow(attempt + 1), slowAfterMs)
+      : null;
 
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error || "请求失败，请稍后再试。");
+    try {
+      const response = await fetch(path, {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(payload.error || "请求失败，请稍后再试。");
+        error.retryable = response.status >= 500;
+        throw error;
+      }
+      return payload;
+    } catch (error) {
+      lastError = error;
+      const retryable = error?.name === "AbortError" || error?.retryable || error instanceof TypeError;
+      if (!retryable || attempt >= retries) {
+        if (error?.name === "AbortError") {
+          throw new Error("服务响应较慢，请稍后再试。");
+        }
+        throw error;
+      }
+      if (typeof onRetry === "function") {
+        onRetry(attempt + 1, error);
+      }
+      await wait(retryDelayMs * (attempt + 1));
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (slowId) window.clearTimeout(slowId);
+    }
   }
-  return payload;
+
+  throw lastError || new Error("请求失败，请稍后再试。");
 }
 
 function syncStateFromServer(payload, { keepOverlay = false } = {}) {
@@ -2712,8 +2760,20 @@ async function refreshSharedState({ keepOverlay = false } = {}) {
   if (refreshPromise) return refreshPromise;
   const query = state.sessionId || getStoredSessionId();
   const suffix = query ? `?session_id=${encodeURIComponent(query)}` : "";
-  refreshPromise = apiRequest(`${API_BASE}/bootstrap${suffix}`)
+  refreshPromise = apiRequest(`${API_BASE}/bootstrap${suffix}`, {
+    timeoutMs: 32000,
+    retries: 1,
+    retryDelayMs: 1200,
+    slowAfterMs: 2600,
+    onSlow: () => {
+      setConnectionNotice("正在唤醒 FitHub 服务，页面会自动继续。");
+    },
+    onRetry: () => {
+      setConnectionNotice("网络有点慢，正在自动重试连接。");
+    }
+  })
     .then(async (payload) => {
+      setConnectionNotice("");
       syncStateFromServer(payload, { keepOverlay });
       const backendManagedIds = Array.isArray(payload?.session?.managedProfileIds) ? payload.session.managedProfileIds : [];
       if (!backendManagedIds.length && getStoredAccounts().length) {
@@ -3235,6 +3295,30 @@ function deepClone(value) {
 
 function showError(message) {
   window.alert(message || "操作失败，请稍后再试。");
+}
+
+function syncConnectionNotice() {
+  const phone = document.querySelector(".phone");
+  if (!phone) return;
+  let notice = phone.querySelector(".connection-notice");
+  if (!state.connectionNotice) {
+    notice?.remove();
+    return;
+  }
+  if (!notice) {
+    notice = document.createElement("div");
+    notice.className = "connection-notice";
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
+    phone.appendChild(notice);
+  }
+  notice.textContent = state.connectionNotice;
+}
+
+function setConnectionNotice(message = "") {
+  if (state.connectionNotice === message) return;
+  state.connectionNotice = message;
+  syncConnectionNotice();
 }
 
 async function runTask(task) {
@@ -9861,6 +9945,7 @@ function renderPage() {
   if (state.activePage === "booking") renderBooking();
   if (state.activePage === "profile") renderProfile();
   syncNavActive();
+  syncConnectionNotice();
   renderOverlay();
   hydrateAsyncImages(appView);
   scheduleMediaWarmup();
@@ -10658,7 +10743,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-5`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-1`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
@@ -10691,7 +10776,7 @@ refreshSharedState().catch((error) => {
   renderPage();
   window.__FITHUB_READY__ = true;
   window.__FITHUB_BOOTSTRAP_DONE__ = true;
-  showError(error?.message || "试用服务连接失败，请稍后刷新页面。");
+  setConnectionNotice(error?.message || "试用服务暂时连接不上，稍后会自动重试。");
 });
 window.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
