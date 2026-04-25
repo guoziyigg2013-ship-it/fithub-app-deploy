@@ -5,6 +5,7 @@ const TINY_PNG_BUFFER = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn0n8kAAAAASUVORK5CYII=",
   "base64"
 );
+const TINY_VIDEO_BUFFER = Buffer.from([0, 0, 0, 0]);
 
 async function expectOk(response, label) {
   expect(response.ok(), `${label}: ${response.status()} ${await response.text()}`).toBeTruthy();
@@ -92,6 +93,48 @@ async function seedAuthorWithTextPost(request) {
     content: postText,
     meta: "文字作者 · 厦门 · 思明区",
     media: [],
+  });
+  return { authorProfileId, postText };
+}
+
+async function seedAuthorWithVideoPost(request) {
+  const bootstrap = await expectOk(await request.get("/api/bootstrap"), "bootstrap");
+  const sessionId = bootstrap.session.id;
+  const phone = `136${String(Date.now()).slice(-8)}`;
+  const codePayload = await postJson(request, "/api/auth/send-code", sessionId, {
+    phone,
+    purpose: "register",
+  });
+  const registered = await postJson(request, "/api/register", sessionId, {
+    role: "enthusiast",
+    verificationCode: codePayload.debugCode,
+    profile: {
+      name: "视频内容作者",
+      phone,
+      gender: "女",
+      heightCm: 166,
+      weightKg: 54,
+      goal: "分享动作讲解视频",
+      intro: "用于视频媒体流回归的作者账号",
+    },
+  });
+  const authorProfileId = registered.session.currentActorProfileId;
+  const dataUrl = `data:video/mp4;base64,${TINY_VIDEO_BUFFER.toString("base64")}`;
+  const posterUrl = `data:image/png;base64,${TINY_PNG_BUFFER.toString("base64")}`;
+  const uploaded = await postJson(request, "/api/media/upload", sessionId, {
+    dataUrl,
+    fileName: "seeded-video.mp4",
+    assetType: "video",
+    category: "posts",
+    thumbnailDataUrl: posterUrl,
+    thumbnailName: "seeded-video-poster.png",
+  });
+  const postText = `视频训练动态 ${Date.now()}`;
+  await postJson(request, "/api/post/create", sessionId, {
+    profileId: authorProfileId,
+    content: postText,
+    meta: "视频作者 · 厦门 · 思明区",
+    media: [uploaded.media],
   });
   return { authorProfileId, postText };
 }
@@ -225,4 +268,47 @@ test("训练者可以收藏纯文字动态，并在收藏页长期可见", async
   const collectionCard = page.locator(".timeline-card", { hasText: seeded.postText }).first();
   await expect(collectionCard).toBeVisible();
   await expect(collectionCard.locator(".timeline-media-card")).toHaveCount(0);
+});
+
+test("视频动态在信息流只加载封面，收藏后可打开视频详情", async ({ page, request }) => {
+  await registerEnthusiast(page, { name: "视频收藏测试用户" });
+
+  const seeded = await seedAuthorWithVideoPost(request);
+  await page.evaluate(async ({ targetProfileId }) => {
+    const sessionId = window.localStorage.getItem("fithub_trial_session_id") || "";
+    const response = await fetch("/api/follow/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, targetProfileId }),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+  }, { targetProfileId: seeded.authorProfileId });
+
+  await gotoApp(page);
+  await page.locator('.bottom-nav [data-page="discover"]').evaluate((element) => element.click());
+  const postCard = page.locator(".timeline-card", { hasText: seeded.postText }).first();
+  await expect(postCard).toBeVisible({ timeout: 10000 });
+  const mediaCard = postCard.locator(".timeline-media-card--video").first();
+  await expect(mediaCard).toBeVisible();
+  await expect(mediaCard.locator(".timeline-video-play")).toBeVisible();
+  await expect(mediaCard.locator("img.timeline-media-image")).toBeVisible();
+  await expect(mediaCard.locator("video.timeline-media-video")).toHaveCount(0);
+
+  const favoriteButton = postCard.locator("[data-favorite-post]");
+  await favoriteButton.click();
+  await expect(favoriteButton).toHaveClass(/is-active/);
+  await expect(favoriteButton.locator(".post-action-number")).toHaveText("1");
+
+  await openMyPage(page);
+  await page.locator('[data-open-my-feature="collections"]').click();
+  const collectionCard = page.locator(".timeline-card", { hasText: seeded.postText }).first();
+  await expect(collectionCard).toBeVisible();
+  await expect(collectionCard.locator(".timeline-media-card--video")).toBeVisible();
+
+  await collectionCard.locator("[data-open-media-detail]").first().click();
+  await expect(page.getByText("媒体详情")).toBeVisible();
+  await expect(page.locator(".media-detail-pill", { hasText: "视频" }).first()).toBeVisible();
+  await expect(page.locator("video.media-detail-video")).toBeVisible();
 });

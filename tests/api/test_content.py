@@ -18,6 +18,7 @@ class ContentRegressionTests(FitHubApiTestCase):
             thumbnail_name="tiny-thumb.png",
         )
         media = payload.get("media") or {}
+        self.assertEqual(media.get("type"), "image")
         self.assertEqual(media.get("name"), "tiny.png")
         self.assertEqual(media.get("contentType"), "image/png")
         self.assertIn(media.get("storageProvider"), {"inline", "supabase"})
@@ -220,3 +221,55 @@ class ContentRegressionTests(FitHubApiTestCase):
         favorite_post = favorite_entry.get("post") or {}
         self.assertEqual(favorite_post["content"], target_post["content"])
         self.assertEqual(favorite_post.get("media"), [])
+
+    def test_video_post_persists_thumbnail_and_can_be_favorited(self):
+        phone_a = self.make_phone(62)
+        phone_b = self.make_phone(63)
+
+        author_client = self.make_client()
+        author_code = author_client.send_code(phone_a, purpose="register")["debugCode"]
+        author_payload = author_client.register_enthusiast(phone_a, "视频收藏作者", author_code)
+        author_profile = self.current_profile(author_payload)
+
+        viewer_client = self.make_client()
+        viewer_code = viewer_client.send_code(phone_b, purpose="register")["debugCode"]
+        viewer_client.register_enthusiast(phone_b, "视频收藏用户", viewer_code)
+
+        tiny_png = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn0n8kAAAAASUVORK5CYII="
+        )
+        tiny_video = "data:video/mp4;base64,AAAA"
+        uploaded = author_client.upload_media(
+            tiny_video,
+            file_name="training-demo.mp4",
+            asset_type="video",
+            category="posts",
+            thumbnail_data_url=tiny_png,
+            thumbnail_name="training-demo-poster.png",
+        )["media"]
+        self.assertEqual(uploaded["type"], "video")
+        self.assertEqual(uploaded["contentType"], "video/mp4")
+        self.assertEqual(uploaded["thumbnailName"], "training-demo-poster.png")
+
+        author_post_payload = author_client.create_post(
+            author_profile["id"],
+            "这是一条带视频封面的训练讲解。",
+            media=[uploaded],
+        )
+        target_post = next(
+            item for item in self.current_profile(author_post_payload).get("posts", [])
+            if item["content"] == "这是一条带视频封面的训练讲解。"
+        )
+        self.assertEqual(target_post["media"][0]["type"], "video")
+        self.assertEqual(target_post["media"][0]["thumbnailName"], "training-demo-poster.png")
+
+        viewer_client.toggle_follow(author_profile["id"])
+        favorite_payload = viewer_client.toggle_favorite(target_post["id"])
+        favorite_entry = next(
+            item for item in favorite_payload.get("favoritePosts", [])
+            if (item.get("post") or {}).get("id") == target_post["id"]
+        )
+        favorite_post = favorite_entry.get("post") or {}
+        self.assertEqual(favorite_post["media"][0]["type"], "video")
+        self.assertEqual(favorite_post["media"][0]["thumbnailName"], "training-demo-poster.png")

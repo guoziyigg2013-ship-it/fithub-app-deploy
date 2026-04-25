@@ -783,6 +783,10 @@ def sanitize_file_name(file_name, content_type):
 
 
 def upload_media_asset(data_url, *, file_name, category, asset_type, force_inline=False, max_bytes_override=None):
+    asset_type = str(asset_type or "image").strip().lower()
+    if asset_type not in {"image", "video"}:
+        raise ValueError("暂不支持这个媒体类型，请重新选择图片或视频。")
+
     content_type, binary = decode_data_url(data_url)
     if asset_type == "video" and not content_type.startswith("video/"):
         raise ValueError("当前文件不是有效视频，请重新选择。")
@@ -795,6 +799,7 @@ def upload_media_asset(data_url, *, file_name, category, asset_type, force_inlin
 
     if force_inline or not supabase_media_storage_enabled():
         return {
+            "type": asset_type,
             "url": data_url,
             "name": sanitize_file_name(file_name, content_type),
             "contentType": content_type,
@@ -820,6 +825,7 @@ def upload_media_asset(data_url, *, file_name, category, asset_type, force_inlin
         expect_json=True,
     )
     return {
+        "type": asset_type,
         "url": build_supabase_public_media_url(object_path),
         "name": sanitized_name,
         "contentType": content_type,

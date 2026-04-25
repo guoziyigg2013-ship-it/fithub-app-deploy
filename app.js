@@ -2987,6 +2987,12 @@ function getMediaThumbnailUrl(item, kind = "feed") {
   return optimizeRemoteImageUrl(sourceUrl, kind);
 }
 
+function getMediaPosterUrl(item, kind = "feed") {
+  const posterUrl = item?.thumbnailUrl || item?.posterUrl || "";
+  if (!posterUrl) return "";
+  return optimizeRemoteImageUrl(posterUrl, kind);
+}
+
 function getMediaDisplayUrl(item) {
   return item?.url || "";
 }
@@ -5601,10 +5607,17 @@ function renderPostMedia(post, options = {}) {
             </button>
           `;
           if (item.type === "video") {
+            const posterUrl = getMediaPosterUrl(item, "feed");
             return `
-              <div class="timeline-media-card image-shell image-shell--cover is-loaded">
+              <div class="timeline-media-card timeline-media-card--video image-shell image-shell--cover is-loaded">
                 ${openButton}
-                <video class="timeline-media-video" src="${getMediaDisplayUrl(item)}" poster="${escapeHtml(getMediaThumbnailUrl(item, "feed"))}" controls playsinline preload="metadata"></video>
+                ${
+                  posterUrl
+                    ? `<img class="timeline-media-image timeline-media-video-poster" src="${escapeHtml(posterUrl)}" alt="${escapeHtml(item.name || "动态视频封面")}" ${loadingAttrs} decoding="async">`
+                    : `<div class="timeline-media-fallback"><span>视频</span></div>`
+                }
+                <span class="timeline-video-play" aria-hidden="true"></span>
+                <span class="timeline-video-tag">视频</span>
               </div>
             `;
           }
@@ -10615,7 +10628,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-2`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-3`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
