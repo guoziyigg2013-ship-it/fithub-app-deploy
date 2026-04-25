@@ -1100,6 +1100,17 @@ function createDefaultAvatar(role, name) {
 const imageShellStateQueue = new Map();
 let imageShellStateFrame = 0;
 let imageHydrationObserver = null;
+const MEDIA_WARMUP_LIMIT = 14;
+const MEDIA_WARMUP_CONCURRENCY = 2;
+const MEDIA_WARMUP_TIMEOUT_MS = 6500;
+const mediaWarmupState = {
+  signature: "",
+  queue: [],
+  active: 0,
+  seen: new Set(),
+  origins: new Set(),
+  idleHandle: 0
+};
 
 function flushImageShellStates() {
   imageShellStateFrame = 0;
@@ -1159,6 +1170,151 @@ function getImageHydrationObserver() {
     { rootMargin: "900px 0px", threshold: 0.01 }
   );
   return imageHydrationObserver;
+}
+
+function isWarmableMediaUrl(url) {
+  return Boolean(
+    url &&
+      typeof url === "string" &&
+      !url.startsWith("data:") &&
+      !url.startsWith("blob:") &&
+      !url.startsWith("#")
+  );
+}
+
+function resolveWarmupUrl(url, kind = "cover") {
+  const optimized = optimizeRemoteImageUrl(url, kind);
+  if (!isWarmableMediaUrl(optimized)) return "";
+  try {
+    return new URL(optimized, window.location.href).href;
+  } catch (_error) {
+    return optimized;
+  }
+}
+
+function ensureMediaPreconnect(url) {
+  if (!isWarmableMediaUrl(url) || typeof document === "undefined") return;
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (parsed.origin === window.location.origin || mediaWarmupState.origins.has(parsed.origin)) return;
+    if (mediaWarmupState.origins.size >= 4) return;
+    mediaWarmupState.origins.add(parsed.origin);
+    const link = document.createElement("link");
+    link.rel = "preconnect";
+    link.href = parsed.origin;
+    link.crossOrigin = "";
+    document.head.appendChild(link);
+  } catch (_error) {
+    // Preconnect is opportunistic only; image loading should never depend on it.
+  }
+}
+
+function addWarmupProfileUrls(urls, profile, includeCover = false) {
+  if (!profile) return;
+  const avatarUrl = resolveWarmupUrl(profile.avatarImage || createDefaultAvatar(profile.role, profile.name), "avatar");
+  if (avatarUrl) urls.push(avatarUrl);
+  if (includeCover) {
+    const coverUrl = resolveWarmupUrl(getProfileCoverImage(profile), "cover");
+    if (coverUrl) urls.push(coverUrl);
+  }
+}
+
+function addWarmupPostMediaUrls(urls, post, limit = 1) {
+  const mediaItems = Array.isArray(post?.media) ? post.media : [];
+  mediaItems.slice(0, limit).forEach((item) => {
+    const mediaUrl = resolveWarmupUrl(getMediaThumbnailUrl(item, "feed") || getMediaDisplayUrl(item), "cover");
+    if (mediaUrl) urls.push(mediaUrl);
+  });
+}
+
+function getCurrentPageWarmupUrls() {
+  const urls = [];
+  if (state.activePage === "discover") {
+    getRecommendedProfiles().slice(0, 10).forEach((profile) => addWarmupProfileUrls(urls, profile));
+    getFollowingFeedItems().slice(0, 8).forEach((item) => {
+      addWarmupProfileUrls(urls, item.profile);
+      if (item.kind === "post") addWarmupPostMediaUrls(urls, item.post, 1);
+      if (item.kind === "profile") addWarmupProfileUrls(urls, item.profile, true);
+    });
+  } else if (state.activePage === "home") {
+    getHomeProfiles(state.homeTab).slice(0, 8).forEach((profile) => addWarmupProfileUrls(urls, profile, true));
+  } else if (state.activePage === "profile") {
+    const profile = getProfile(state.activeProfileId) || getMyPageProfile();
+    addWarmupProfileUrls(urls, profile, true);
+    (profile?.posts || []).slice(0, 4).forEach((post) => addWarmupPostMediaUrls(urls, post, 1));
+    getFavoritedPostEntries().slice(0, 4).forEach((entry) => addWarmupPostMediaUrls(urls, entry.post, 1));
+  }
+
+  const uniqueUrls = [];
+  const seenUrls = new Set();
+  urls.forEach((url) => {
+    if (!isWarmableMediaUrl(url) || seenUrls.has(url)) return;
+    seenUrls.add(url);
+    uniqueUrls.push(url);
+  });
+  return uniqueUrls.slice(0, MEDIA_WARMUP_LIMIT);
+}
+
+function loadWarmupImage(url) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      image.onload = null;
+      image.onerror = null;
+      resolve();
+    };
+    image.onload = finish;
+    image.onerror = finish;
+    window.setTimeout(finish, MEDIA_WARMUP_TIMEOUT_MS);
+    image.decoding = "async";
+    image.src = url;
+  });
+}
+
+function drainMediaWarmupQueue() {
+  if (!mediaWarmupState.queue.length || mediaWarmupState.active >= MEDIA_WARMUP_CONCURRENCY) return;
+  const url = mediaWarmupState.queue.shift();
+  mediaWarmupState.active += 1;
+  loadWarmupImage(url).finally(() => {
+    mediaWarmupState.active = Math.max(0, mediaWarmupState.active - 1);
+    drainMediaWarmupQueue();
+  });
+  drainMediaWarmupQueue();
+}
+
+function scheduleMediaWarmup() {
+  if (state.isBootstrapping) return;
+  const connection = navigator.connection || navigator.webkitConnection || navigator.mozConnection;
+  if (connection?.saveData) return;
+
+  const runWarmup = () => {
+    mediaWarmupState.idleHandle = 0;
+    const urls = getCurrentPageWarmupUrls();
+    const signature = `${state.activePage}:${urls.join("|")}`;
+    if (!urls.length || signature === mediaWarmupState.signature) return;
+    mediaWarmupState.signature = signature;
+    mediaWarmupState.queue = urls.filter((url) => {
+      if (mediaWarmupState.seen.has(url)) return false;
+      mediaWarmupState.seen.add(url);
+      ensureMediaPreconnect(url);
+      return true;
+    });
+    drainMediaWarmupQueue();
+  };
+
+  if (mediaWarmupState.idleHandle) {
+    if (window.cancelIdleCallback) {
+      window.cancelIdleCallback(mediaWarmupState.idleHandle);
+    } else {
+      window.clearTimeout(mediaWarmupState.idleHandle);
+    }
+  }
+  mediaWarmupState.idleHandle = window.requestIdleCallback
+    ? window.requestIdleCallback(runWarmup, { timeout: 900 })
+    : window.setTimeout(runWarmup, 120);
 }
 
 function createInitialProfiles() {
@@ -9664,6 +9820,7 @@ function renderPage() {
   syncNavActive();
   renderOverlay();
   hydrateAsyncImages(appView);
+  scheduleMediaWarmup();
   hydrateRouteMaps(appView).catch(() => {});
 }
 
@@ -10458,7 +10615,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-1`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-2`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
