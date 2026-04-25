@@ -44,10 +44,10 @@ async function waitForBootstrapToSettle(page) {
 async function openRegister(page, role = "enthusiast") {
   await gotoApp(page);
   await waitForBootstrapToSettle(page);
-  const registerNameField = page.locator('#registerForm input[name="name"]');
+  const registerForm = page.locator("#registerForm");
   const registerCodeButton = page.locator('[data-send-register-code="1"]');
   if (
-    (await registerNameField.isVisible().catch(() => false)) &&
+    (await registerForm.isVisible().catch(() => false)) &&
     (await registerCodeButton.isVisible().catch(() => false))
   ) {
     return;
@@ -57,7 +57,7 @@ async function openRegister(page, role = "enthusiast") {
   }
   await expect(page.locator(`[data-choose-role="${role}"]`)).toBeVisible();
   await page.locator(`[data-choose-role="${role}"]`).click();
-  const directOpened = await registerNameField
+  const directOpened = await registerForm
     .waitFor({ state: "visible", timeout: 1500 })
     .then(() => true)
     .catch(() => false);
@@ -72,7 +72,7 @@ async function openRegister(page, role = "enthusiast") {
     }
   }
 
-  await expect(registerNameField).toBeVisible();
+  await expect(registerForm).toBeVisible();
   await expect(registerCodeButton).toBeVisible();
 }
 
@@ -126,6 +126,43 @@ async function registerEnthusiast(page, { name = "测试训练者", phone = buil
   return { name, phone };
 }
 
+async function registerCoach(page, { name = "测试教练", phone = buildUniquePhone() } = {}) {
+  await openRegister(page, "coach");
+  await page.locator('#registerForm input[name="name"]').fill(name);
+  const code = await sendRegisterCode(page, phone);
+  await page.locator('#registerForm input[name="verification_code"]').fill(code);
+  await page.locator('#registerForm input[name="city"]').fill("厦门");
+  await page.locator('#registerForm input[name="location"]').fill("厦门 · 思明区");
+  await page.locator('#registerForm textarea[name="specialties"]').fill("力量训练 减脂塑形 私教");
+  await page.locator('#registerForm input[name="years"]').fill("5");
+  await page.locator('#registerForm input[name="price"]').fill("¥260/小时");
+  await page.locator('#registerForm textarea[name="intro"]').fill("用于教练端注册和跨设备登录回归。");
+  await page.locator('#registerForm button[type="submit"]').click();
+  await expect(page.locator("#registerForm")).toBeHidden({ timeout: 10000 });
+  await openMyPage(page);
+  await expect(page.getByText(name)).toBeVisible();
+  return { name, phone };
+}
+
+async function registerGym(page, { name = "测试健身房", phone = buildUniquePhone() } = {}) {
+  await openRegister(page, "gym");
+  await page.locator('#registerForm input[name="gym_name"]').fill(name);
+  const code = await sendRegisterCode(page, phone);
+  await page.locator('#registerForm input[name="verification_code"]').fill(code);
+  await page.locator('#registerForm input[name="contact_name"]').fill("测试店长");
+  await page.locator('#registerForm input[name="city"]').fill("厦门");
+  await page.locator('#registerForm input[name="location"]').fill("厦门 · 思明区");
+  await page.locator('#registerForm input[name="hours"]').fill("06:00 - 23:00");
+  await page.locator('#registerForm input[name="price"]').fill("¥169/月起");
+  await page.locator('#registerForm textarea[name="facilities"]').fill("力量区 跑步机 团课教室 淋浴");
+  await page.locator('#registerForm textarea[name="intro"]').fill("用于健身房端注册和跨设备登录回归。");
+  await page.locator('#registerForm button[type="submit"]').click();
+  await expect(page.locator("#registerForm")).toBeHidden({ timeout: 10000 });
+  await openMyPage(page);
+  await expect(page.getByText(name)).toBeVisible();
+  return { name, phone };
+}
+
 async function loginWithPhone(page, { phone, role = "enthusiast" }) {
   await gotoApp(page);
   await waitForBootstrapToSettle(page);
@@ -154,5 +191,7 @@ module.exports = {
   gotoApp,
   openMyPage,
   registerEnthusiast,
+  registerCoach,
+  registerGym,
   loginWithPhone,
 };
