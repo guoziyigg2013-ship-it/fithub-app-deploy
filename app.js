@@ -9920,7 +9920,24 @@ function syncChatComposerState() {
   }
 }
 
+function getPerformanceNow() {
+  return window.performance?.now ? window.performance.now() : Date.now();
+}
+
+function recordRenderMetric(page, startedAt) {
+  const metric = {
+    page,
+    durationMs: Math.max(0, Math.round((getPerformanceNow() - startedAt) * 10) / 10),
+    at: Date.now()
+  };
+  window.__FITHUB_LAST_RENDER_METRIC__ = metric;
+  const metrics = Array.isArray(window.__FITHUB_RENDER_METRICS__) ? window.__FITHUB_RENDER_METRICS__ : [];
+  metrics.push(metric);
+  window.__FITHUB_RENDER_METRICS__ = metrics.slice(-40);
+}
+
 function renderPage() {
+  const renderStartedAt = getPerformanceNow();
   resetProfileSwipe();
   routeMapRegistry.clear();
   document.body.classList.toggle(
@@ -9939,6 +9956,7 @@ function renderPage() {
       <article class="empty-card">正在同步共享数据、身份和互动内容，请稍候...</article>
     `;
     syncNavActive();
+    recordRenderMetric("bootstrapping", renderStartedAt);
     return;
   }
   if (state.activePage === "home") renderHome();
@@ -9951,6 +9969,7 @@ function renderPage() {
   hydrateAsyncImages(appView);
   scheduleMediaWarmup();
   hydrateRouteMaps(appView).catch(() => {});
+  recordRenderMetric(state.activePage, renderStartedAt);
 }
 
 appView.addEventListener("click", (event) => {
@@ -10744,7 +10763,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-2`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-3`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
