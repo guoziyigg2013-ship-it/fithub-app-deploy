@@ -124,7 +124,11 @@ test("消息中心能集中显示赞、评论和私信咨询", async ({ page, re
   });
 
   await openMyPage(page);
-  await page.locator('[data-open-my-feature="messages"]').click();
+  const profileNavBadge = page.locator('.bottom-nav [data-page="profile"] .nav-unread-badge');
+  await expect(profileNavBadge).toHaveText(/\d+/);
+  const messagesTile = page.locator('[data-open-my-feature="messages"]').first();
+  await expect(messagesTile.locator(".account-tile-badge")).toHaveText(/\d+/);
+  await messagesTile.click();
 
   await expect(page.getByRole("heading", { name: "消息", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "互动消息" })).toBeVisible();
@@ -168,4 +172,8 @@ test("消息中心能集中显示赞、评论和私信咨询", async ({ page, re
     .filter({ hasText: scenario.actor.name })
     .first();
   await expect(readMessageThread.locator(".avatar-unread-badge")).toHaveCount(0);
+  await expect(profileNavBadge).toHaveCount(0);
+  await page.locator('.bottom-nav [data-page="profile"]').evaluate((element) => element.click());
+  const readMessagesTile = page.locator('[data-open-my-feature="messages"]').first();
+  await expect(readMessagesTile.locator(".account-tile-badge")).toHaveCount(0);
 });

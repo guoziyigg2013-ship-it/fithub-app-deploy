@@ -1976,6 +1976,11 @@ body.is-workout-live .app {
   text-align: center;
 }
 
+.account-tile-icon-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
 .account-tile-icon {
   width: 36px;
   height: 36px;
@@ -1986,6 +1991,26 @@ body.is-workout-live .app {
   font-size: 16px;
   font-weight: 700;
   background: rgba(242, 140, 40, 0.14);
+}
+
+.account-tile-badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ff4d4f;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  border: 2px solid #fff;
+  box-shadow: 0 6px 12px rgba(255, 77, 79, 0.2);
 }
 
 .account-tile strong {
@@ -4821,6 +4846,7 @@ body.is-workout-live .app {
 .nav-link {
   border: 0;
   background: transparent;
+  position: relative;
   display: grid;
   justify-items: center;
   gap: 5px;
@@ -4838,6 +4864,26 @@ body.is-workout-live .app {
 
 .nav-link--ghost {
   pointer-events: none;
+}
+
+.nav-unread-badge {
+  position: absolute;
+  top: 12px;
+  right: calc(50% - 24px);
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ff4d4f;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 10px rgba(255, 77, 79, 0.22);
 }
 
 .nav-icon {

@@ -4050,6 +4050,20 @@ function syncNavActive() {
   navLinks.forEach((link) => {
     link.classList.toggle("is-active", link.dataset.page === state.activePage);
   });
+  const profileLink = Array.from(navLinks).find((link) => link.dataset.page === "profile");
+  if (!profileLink) return;
+  const unreadCount = state.isBootstrapping ? 0 : getInboxCount();
+  let badge = profileLink.querySelector(".nav-unread-badge");
+  if (!unreadCount) {
+    badge?.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "nav-unread-badge";
+    profileLink.appendChild(badge);
+  }
+  badge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
 }
 
 function openOverlay(mode) {
@@ -4080,6 +4094,7 @@ function closeOverlay() {
   renderOverlay();
   if (closingMode === "chat" && state.activePage === "profile" && state.profileSubpage === "messages") {
     renderProfile();
+    syncNavActive();
   }
 }
 
@@ -6989,10 +7004,20 @@ function getBookingDashboard(profile) {
   };
 }
 
-function renderPersonalShortcutTile(label, sublabel, icon, attrs = "") {
+function renderPersonalShortcutTile(label, sublabel, icon, attrs = "", options = {}) {
+  const badgeCount = Math.max(0, Number(options.badgeCount || 0));
+  const badge = badgeCount
+    ? `<span class="account-tile-badge">${escapeHtml(badgeCount > 99 ? "99+" : String(badgeCount))}</span>`
+    : "";
+  const ariaLabel = badgeCount
+    ? `${label}，${badgeCount > 99 ? "99+" : String(badgeCount)} 条未读`
+    : label;
   return `
-    <button class="account-tile" type="button" ${attrs}>
-      <span class="account-tile-icon">${escapeHtml(icon)}</span>
+    <button class="account-tile" type="button" aria-label="${escapeHtml(ariaLabel)}" ${attrs}>
+      <span class="account-tile-icon-wrap">
+        <span class="account-tile-icon">${escapeHtml(icon)}</span>
+        ${badge}
+      </span>
       <strong>${escapeHtml(label)}</strong>
     </button>
   `;
@@ -8318,12 +8343,13 @@ function renderHealthFeature(profile) {
 function renderPersonalDashboardPage(profile, managedProfiles) {
   const stats = getManagedDashboardStats(profile);
   const relatedBookings = getRelevantBookingsForProfile(profile);
+  const inboxCount = getInboxCount();
   const shortcutTiles =
     profile.role === "enthusiast"
       ? [
           renderPersonalShortcutTile("账户", "资料与安全", "账", 'data-open-my-feature="account"'),
           renderPersonalShortcutTile("商城", "器材与精选商品", "商", 'data-open-my-feature="shop"'),
-          renderPersonalShortcutTile("消息", `${getInboxCount()} 条互动`, "信", 'data-open-my-feature="messages"'),
+          renderPersonalShortcutTile("消息", `${inboxCount} 条互动`, "信", 'data-open-my-feature="messages"', { badgeCount: inboxCount }),
           renderPersonalShortcutTile("订单", "预约记录", "单", 'data-open-my-feature="orders"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
           renderPersonalShortcutTile("收藏", `${getFavoritedPostEntries().length} 条`, "藏", 'data-open-my-feature="collections"'),
@@ -8333,7 +8359,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
       : [
           renderPersonalShortcutTile("账户", "资料与主页", "账", 'data-open-my-feature="account"'),
           renderPersonalShortcutTile("商城", "器材、周边与门店商品", "商", 'data-open-my-feature="shop"'),
-          renderPersonalShortcutTile("消息", `${getInboxCount()} 条互动`, "信", 'data-open-my-feature="messages"'),
+          renderPersonalShortcutTile("消息", `${inboxCount} 条互动`, "信", 'data-open-my-feature="messages"', { badgeCount: inboxCount }),
           renderPersonalShortcutTile("订单", `别人给我的 ${relatedBookings.length} 单`, "单", 'data-open-my-feature="orders"'),
           renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
           renderPersonalShortcutTile("收藏", `${getFavoritedPostEntries().length} 条`, "藏", 'data-open-my-feature="collections"'),
@@ -10632,7 +10658,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-4`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260425-5`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
