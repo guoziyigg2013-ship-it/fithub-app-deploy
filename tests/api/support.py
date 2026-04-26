@@ -227,6 +227,23 @@ class ApiClient:
     def create_booking(self, target_profile_id, time_label="本周六 20:00"):
         return self.post("/api/booking/create", {"targetProfileId": target_profile_id, "time": time_label})
 
+    def create_report(self, target_type, target_id, reason="不适内容"):
+        return self.post(
+            "/api/report/create",
+            {
+                "targetType": target_type,
+                "targetId": target_id,
+                "reason": reason,
+            },
+        )
+
+    def admin_moderation(self, token="test-maintenance-token", expected_status=200):
+        return self.request(
+            "GET",
+            f"/api/admin/moderation?token={urllib.parse.quote(token)}",
+            expected_status=expected_status,
+        )
+
 
 class FitHubApiTestCase(unittest.TestCase):
     @classmethod

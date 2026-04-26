@@ -3297,6 +3297,25 @@ function showError(message) {
   window.alert(message || "操作失败，请稍后再试。");
 }
 
+function showToast(message) {
+  const text = String(message || "").trim();
+  if (!text) return;
+  let toast = document.querySelector(".app-toast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.className = "app-toast";
+    toast.setAttribute("role", "status");
+    toast.setAttribute("aria-live", "polite");
+    document.body.appendChild(toast);
+  }
+  toast.textContent = text;
+  toast.classList.add("is-visible");
+  window.clearTimeout(showToast.hideTimer);
+  showToast.hideTimer = window.setTimeout(() => {
+    toast.classList.remove("is-visible");
+  }, 1800);
+}
+
 function syncConnectionNotice() {
   const phone = document.querySelector(".phone");
   if (!phone) return;
@@ -5392,6 +5411,17 @@ async function submitPostComment(postId) {
   refreshPostCommentViews(postId);
 }
 
+async function submitReport(targetType, targetId) {
+  const reason = window.prompt("举报原因（如广告、骚扰、不实内容）", "不适内容");
+  if (!reason || !reason.trim()) return;
+  await postWithoutStateSync(`${API_BASE}/report/create`, {
+    targetType,
+    targetId,
+    reason: reason.trim()
+  });
+  showToast("已收到举报，我们会尽快处理。");
+}
+
 async function sendDirectMessage(profileId) {
   const text = state.chatDraft.trim();
   if (!text) return;
@@ -5842,6 +5872,7 @@ function renderPostCard(profile, post, options = {}) {
             ? `<button class="post-action-button" data-open-chat="${profile.id}" type="button">私信</button>`
             : ""
         }
+        <button class="post-action-button post-action-button--muted" data-report-target-type="post" data-report-target-id="${post.id}" type="button">举报</button>
       </div>
       ${renderPostComments(post)}
       <div class="post-comment-composer">
@@ -10155,6 +10186,11 @@ appView.addEventListener("click", (event) => {
       markThreadRead(thread.id);
     }
     openOverlay("chat");
+    return;
+  }
+
+  if (target.dataset.reportTargetId) {
+    runTask(() => submitReport(target.dataset.reportTargetType || "post", target.dataset.reportTargetId));
     return;
   }
 

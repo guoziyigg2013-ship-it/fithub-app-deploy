@@ -324,3 +324,66 @@ class ContentRegressionTests(FitHubApiTestCase):
         favorite_post = favorite_entry.get("post") or {}
         self.assertEqual(favorite_post["media"][0]["type"], "video")
         self.assertEqual(favorite_post["media"][0]["thumbnailName"], "training-demo-poster.png")
+
+    def test_risky_post_comment_and_message_are_queued_for_moderation(self):
+        phone_a = self.make_phone(70)
+        phone_b = self.make_phone(71)
+
+        author_client = self.make_client()
+        author_code = author_client.send_code(phone_a, purpose="register")["debugCode"]
+        author_payload = author_client.register_enthusiast(phone_a, "审核作者", author_code)
+        author_profile = self.current_profile(author_payload)
+
+        viewer_client = self.make_client()
+        viewer_code = viewer_client.send_code(phone_b, purpose="register")["debugCode"]
+        viewer_payload = viewer_client.register_enthusiast(phone_b, "审核互动用户", viewer_code)
+        viewer_profile = self.current_profile(viewer_payload)
+
+        post_payload = author_client.create_post(author_profile["id"], "这是一条加微信后私下付款的测试动态。")
+        target_post = next(
+            item for item in self.current_profile(post_payload).get("posts", [])
+            if item["content"] == "这是一条加微信后私下付款的测试动态。"
+        )
+
+        viewer_client.toggle_follow(author_profile["id"])
+        viewer_client.comment_post(target_post["id"], "评论里也提醒转账风险。")
+        viewer_client.send_message(author_profile["id"], "私信里不要私下付款。")
+
+        dashboard = viewer_client.admin_moderation()
+        self.assertGreaterEqual(dashboard["summary"]["pendingReview"], 3)
+        queued_types = {item["type"] for item in dashboard["moderationQueue"]}
+        self.assertIn("post", queued_types)
+        self.assertIn("comment", queued_types)
+        self.assertIn("message", queued_types)
+        self.assertTrue(any(item.get("targetOwnerProfileId") == author_profile["id"] for item in dashboard["moderationQueue"]))
+        self.assertTrue(any(item.get("targetOwnerProfileId") == viewer_profile["id"] for item in dashboard["moderationQueue"]))
+
+    def test_user_report_is_persisted_and_admin_endpoint_is_protected(self):
+        phone_a = self.make_phone(72)
+        phone_b = self.make_phone(73)
+
+        author_client = self.make_client()
+        author_code = author_client.send_code(phone_a, purpose="register")["debugCode"]
+        author_payload = author_client.register_enthusiast(phone_a, "被举报作者", author_code)
+        author_profile = self.current_profile(author_payload)
+
+        viewer_client = self.make_client()
+        viewer_code = viewer_client.send_code(phone_b, purpose="register")["debugCode"]
+        viewer_client.register_enthusiast(phone_b, "举报用户", viewer_code)
+
+        post_payload = author_client.create_post(author_profile["id"], "这是一条普通但可被举报的动态。")
+        target_post = next(
+            item for item in self.current_profile(post_payload).get("posts", [])
+            if item["content"] == "这是一条普通但可被举报的动态。"
+        )
+
+        viewer_client.create_report("post", target_post["id"], reason="广告骚扰")
+        denied = viewer_client.admin_moderation(token="wrong-token", expected_status=403)
+        self.assertIn("error", denied)
+
+        dashboard = viewer_client.admin_moderation()
+        self.assertEqual(dashboard["summary"]["openReports"], 1)
+        report = next(item for item in dashboard["reports"] if item["targetId"] == target_post["id"])
+        self.assertEqual(report["reason"], "广告骚扰")
+        self.assertEqual(report["targetOwnerProfileId"], author_profile["id"])
+        self.assertTrue(any(item["source"] == "user-report" and item["targetId"] == target_post["id"] for item in dashboard["moderationQueue"]))

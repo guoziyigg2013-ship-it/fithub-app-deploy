@@ -69,6 +69,7 @@ MEDIA_IMAGE_LIMIT_BYTES = int(os.getenv("FITHUB_IMAGE_UPLOAD_LIMIT_BYTES") or st
 MEDIA_VIDEO_LIMIT_BYTES = int(os.getenv("FITHUB_VIDEO_UPLOAD_LIMIT_BYTES") or str(8 * 1024 * 1024))
 MEDIA_THUMB_LIMIT_BYTES = int(os.getenv("FITHUB_THUMB_UPLOAD_LIMIT_BYTES") or str(2 * 1024 * 1024))
 MEDIA_MAINTENANCE_TOKEN = (os.getenv("FITHUB_MEDIA_MAINTENANCE_TOKEN") or "").strip()
+ADMIN_TOKEN = (os.getenv("FITHUB_ADMIN_TOKEN") or MEDIA_MAINTENANCE_TOKEN).strip()
 PUBLIC_API_ORIGIN = (os.getenv("FITHUB_PUBLIC_API_ORIGIN") or "").strip().rstrip("/")
 SMS_PROVIDER = (os.getenv("FITHUB_SMS_PROVIDER") or "").strip().lower()
 SMS_CODE_LENGTH = int(os.getenv("FITHUB_SMS_CODE_LENGTH") or "6")
@@ -410,6 +411,9 @@ def compact_media_item(item):
 
 
 def sanitize_state(state):
+    state.setdefault("reports", [])
+    state.setdefault("moderationQueue", [])
+    state.setdefault("adminActions", [])
     for profile in state.get("profiles", {}).values():
         profile["avatarImage"] = compact_avatar_image(profile.get("avatarImage"), profile.get("role", "enthusiast"))
     for post in state.get("posts", {}).values():
@@ -3563,6 +3567,9 @@ def initial_state():
         "otpCodes": {},
         "accounts": {},
         "sessions": {},
+        "reports": [],
+        "moderationQueue": [],
+        "adminActions": [],
     }
 
 
@@ -4210,6 +4217,170 @@ def serialize_threads(state, current_actor_profile_id):
         )
     threads.sort(key=lambda item: item["lastMessage"]["createdAt"] if item["lastMessage"] else "", reverse=True)
     return threads
+
+
+CONTENT_REVIEW_KEYWORDS = {
+    "诈骗": "疑似诈骗",
+    "赌博": "违规交易",
+    "博彩": "违规交易",
+    "毒品": "违法内容",
+    "枪支": "违法内容",
+    "裸聊": "低俗骚扰",
+    "约炮": "低俗骚扰",
+    "自杀": "高风险表达",
+    "杀人": "暴力威胁",
+    "转账": "站外交易风险",
+    "私下付款": "站外交易风险",
+    "加微信": "站外导流风险",
+}
+
+
+def normalize_moderation_text(text):
+    return re.sub(r"\s+", "", str(text or "").strip().lower())
+
+
+def review_text_content(text, source=""):
+    normalized = normalize_moderation_text(text)
+    flags = []
+    for keyword, label in CONTENT_REVIEW_KEYWORDS.items():
+        if keyword.lower() in normalized and label not in flags:
+            flags.append(label)
+    if len(str(text or "")) > 1200:
+        flags.append("内容过长")
+    return {
+        "status": "pending_review" if flags else "approved",
+        "flags": flags,
+        "source": source,
+        "checkedAt": iso_at(),
+    }
+
+
+def queue_moderation_item(state, item):
+    state.setdefault("moderationQueue", [])
+    item_type = item.get("type")
+    item_id = item.get("targetId")
+    source = item.get("source") or "content-review"
+    existing = next(
+        (
+            queued
+            for queued in state["moderationQueue"]
+            if queued.get("type") == item_type
+            and queued.get("targetId") == item_id
+            and queued.get("source") == source
+            and queued.get("status") == "pending"
+        ),
+        None,
+    )
+    if existing:
+        existing["updatedAt"] = iso_at()
+        existing["flags"] = sorted(set(existing.get("flags", []) + item.get("flags", [])))
+        return existing
+    queued_item = {
+        "id": item.get("id") or f"moderation-{uuid.uuid4().hex[:10]}",
+        "type": item_type,
+        "targetId": item_id,
+        "targetOwnerProfileId": resolve_canonical_profile_id(state, item.get("targetOwnerProfileId") or "") or item.get("targetOwnerProfileId") or "",
+        "reporterProfileId": resolve_canonical_profile_id(state, item.get("reporterProfileId") or "") or item.get("reporterProfileId") or "",
+        "source": source,
+        "flags": item.get("flags") or [],
+        "excerpt": str(item.get("excerpt") or "")[:160],
+        "status": "pending",
+        "createdAt": iso_at(),
+        "updatedAt": iso_at(),
+    }
+    state["moderationQueue"].insert(0, queued_item)
+    del state["moderationQueue"][200:]
+    return queued_item
+
+
+def attach_text_moderation(state, record, text, item_type, owner_profile_id, source):
+    review = review_text_content(text, source=source)
+    record["moderation"] = review
+    if review["status"] == "pending_review":
+        queue_moderation_item(
+            state,
+            {
+                "type": item_type,
+                "targetId": record.get("id"),
+                "targetOwnerProfileId": owner_profile_id,
+                "source": "content-review",
+                "flags": review.get("flags", []),
+                "excerpt": text,
+            },
+        )
+    return review
+
+
+def find_report_target(state, target_type, target_id):
+    target_type = str(target_type or "").strip()
+    target_id = str(target_id or "").strip()
+    if target_type == "profile":
+        profile_id = resolve_canonical_profile_id(state, target_id)
+        profile = state.get("profiles", {}).get(profile_id)
+        if profile:
+            return {"type": target_type, "id": profile_id, "ownerProfileId": profile_id, "record": profile}
+    if target_type == "post":
+        post = state.get("posts", {}).get(target_id)
+        if post:
+            owner = resolve_canonical_profile_id(state, post.get("authorProfileId")) or post.get("authorProfileId")
+            return {"type": target_type, "id": target_id, "ownerProfileId": owner, "record": post}
+    if target_type == "comment":
+        for post in state.get("posts", {}).values():
+            for comment in post.get("comments", []):
+                if comment.get("id") == target_id:
+                    owner = resolve_canonical_profile_id(state, comment.get("authorProfileId")) or comment.get("authorProfileId")
+                    return {"type": target_type, "id": target_id, "ownerProfileId": owner, "record": comment, "postId": post.get("id")}
+    if target_type == "message":
+        for thread in state.get("threads", []):
+            for message in thread.get("messages", []):
+                if message.get("id") == target_id:
+                    owner = resolve_canonical_profile_id(state, message.get("senderProfileId")) or message.get("senderProfileId")
+                    return {"type": target_type, "id": target_id, "ownerProfileId": owner, "record": message, "threadId": thread.get("id")}
+    return None
+
+
+def serialize_moderation_item(state, item):
+    owner_id = resolve_canonical_profile_id(state, item.get("targetOwnerProfileId") or "")
+    reporter_id = resolve_canonical_profile_id(state, item.get("reporterProfileId") or "")
+    return {
+        **item,
+        "targetOwnerProfile": serialize_profile_brief(state, owner_id) if owner_id else None,
+        "reporterProfile": serialize_profile_brief(state, reporter_id) if reporter_id else None,
+    }
+
+
+def build_moderation_dashboard(state):
+    reports = state.setdefault("reports", [])
+    queue = state.setdefault("moderationQueue", [])
+    open_reports = [item for item in reports if item.get("status", "open") == "open"]
+    pending_queue = [item for item in queue if item.get("status", "pending") == "pending"]
+    return {
+        "ok": True,
+        "summary": {
+            "openReports": len(open_reports),
+            "pendingReview": len(pending_queue),
+            "totalReports": len(reports),
+            "totalQueued": len(queue),
+        },
+        "reports": [serialize_moderation_item(state, item) for item in reports[:100]],
+        "moderationQueue": [serialize_moderation_item(state, item) for item in queue[:100]],
+        "adminActions": state.setdefault("adminActions", [])[:50],
+    }
+
+
+def moderation_admin_authorized(headers, query=None, payload=None):
+    expected_token = ADMIN_TOKEN
+    if not expected_token:
+        return False
+    provided_token = ""
+    auth_header = str(headers.get("Authorization") or "").strip()
+    if auth_header.lower().startswith("bearer "):
+        provided_token = auth_header[7:].strip()
+    if not provided_token and query:
+        provided_token = str(query.get("token", [""])[0]).strip()
+    if not provided_token and payload:
+        provided_token = str(payload.get("token") or "").strip()
+    return hmac.compare_digest(provided_token, expected_token)
 
 
 def bootstrap_response(state, session):
@@ -4970,6 +5141,14 @@ class FitHubHandler(BaseHTTPRequestHandler):
 
             self._write_json(self._read_state(action))
             return
+        if parsed.path == f"{API_PREFIX}/admin/moderation":
+            query = parse_qs(parsed.query)
+            if not moderation_admin_authorized(self.headers, query=query):
+                self._write_json({"error": "没有权限查看审核后台。"}, status=HTTPStatus.FORBIDDEN)
+                return
+
+            self._write_json(self._read_state(build_moderation_dashboard))
+            return
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def _handle_api_post(self, parsed):
@@ -5452,16 +5631,19 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     raise ValueError("只能用当前设备已注册的身份发布动态。")
                 media_items = [deepcopy(item) for item in (payload.get("media") or []) if isinstance(item, dict)]
                 post_id = f"post-{uuid.uuid4().hex[:10]}"
-                state["posts"][post_id] = {
+                content = payload.get("content") or "分享了一条新的动态。"
+                post_record = {
                     "id": post_id,
                     "authorProfileId": profile_id,
                     "createdAt": iso_at(),
-                    "content": payload.get("content") or "分享了一条新的动态。",
+                    "content": content,
                     "meta": payload.get("meta") or state["profiles"][profile_id]["locationLabel"],
                     "media": media_items,
                     "likes": [],
                     "comments": [],
                 }
+                attach_text_moderation(state, post_record, content, "post", profile_id, "post-create")
+                state["posts"][post_id] = post_record
                 release_session_draft_media(session, media_items)
                 session["currentActorProfileId"] = profile_id
                 return bootstrap_response(state, session)
@@ -5572,6 +5754,119 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 )
 
             self._write_json(self._with_state(action))
+            return
+
+        if parsed.path == f"{API_PREFIX}/report/create":
+            def action(state):
+                session = ensure_session(state, session_id)
+                reporter_id = session.get("currentActorProfileId")
+                if not reporter_id:
+                    raise ValueError("请先登录后再举报。")
+                target_type = str(payload.get("targetType") or "").strip()
+                target_id = str(payload.get("targetId") or "").strip()
+                if target_type not in {"profile", "post", "comment", "message"}:
+                    raise ValueError("举报对象类型不正确。")
+                target = find_report_target(state, target_type, target_id)
+                if not target:
+                    raise ValueError("没有找到需要举报的内容。")
+                reason = str(payload.get("reason") or "不适内容").strip()[:80]
+                detail = str(payload.get("detail") or "").strip()[:500]
+                reports = state.setdefault("reports", [])
+                existing = next(
+                    (
+                        item
+                        for item in reports
+                        if item.get("reporterProfileId") == reporter_id
+                        and item.get("targetType") == target_type
+                        and item.get("targetId") == target["id"]
+                        and item.get("status", "open") == "open"
+                    ),
+                    None,
+                )
+                if existing:
+                    existing["reason"] = reason
+                    existing["detail"] = detail
+                    existing["updatedAt"] = iso_at()
+                    report = existing
+                else:
+                    report = {
+                        "id": f"report-{uuid.uuid4().hex[:10]}",
+                        "reporterProfileId": reporter_id,
+                        "targetType": target_type,
+                        "targetId": target["id"],
+                        "targetOwnerProfileId": target["ownerProfileId"],
+                        "postId": target.get("postId", ""),
+                        "threadId": target.get("threadId", ""),
+                        "reason": reason,
+                        "detail": detail,
+                        "status": "open",
+                        "createdAt": iso_at(),
+                        "updatedAt": iso_at(),
+                    }
+                    reports.insert(0, report)
+                    del reports[300:]
+                excerpt = ""
+                target_record = target.get("record") or {}
+                if isinstance(target_record, dict):
+                    excerpt = target_record.get("content") or target_record.get("text") or target_record.get("name") or ""
+                queue_moderation_item(
+                    state,
+                    {
+                        "type": target_type,
+                        "targetId": target["id"],
+                        "targetOwnerProfileId": target["ownerProfileId"],
+                        "reporterProfileId": reporter_id,
+                        "source": "user-report",
+                        "flags": [reason],
+                        "excerpt": excerpt or detail,
+                    },
+                )
+                if payload.get("compact"):
+                    return {"ok": True, "report": report}
+                return bootstrap_response(state, session)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/admin/moderation/resolve":
+            if not moderation_admin_authorized(self.headers, payload=payload):
+                self._write_json({"error": "没有权限处理审核项。"}, status=HTTPStatus.FORBIDDEN)
+                return
+
+            def action(state):
+                target_id = str(payload.get("id") or "").strip()
+                target_kind = str(payload.get("kind") or "report").strip()
+                status = str(payload.get("status") or "resolved").strip()
+                if status not in {"resolved", "dismissed"}:
+                    status = "resolved"
+                collection_name = "moderationQueue" if target_kind == "queue" else "reports"
+                collection = state.setdefault(collection_name, [])
+                target = next((item for item in collection if item.get("id") == target_id), None)
+                if not target:
+                    raise ValueError("没有找到这个审核项。")
+                target["status"] = status
+                target["resolvedAt"] = iso_at()
+                target["resolutionNote"] = str(payload.get("note") or "").strip()[:300]
+                state.setdefault("adminActions", []).insert(
+                    0,
+                    {
+                        "id": f"admin-action-{uuid.uuid4().hex[:10]}",
+                        "kind": target_kind,
+                        "targetId": target_id,
+                        "status": status,
+                        "createdAt": iso_at(),
+                    },
+                )
+                del state["adminActions"][100:]
+                return build_moderation_dashboard(state)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
         if parsed.path == f"{API_PREFIX}/checkin/create":
@@ -5702,14 +5997,14 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 if not text:
                     raise ValueError("评论内容不能为空。")
                 post = state["posts"][payload["postId"]]
-                post.setdefault("comments", []).append(
-                    {
-                        "id": f"comment-{uuid.uuid4().hex[:10]}",
-                        "authorProfileId": actor,
-                        "text": text,
-                        "createdAt": iso_at(),
-                    }
-                )
+                comment = {
+                    "id": f"comment-{uuid.uuid4().hex[:10]}",
+                    "authorProfileId": actor,
+                    "text": text,
+                    "createdAt": iso_at(),
+                }
+                attach_text_moderation(state, comment, text, "comment", actor, "post-comment")
+                post.setdefault("comments", []).append(comment)
                 if payload.get("compact"):
                     return compact_post_interaction_response(state, session, post)
                 return bootstrap_response(state, session)
@@ -5732,14 +6027,14 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 if not text:
                     raise ValueError("私信内容不能为空。")
                 thread = find_or_create_thread(state, actor, target_profile_id)
-                thread["messages"].append(
-                    {
-                        "id": f"msg-{uuid.uuid4().hex[:10]}",
-                        "senderProfileId": actor,
-                        "text": text,
-                        "createdAt": iso_at(),
-                    }
-                )
+                message = {
+                    "id": f"msg-{uuid.uuid4().hex[:10]}",
+                    "senderProfileId": actor,
+                    "text": text,
+                    "createdAt": iso_at(),
+                }
+                attach_text_moderation(state, message, text, "message", actor, "message-send")
+                thread["messages"].append(message)
                 if payload.get("compact"):
                     return compact_message_response(state, session, target_profile_id)
                 return bootstrap_response(state, session)
