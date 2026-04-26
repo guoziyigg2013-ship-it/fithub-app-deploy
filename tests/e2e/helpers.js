@@ -190,6 +190,7 @@ module.exports = {
   buildUniquePhone,
   gotoApp,
   openMyPage,
+  openRegister,
   registerEnthusiast,
   registerCoach,
   registerGym,

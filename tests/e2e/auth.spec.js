@@ -6,6 +6,7 @@ const {
   gotoApp,
   loginWithPhone,
   openMyPage,
+  openRegister,
 } = require("./helpers");
 
 test("训练者注册后同设备重进会自动恢复，退出后可验证码重新登录", async ({ browser }) => {
@@ -56,4 +57,23 @@ test("教练和健身房注册后可跨设备登录回到各自主页", async ({
   await expect(gymLoginPage.getByText("跨端测试健身房")).toBeVisible();
   await expect(gymLoginPage.getByText("健身房").first()).toBeVisible();
   await gymLoginContext.close();
+});
+
+test("教练课时费使用10到600元滚轮选择", async ({ page }) => {
+  await openRegister(page, "coach");
+
+  const priceInput = page.locator('#registerForm input[name="price"]');
+  await expect(priceInput).toHaveAttribute("type", "hidden");
+  await expect(priceInput).toHaveValue("¥280/小时");
+  await expect(page.locator("#registerForm").getByText("280 元/小时")).toBeVisible();
+
+  await page.locator('[data-open-register-wheel="price"]').click();
+  await expect(page.locator(".register-wheel-card")).toBeVisible();
+  await expect(page.locator('[data-register-wheel-option="price"][data-wheel-value="10"]')).toHaveCount(1);
+  await expect(page.locator('[data-register-wheel-option="price"][data-wheel-value="600"]')).toHaveCount(1);
+
+  await page.locator('[data-register-wheel-option="price"][data-wheel-value="600"]').click();
+  await page.locator('[data-confirm-register-wheel="1"]').click();
+  await expect(priceInput).toHaveValue("¥600/小时");
+  await expect(page.locator("#registerForm").getByText("600 元/小时")).toBeVisible();
 });
