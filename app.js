@@ -1643,6 +1643,7 @@ const state = {
   favoritePostIds: new Set(),
   favoritePosts: [],
   notifications: [],
+  followMutationQueue: new Map(),
   likeMutationQueue: new Map(),
   favoriteMutationQueue: new Map(),
   pendingMessageProfileIds: new Set(),
@@ -2705,6 +2706,7 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
     : payload.session.currentActorProfileId || state.managedProfileIds[0] || "";
   state.followSet = preserveManagedSession ? previousFollowSet : new Set(payload.followSet || []);
   state.followerSet = preserveManagedSession ? previousFollowerSet : new Set(payload.followerSet || []);
+  applyPendingFollowMutations();
   state.favoritePostIds = preserveManagedSession ? previousFavoritePostIds : new Set(payload.favoritePostIds || []);
   state.favoritePosts = preserveManagedSession ? previousFavoritePosts : (Array.isArray(payload.favoritePosts) ? payload.favoritePosts : []);
   state.notifications = preserveManagedSession ? previousNotifications : (Array.isArray(payload.notifications) ? payload.notifications : []);
@@ -3588,6 +3590,92 @@ function refreshPostFavoriteButtons(postId) {
   });
 }
 
+function applyFollowState(profileId, following) {
+  if (!profileId) return;
+  const wasFollowing = state.followSet.has(profileId);
+  if (wasFollowing === following) return;
+
+  if (following) {
+    state.followSet.add(profileId);
+  } else {
+    state.followSet.delete(profileId);
+  }
+
+  const delta = following ? 1 : -1;
+  updateProfile(profileId, (profile) => ({
+    ...profile,
+    followers: Math.max(0, Number(profile.followers || 0) + delta)
+  }));
+
+  const actor = getCurrentActor();
+  if (actor?.id && actor.id !== profileId) {
+    updateProfile(actor.id, (profile) => ({
+      ...profile,
+      following: Math.max(0, Number(profile.following || 0) + delta)
+    }));
+    const updatedActor = getProfile(actor.id);
+    if (updatedActor) {
+      const matchedAccount =
+        state.managedAccounts.find(
+          (item) =>
+            item.roles.includes(updatedActor.role) &&
+            (!normalizePhone(updatedActor.phone) || item.phone === normalizePhone(updatedActor.phone))
+        ) || state.managedAccounts[0] || null;
+      rememberFollowBackup(updatedActor, matchedAccount, state.followSet, state.followerSet);
+    }
+  }
+}
+
+function applyPendingFollowMutations() {
+  state.followMutationQueue.forEach((mutation, profileId) => {
+    applyFollowState(profileId, Boolean(mutation.desiredFollowing));
+  });
+}
+
+async function flushFollowMutation(profileId) {
+  const mutation = state.followMutationQueue.get(profileId);
+  if (!mutation || mutation.inFlight) return;
+
+  if (mutation.confirmedFollowing === mutation.desiredFollowing) {
+    state.followMutationQueue.delete(profileId);
+    return;
+  }
+
+  const desiredForRequest = Boolean(mutation.desiredFollowing);
+  mutation.inFlight = true;
+
+  try {
+    await postAndSync(`${API_BASE}/follow/toggle`, {
+      targetProfileId: profileId,
+      desiredFollowing: desiredForRequest
+    }, { keepOverlay: true });
+    mutation.confirmedFollowing = desiredForRequest;
+  } catch (error) {
+    if (mutation.desiredFollowing === desiredForRequest) {
+      applyFollowState(profileId, Boolean(mutation.confirmedFollowing));
+      state.followMutationQueue.delete(profileId);
+      renderPage();
+      throw error;
+    }
+  } finally {
+    mutation.inFlight = false;
+  }
+
+  if (!state.followMutationQueue.has(profileId)) return;
+
+  if (mutation.confirmedFollowing !== mutation.desiredFollowing) {
+    window.setTimeout(() => {
+      flushFollowMutation(profileId).catch((error) => {
+        showError(error?.message || "关注同步失败，请稍后再试。");
+      });
+    }, 0);
+    return;
+  }
+
+  state.followMutationQueue.delete(profileId);
+  renderPage();
+}
+
 async function flushPostLikeQueue(postId) {
   const mutation = state.likeMutationQueue.get(postId);
   if (!mutation || mutation.inFlight || mutation.queued <= 0) return;
@@ -4390,10 +4478,30 @@ function isManagedProfile(profileId) {
 
 async function toggleFollow(profileId) {
   if (isManagedProfile(profileId)) return;
-  await postAndSync(`${API_BASE}/follow/toggle`, {
-    targetProfileId: profileId
-  });
+
+  const actor = getCurrentActor();
+  if (!actor?.id) {
+    throw new Error("请先注册后再关注。");
+  }
+
+  const previousFollowing = state.followSet.has(profileId);
+  const desiredFollowing = !previousFollowing;
+  const mutation =
+    state.followMutationQueue.get(profileId) ||
+    {
+      inFlight: false,
+      confirmedFollowing: previousFollowing,
+      desiredFollowing: previousFollowing
+    };
+
+  mutation.desiredFollowing = desiredFollowing;
+  state.followMutationQueue.set(profileId, mutation);
+
+  applyFollowState(profileId, desiredFollowing);
   renderPage();
+  flushFollowMutation(profileId).catch((error) => {
+    showError(error?.message || "关注同步失败，请稍后再试。");
+  });
 }
 
 function openProfile(profileId) {
@@ -5605,7 +5713,7 @@ function renderDiscover() {
       ${recommendedProfiles
         .map((profile) => {
           return `
-            <article class="discover-avatar-card">
+            <article class="discover-avatar-card" data-profile-id="${escapeHtml(profile.id)}">
               <button class="discover-avatar-button" data-open-profile="${profile.id}" type="button">
                 ${renderAvatarMarkup(profile, "avatar avatar--discover")}
                 <strong>${escapeHtml(profile.name)}</strong>

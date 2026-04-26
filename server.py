@@ -5691,11 +5691,20 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     for item in follows
                     if item["sourceProfileId"] in source_alias_ids and item["targetProfileId"] in target_alias_ids
                 ]
-                if existing:
+                desired_following = payload.get("desiredFollowing")
+                if desired_following is None:
+                    should_follow = not existing
+                else:
+                    should_follow = bool(desired_following)
+
+                if existing and not should_follow:
                     for item in existing:
                         follows.remove(item)
-                else:
+                elif not existing and should_follow:
                     follows.append({"sourceProfileId": source_profile_id, "targetProfileId": target_profile_id, "createdAt": iso_at()})
+                elif len(existing) > 1:
+                    for item in existing[1:]:
+                        follows.remove(item)
                 return bootstrap_response(state, session)
             try:
                 self._write_json(self._with_state(action))
