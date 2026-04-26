@@ -2428,6 +2428,7 @@ function buildSnapshotRecoveryProfile(profile) {
     specialties: Array.isArray(profile.tags) ? profile.tags.join(" ") : "",
     facilities: Array.isArray(profile.tags) ? profile.tags.join(" ") : "",
     pricingPlans: Array.isArray(profile.pricingPlans) ? profile.pricingPlans : [],
+    availabilitySlots: Array.isArray(profile.availabilitySlots) ? profile.availabilitySlots : [],
     checkins: Array.isArray(profile.checkins) ? profile.checkins : [],
     reviews: Array.isArray(profile.reviews) ? profile.reviews : []
   };
@@ -5789,10 +5790,11 @@ async function sendDirectMessage(profileId) {
   }
 }
 
-async function createBooking(profileId, plan = null) {
+async function createBooking(profileId, plan = null, availabilitySlotId = "") {
   await postAndSync(`${API_BASE}/booking/create`, {
     targetProfileId: profileId,
-    plan
+    plan,
+    availabilitySlotId
   });
   state.activePage = "booking";
   syncNavActive();
@@ -6071,7 +6073,7 @@ function renderBooking() {
         <p class="page-label">Booking</p>
         <h1>预约</h1>
       </div>
-      <button class="mini-button" data-open-role-picker="1" type="button">切换身份</button>
+      <button class="mini-button mini-button--accent" data-open-role-picker="1" type="button">切换身份</button>
     </section>
 
     <article class="summary-card">
@@ -6088,6 +6090,8 @@ function renderBooking() {
         <strong>${bookingDashboard.points}</strong>
       </div>
     </article>
+
+    ${renderAvailabilityManager(myProfile)}
 
     <section class="stack-list">
       ${renderManagedBookingList(myProfile, bookingList, {
@@ -6358,6 +6362,7 @@ function renderProfileFeatureSection(profile) {
           )
           .join("")}
       </div>
+      ${renderPublicAvailability(profile)}
       <p class="helper-note helper-note--detail">
         ${profile.role === "gym"
           ? `营业时间：${escapeHtml(profile.hours || "未填写")} · 定位：${escapeHtml(profile.locationLabel)}`
@@ -7522,6 +7527,157 @@ function getBookingDashboard(profile) {
   };
 }
 
+function getAvailabilitySlots(profile, { includeClosed = false } = {}) {
+  return (Array.isArray(profile?.availabilitySlots) ? profile.availabilitySlots : [])
+    .filter((slot) => includeClosed || (slot.status || "open") === "open")
+    .slice()
+    .sort((left, right) => `${left.date || ""} ${left.time || ""}`.localeCompare(`${right.date || ""} ${right.time || ""}`));
+}
+
+function getDefaultAvailabilityDate(offsetDays = 1) {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatAvailabilityDate(dateValue) {
+  if (!dateValue) return "日期待定";
+  const date = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateValue;
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+  if (isSameLocalDay(date, today)) return "今天";
+  if (isSameLocalDay(date, tomorrow)) return "明天";
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function formatAvailabilitySlot(slot = {}) {
+  const dateValue = slot.date || slot.scheduledDate || "";
+  const timeValue = slot.time || slot.scheduledTime || "";
+  const duration = Number(slot.durationMinutes || 60);
+  return `${formatAvailabilityDate(dateValue)} ${timeValue || "时间待定"} · ${duration} 分钟`;
+}
+
+function renderAvailabilityManager(profile) {
+  if (!profile || !["coach", "gym"].includes(profile.role)) return "";
+  const slots = getAvailabilitySlots(profile, { includeClosed: true });
+  const roleNoun = profile.role === "gym" ? "到店时间" : "可预约时间";
+  const defaultDate = getDefaultAvailabilityDate(1);
+
+  return `
+    <article class="availability-card">
+      <div class="section-title-row">
+        <div>
+          <h3>发布${roleNoun}</h3>
+          <p class="result-tip">${profile.role === "gym" ? "让用户看到你的可到店训练时间。" : "让学员直接看到你可以接课的时间。"}</p>
+        </div>
+        <span class="status-pill">${escapeHtml(slots.filter((slot) => (slot.status || "open") === "open").length)} 个开放</span>
+      </div>
+      <div class="availability-form">
+        <label>
+          <span>日期</span>
+          <input data-availability-date="${profile.id}" type="date" value="${defaultDate}" min="${getDefaultAvailabilityDate(0)}">
+        </label>
+        <label>
+          <span>开始</span>
+          <input data-availability-time="${profile.id}" type="time" value="18:30">
+        </label>
+        <label>
+          <span>时长</span>
+          <select data-availability-duration="${profile.id}">
+            <option value="45">45 分钟</option>
+            <option value="60" selected>60 分钟</option>
+            <option value="90">90 分钟</option>
+            <option value="120">120 分钟</option>
+          </select>
+        </label>
+      </div>
+      <div class="availability-note-row">
+        <input data-availability-note="${profile.id}" type="text" maxlength="40" placeholder="${profile.role === "gym" ? "例如：晚间器械区 / 团课体验" : "例如：私教体验课 / 减脂训练"}">
+        <button class="mini-button mini-button--accent" data-create-availability="${profile.id}" type="button">发布</button>
+      </div>
+      <div class="availability-slot-list">
+        ${
+          slots.length
+            ? slots
+                .map((slot) => `
+                  <article class="availability-slot ${slot.status === "booked" ? "is-booked" : ""}">
+                    <div>
+                      <strong>${escapeHtml(formatAvailabilitySlot(slot))}</strong>
+                      <p>${escapeHtml(slot.note || (slot.status === "booked" ? "已被预约" : "可被用户预约"))}</p>
+                    </div>
+                    ${
+                      slot.status === "booked"
+                        ? '<span class="status-pill">已约</span>'
+                        : `<button class="text-link" data-delete-availability="${slot.id}" data-availability-profile="${profile.id}" type="button">取消</button>`
+                    }
+                  </article>
+                `)
+                .join("")
+            : '<p class="empty-inline">还没有开放时间。发布后，用户会在你的主页看到并预约。</p>'
+        }
+      </div>
+    </article>
+  `;
+}
+
+function renderPublicAvailability(profile) {
+  const slots = getAvailabilitySlots(profile);
+  if (!slots.length) return "";
+  return `
+    <section class="availability-public">
+      <div class="section-title-row">
+        <div>
+          <h3>可预约时间</h3>
+          <p class="result-tip">选择一个时间后，会同步进入双方预约页。</p>
+        </div>
+      </div>
+      <div class="availability-public-list">
+        ${slots
+          .map((slot) => `
+            <button class="availability-public-slot" data-create-booking="${profile.id}" data-availability-slot="${slot.id}" type="button">
+              <strong>${escapeHtml(formatAvailabilitySlot(slot))}</strong>
+              <span>${escapeHtml(slot.note || "立即预约")}</span>
+            </button>
+          `)
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+async function createAvailabilitySlot(profileId) {
+  const dateInput = [...appView.querySelectorAll("[data-availability-date]")].find((item) => item.dataset.availabilityDate === profileId);
+  const timeInput = [...appView.querySelectorAll("[data-availability-time]")].find((item) => item.dataset.availabilityTime === profileId);
+  const durationInput = [...appView.querySelectorAll("[data-availability-duration]")].find((item) => item.dataset.availabilityDuration === profileId);
+  const noteInput = [...appView.querySelectorAll("[data-availability-note]")].find((item) => item.dataset.availabilityNote === profileId);
+  const date = dateInput?.value || "";
+  const time = timeInput?.value || "";
+  if (!date || !time) {
+    throw new Error("请选择日期和开始时间。");
+  }
+  await postAndSync(`${API_BASE}/availability/create`, {
+    profileId,
+    date,
+    time,
+    durationMinutes: Number(durationInput?.value || 60),
+    note: noteInput?.value || ""
+  });
+  renderPage();
+}
+
+async function deleteAvailabilitySlot(profileId, slotId) {
+  await postAndSync(`${API_BASE}/availability/delete`, {
+    profileId,
+    slotId
+  });
+  renderPage();
+}
+
 function renderPersonalShortcutTile(label, sublabel, icon, attrs = "", options = {}) {
   const badgeCount = Math.max(0, Number(options.badgeCount || 0));
   const badge = badgeCount
@@ -7609,6 +7765,9 @@ function renderManagedBookingList(profile, bookings, { emptyText = "", primaryAc
           const metaLeft = profileRole === "enthusiast"
             ? `${counterpartLabel} · ${counterpartRole || "服务方"}`
             : `${counterpartLabel} · ${counterpartRole || "预约人"}`;
+          const scheduleText = card.scheduledDate || card.scheduledTime
+            ? formatAvailabilitySlot(card)
+            : card.time || "待确认";
           return `
             <article class="booking-card">
               <div class="booking-top">
@@ -7618,8 +7777,9 @@ function renderManagedBookingList(profile, bookings, { emptyText = "", primaryAc
               <p>${escapeHtml(metaLeft)}</p>
               <div class="community-meta">
                 <span>${escapeHtml(card.price || "待确认")}</span>
-                <span>${escapeHtml(card.time || "待确认")}</span>
+                <span>${escapeHtml(scheduleText)}</span>
               </div>
+              ${card.slotNote ? `<p class="booking-slot-note">${escapeHtml(card.slotNote)}</p>` : ""}
               <div class="booking-bottom">
                 <span>${escapeHtml(card.place || card.counterpartLocationLabel || "位置待确认")}</span>
                 <button class="cta" type="button" data-open-profile="${card.counterpartProfileId || card.targetProfileId || card.createdByProfileId || ""}">
@@ -9521,7 +9681,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
         <p class="page-label">My</p>
         <h1>${escapeHtml(currentFeature.title)}</h1>
       </div>
-      <button class="mini-button" data-open-my-home="1" type="button">我的</button>
+      <button class="mini-button mini-button--accent" data-open-my-home="1" type="button">我的</button>
     </section>
 
     <article class="swipe-tip">
@@ -9577,7 +9737,7 @@ function renderProfilePage(profile) {
         <p class="page-label">Profile</p>
         <h1>主页</h1>
       </div>
-      <button class="mini-button" data-open-role-picker="1" type="button">我是${escapeHtml(roleConfig[state.selectedRole].short)}</button>
+      <button class="mini-button mini-button--accent" data-open-role-picker="1" type="button">我是${escapeHtml(roleConfig[state.selectedRole].short)}</button>
     </section>
 
     <article class="swipe-tip">
@@ -10681,7 +10841,18 @@ appView.addEventListener("click", (event) => {
     const profile = getProfile(target.dataset.createBooking);
     const planIndex = Number(target.dataset.planIndex || 0);
     const plan = profile?.pricingPlans?.[planIndex] || null;
-    runTask(() => createBooking(target.dataset.createBooking, plan));
+    runTask(() => createBooking(target.dataset.createBooking, plan, target.dataset.availabilitySlot || ""));
+    return;
+  }
+
+  if (target.dataset.createAvailability) {
+    runTask(() => createAvailabilitySlot(target.dataset.createAvailability));
+    return;
+  }
+
+  if (target.dataset.deleteAvailability) {
+    runTask(() => deleteAvailabilitySlot(target.dataset.availabilityProfile, target.dataset.deleteAvailability));
+    return;
   }
 });
 
@@ -11181,7 +11352,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-6`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-7`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

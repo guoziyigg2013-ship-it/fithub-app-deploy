@@ -1528,6 +1528,11 @@ body.is-workout-live .app {
   color: var(--muted);
 }
 
+.booking-slot-note {
+  margin-top: -6px !important;
+  font-size: 12px;
+}
+
 .status-pill {
   padding: 6px 10px;
   border-radius: 999px;
@@ -1543,6 +1548,107 @@ body.is-workout-live .app {
 .booking-bottom span {
   color: var(--muted);
   font-size: 13px;
+}
+
+.availability-card {
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid rgba(242, 140, 40, 0.18);
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, rgba(255, 171, 66, 0.16), rgba(255, 255, 255, 0.9) 48%),
+    #fff;
+  box-shadow: 0 14px 28px rgba(157, 88, 15, 0.07);
+}
+
+.availability-form {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.availability-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.availability-form input,
+.availability-form select,
+.availability-note-row input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #1d140f;
+  font: inherit;
+  outline: 0;
+  padding: 0 12px;
+}
+
+.availability-note-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.availability-slot-list,
+.availability-public-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.availability-slot,
+.availability-public-slot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(242, 140, 40, 0.14);
+  border-radius: 17px;
+  background: rgba(255, 255, 255, 0.76);
+  text-align: left;
+}
+
+.availability-slot p,
+.availability-public-slot span {
+  display: block;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.availability-slot.is-booked {
+  opacity: 0.72;
+}
+
+.availability-public {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.availability-public-slot {
+  border: 1px solid rgba(242, 140, 40, 0.24);
+  background: rgba(255, 247, 237, 0.84);
+  color: inherit;
+}
+
+.availability-public-slot strong {
+  color: #8a4d11;
+}
+
+.empty-inline {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .profile-card {

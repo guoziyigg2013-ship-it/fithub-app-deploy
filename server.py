@@ -4244,8 +4244,33 @@ def serialize_profile(state, profile_id, current_actor_profile_id):
         deepcopy(item)
         for item in sorted(profile.get("healthHistory", []), key=lambda value: value.get("createdAt", ""), reverse=True)[:60]
     ]
+    profile["availabilitySlots"] = serialize_availability_slots(profile)
     profile.pop("externalWorkoutIds", None)
     return profile
+
+
+def serialize_availability_slots(profile):
+    slots = []
+    for item in profile.get("availabilitySlots", []) or []:
+        date_value = str(item.get("date") or item.get("scheduledDate") or "").strip()
+        time_value = str(item.get("time") or item.get("scheduledTime") or "").strip()
+        if not date_value or not time_value:
+            continue
+        slots.append(
+            {
+                "id": str(item.get("id") or f"slot-{uuid.uuid4().hex[:10]}"),
+                "date": date_value[:10],
+                "time": time_value[:5],
+                "durationMinutes": parse_optional_int(item.get("durationMinutes")) or 60,
+                "note": str(item.get("note") or "").strip()[:80],
+                "status": str(item.get("status") or "open").strip() or "open",
+                "createdAt": item.get("createdAt") or "",
+                "bookedByProfileId": item.get("bookedByProfileId") or "",
+                "bookedAt": item.get("bookedAt") or "",
+            }
+        )
+    slots.sort(key=lambda value: (value.get("date", ""), value.get("time", ""), value.get("createdAt", "")))
+    return slots
 
 
 def serialize_bookings(state, session):
@@ -4623,6 +4648,7 @@ def build_profile_payload(role, payload, existing_profile, session):
             "pricingPlans": payload.get("pricingPlans") or (existing_profile or {}).get("pricingPlans") or [
                 {"title": "会员卡", "detail": "到店训练 / 团课预约", "price": payload.get("price") or "¥99/月起"}
             ],
+            "availabilitySlots": payload.get("availabilitySlots") or (existing_profile or {}).get("availabilitySlots", []),
             "healthHistory": payload.get("healthHistory") or (existing_profile or {}).get("healthHistory", []),
             "reviews": payload.get("reviews") or (existing_profile or {}).get("reviews", []),
             "checkins": payload.get("checkins") or (existing_profile or {}).get("checkins", []),
@@ -4658,6 +4684,7 @@ def build_profile_payload(role, payload, existing_profile, session):
             "pricingPlans": payload.get("pricingPlans") or (existing_profile or {}).get("pricingPlans") or [
                 {"title": "私教课程", "detail": "一对一训练服务", "price": payload.get("price") or "¥220/小时"}
             ],
+            "availabilitySlots": payload.get("availabilitySlots") or (existing_profile or {}).get("availabilitySlots", []),
             "healthHistory": payload.get("healthHistory") or (existing_profile or {}).get("healthHistory", []),
             "reviews": payload.get("reviews") or (existing_profile or {}).get("reviews", []),
             "checkins": payload.get("checkins") or (existing_profile or {}).get("checkins", []),
@@ -6273,6 +6300,91 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        if parsed.path == f"{API_PREFIX}/availability/create":
+            def action(state):
+                session = ensure_session(state, session_id)
+                requested_profile_id = resolve_canonical_profile_id(state, payload.get("profileId"))
+                allowed, actor = ensure_session_identity(
+                    state,
+                    session,
+                    preferred_role=str(session.get("selectedRole") or "").strip(),
+                    requested_profile_id=requested_profile_id,
+                )
+                if not allowed or not actor:
+                    raise ValueError("请先登录对应身份后再发布可预约时间。")
+                profile = state["profiles"].get(actor)
+                if not profile or profile.get("role") not in {"coach", "gym"}:
+                    raise ValueError("只有健身教练和健身房可以发布可预约时间。")
+
+                date_value = str(payload.get("date") or "").strip()
+                time_value = str(payload.get("time") or "").strip()
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_value):
+                    raise ValueError("请选择正确的预约日期。")
+                if not re.fullmatch(r"\d{2}:\d{2}", time_value):
+                    raise ValueError("请选择正确的预约时间。")
+                duration_minutes = parse_optional_int(payload.get("durationMinutes")) or 60
+                duration_minutes = min(240, max(30, duration_minutes))
+                note = str(payload.get("note") or "").strip()[:80]
+
+                profile.setdefault("availabilitySlots", []).insert(
+                    0,
+                    {
+                        "id": f"slot-{uuid.uuid4().hex[:10]}",
+                        "date": date_value,
+                        "time": time_value,
+                        "durationMinutes": duration_minutes,
+                        "note": note,
+                        "status": "open",
+                        "createdAt": iso_at(),
+                    },
+                )
+                return bootstrap_response(state, session)
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/availability/delete":
+            def action(state):
+                session = ensure_session(state, session_id)
+                requested_profile_id = resolve_canonical_profile_id(state, payload.get("profileId"))
+                allowed, actor = ensure_session_identity(
+                    state,
+                    session,
+                    preferred_role=str(session.get("selectedRole") or "").strip(),
+                    requested_profile_id=requested_profile_id,
+                )
+                if not allowed or not actor:
+                    raise ValueError("请先登录对应身份后再管理可预约时间。")
+                profile = state["profiles"].get(actor)
+                if not profile or profile.get("role") not in {"coach", "gym"}:
+                    raise ValueError("只有健身教练和健身房可以管理可预约时间。")
+
+                slot_id = str(payload.get("slotId") or "").strip()
+                if not slot_id:
+                    raise ValueError("请选择要取消的时间。")
+                updated_slots = []
+                removed = False
+                for slot in profile.get("availabilitySlots", []) or []:
+                    if str(slot.get("id") or "") != slot_id:
+                        updated_slots.append(slot)
+                        continue
+                    removed = True
+                    if str(slot.get("status") or "open") == "booked":
+                        slot["status"] = "cancelled"
+                        slot["cancelledAt"] = iso_at()
+                        updated_slots.append(slot)
+                if not removed:
+                    raise ValueError("没有找到这个可预约时间。")
+                profile["availabilitySlots"] = updated_slots
+                return bootstrap_response(state, session)
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if parsed.path == f"{API_PREFIX}/booking/create":
             def action(state):
                 session = ensure_session(state, session_id)
@@ -6283,8 +6395,28 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 )
                 if not allowed or not actor:
                     raise ValueError("请先注册后再预约。")
-                target_profile = state["profiles"][payload["targetProfileId"]]
+                target_profile_id = resolve_canonical_profile_id(state, payload.get("targetProfileId"))
+                target_profile = state["profiles"].get(target_profile_id)
+                if not target_profile:
+                    raise ValueError("没有找到可预约对象。")
                 plan = payload.get("plan") or (target_profile.get("pricingPlans") or [{}])[0]
+                slot = None
+                slot_id = str(payload.get("availabilitySlotId") or "").strip()
+                if slot_id:
+                    for candidate in target_profile.setdefault("availabilitySlots", []):
+                        if str(candidate.get("id") or "") == slot_id:
+                            slot = candidate
+                            break
+                    if not slot:
+                        raise ValueError("这个可预约时间不存在，请刷新后再试。")
+                    if str(slot.get("status") or "open") != "open":
+                        raise ValueError("这个时间已被预约，请选择其他时间。")
+                    slot["status"] = "booked"
+                    slot["bookedByProfileId"] = actor
+                    slot["bookedAt"] = iso_at()
+                scheduled_date = slot.get("date") if slot else ""
+                scheduled_time = slot.get("time") if slot else ""
+                duration_minutes = parse_optional_int(slot.get("durationMinutes")) if slot else None
                 state["bookings"].insert(
                     0,
                     {
@@ -6294,7 +6426,12 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         "targetProfileId": target_profile["id"],
                         "title": f"{target_profile['name']} · {plan.get('title', '立即预约')}",
                         "place": target_profile.get("locationLabel", DEFAULT_POSITION["label"]),
-                        "time": payload.get("time") or "待确认",
+                        "time": payload.get("time") or (f"{scheduled_date} {scheduled_time}".strip() if slot else "待确认"),
+                        "scheduledDate": scheduled_date,
+                        "scheduledTime": scheduled_time,
+                        "durationMinutes": duration_minutes,
+                        "availabilitySlotId": slot_id,
+                        "slotNote": slot.get("note") if slot else "",
                         "status": "已预约",
                         "action": "查看主页",
                         "price": plan.get("price", target_profile.get("price", "待确认")),

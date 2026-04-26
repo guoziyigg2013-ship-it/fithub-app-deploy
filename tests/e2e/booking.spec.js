@@ -47,12 +47,24 @@ async function seedCoachProvider(request) {
   return {
     phone,
     name,
+    sessionId,
     profileId: registered.session.currentActorProfileId,
   };
 }
 
 test("训练者可以预约教练，教练端能看到别人给我的预约", async ({ page, context, request }) => {
   const coach = await seedCoachProvider(request);
+  const availability = await postJson(request, "/api/availability/create", coach.sessionId, {
+    profileId: coach.profileId,
+    date: "2030-05-20",
+    time: "18:30",
+    durationMinutes: 60,
+    note: "预约回归测试时段",
+  });
+  const coachProfile = availability.profiles.find((profile) => profile.id === coach.profileId);
+  const slot = coachProfile.availabilitySlots.find((item) => item.date === "2030-05-20" && item.time === "18:30");
+  expect(slot).toBeTruthy();
+
   const buyer = await registerEnthusiast(page, { name: "预约测试学员" });
 
   await page.locator('.bottom-nav [data-page="home"]').evaluate((element) => element.click());
@@ -63,22 +75,25 @@ test("训练者可以预约教练，教练端能看到别人给我的预约", as
   await expect(coachCard).toBeVisible();
   await coachCard.locator("h3").click();
   await expect(page.getByText(coach.name)).toBeVisible();
+  await expect(page.getByText("可预约时间")).toBeVisible();
 
-  await page.locator(`[data-create-booking="${coach.profileId}"]`).first().click();
-  await expect(page.getByRole("heading", { name: "预约" })).toBeVisible();
+  await page.locator(`[data-create-booking="${coach.profileId}"][data-availability-slot="${slot.id}"]`).first().click();
+  await expect(page.getByRole("heading", { name: "预约", exact: true })).toBeVisible();
   const outgoingBooking = page.locator(".booking-card", { hasText: coach.name }).first();
   await expect(outgoingBooking).toBeVisible();
   await expect(outgoingBooking).toContainText("已预约");
   await expect(outgoingBooking).toContainText("¥260/小时");
+  await expect(outgoingBooking).toContainText("18:30");
 
   const coachPage = await context.newPage();
   await loginWithPhone(coachPage, { phone: coach.phone, role: "coach" });
   await coachPage.locator('.bottom-nav [data-page="booking"]').evaluate((element) => element.click());
-  await expect(coachPage.getByRole("heading", { name: "预约" })).toBeVisible();
+  await expect(coachPage.getByRole("heading", { name: "预约", exact: true })).toBeVisible();
 
   const incomingBooking = coachPage.locator(".booking-card", { hasText: buyer.name }).first();
   await expect(incomingBooking).toBeVisible();
   await expect(incomingBooking).toContainText("已预约");
   await expect(incomingBooking).toContainText("健身爱好者");
+  await expect(incomingBooking).toContainText("18:30");
   await coachPage.close();
 });
