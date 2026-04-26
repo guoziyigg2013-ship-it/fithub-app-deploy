@@ -135,7 +135,7 @@ async function registerCoach(page, { name = "测试教练", phone = buildUniqueP
   await page.locator('#registerForm input[name="location"]').fill("厦门 · 思明区");
   await page.locator('#registerForm textarea[name="specialties"]').fill("力量训练 减脂塑形 私教");
   await page.locator('#registerForm input[name="years"]').fill("5");
-  await page.locator('#registerForm input[name="price"]').fill("¥260/小时");
+  await setHiddenInput(page, '#registerForm input[name="price"]', "¥260/小时");
   await page.locator('#registerForm textarea[name="intro"]').fill("用于教练端注册和跨设备登录回归。");
   await page.locator('#registerForm button[type="submit"]').click();
   await expect(page.locator("#registerForm")).toBeHidden({ timeout: 10000 });

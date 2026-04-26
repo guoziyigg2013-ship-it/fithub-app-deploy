@@ -1583,6 +1583,17 @@ const REGISTER_WHEEL_FIELDS = {
     step: 0.5,
     defaultValue: 60,
     helper: "用于更准确估算训练消耗"
+  },
+  "coach.price": {
+    label: "课时费",
+    unit: "元/小时",
+    min: 10,
+    max: 600,
+    step: 10,
+    defaultValue: 280,
+    helper: "上下滑动选择每小时课时费",
+    submitPrefix: "¥",
+    submitSuffix: "/小时"
   }
 };
 
@@ -4568,8 +4579,8 @@ function getRegistrationSeed(role) {
   return getManagedProfiles().find((profile) => profile.role === role) || {};
 }
 
-function getRegisterWheelConfig(fieldName) {
-  return REGISTER_WHEEL_FIELDS[fieldName] || null;
+function getRegisterWheelConfig(fieldName, role = state.registerRole) {
+  return REGISTER_WHEEL_FIELDS[`${role}.${fieldName}`] || REGISTER_WHEEL_FIELDS[fieldName] || null;
 }
 
 function formatRegisterWheelNumber(value) {
@@ -4577,6 +4588,32 @@ function formatRegisterWheelNumber(value) {
   if (!Number.isFinite(numeric)) return "";
   if (Math.abs(numeric - Math.round(numeric)) < 0.001) return String(Math.round(numeric));
   return numeric.toFixed(1).replace(/\.0$/, "");
+}
+
+function extractRegisterWheelNumber(value) {
+  const matched = String(value || "").match(/(\d+(?:\.\d+)?)/);
+  return matched ? Number(matched[1]) : NaN;
+}
+
+function normalizeRegisterWheelValue(fieldName, value, role = state.registerRole) {
+  const config = getRegisterWheelConfig(fieldName, role);
+  if (!config) return value == null ? "" : String(value);
+
+  let numeric = extractRegisterWheelNumber(value);
+  if (!Number.isFinite(numeric)) numeric = Number(config.defaultValue);
+  const step = Number(config.step) || 1;
+  const min = Number(config.min);
+  const max = Number(config.max);
+  const snapped = min + Math.round((numeric - min) / step) * step;
+  const clamped = Math.min(max, Math.max(min, snapped));
+  return formatRegisterWheelNumber(clamped);
+}
+
+function formatRegisterWheelSubmitValue(fieldName, value, role = state.registerRole) {
+  const config = getRegisterWheelConfig(fieldName, role);
+  if (!config) return value == null ? "" : String(value);
+  const normalized = normalizeRegisterWheelValue(fieldName, value, role);
+  return `${config.submitPrefix || ""}${normalized}${config.submitSuffix || ""}`;
 }
 
 function getRegisterDraft(role = state.registerRole) {
@@ -4617,7 +4654,7 @@ function seedRegisterDraft(role = state.registerRole) {
   roleConfig[role].fields.forEach((field) => {
     if (Object.prototype.hasOwnProperty.call(draft, field.name) && draft[field.name] !== "") return;
     let value = getFieldDefault(field, seed);
-    const wheelConfig = getRegisterWheelConfig(field.name);
+    const wheelConfig = getRegisterWheelConfig(field.name, role);
     if ((value === "" || value == null) && wheelConfig) {
       value = wheelConfig.defaultValue;
     }
@@ -4633,15 +4670,15 @@ function getRegisterFieldValue(field, seed, role = state.registerRole) {
     return draft[field.name];
   }
   let value = getFieldDefault(field, seed);
-  const wheelConfig = getRegisterWheelConfig(field.name);
+  const wheelConfig = getRegisterWheelConfig(field.name, role);
   if ((value === "" || value == null) && wheelConfig) {
     value = wheelConfig.defaultValue;
   }
   return value == null ? "" : String(value);
 }
 
-function getRegisterWheelOptions(fieldName) {
-  const config = getRegisterWheelConfig(fieldName);
+function getRegisterWheelOptions(fieldName, role = state.registerRole) {
+  const config = getRegisterWheelConfig(fieldName, role);
   if (!config) return [];
 
   const options = [];
@@ -4652,17 +4689,17 @@ function getRegisterWheelOptions(fieldName) {
   return options;
 }
 
-function getRegisterWheelValue(fieldName) {
-  const config = getRegisterWheelConfig(fieldName);
+function getRegisterWheelValue(fieldName, role = state.registerRole) {
+  const config = getRegisterWheelConfig(fieldName, role);
   const value = getRegisterFieldValue({ name: fieldName }, getRegistrationSeed(state.registerRole));
-  if (value !== "") return String(value);
+  if (value !== "") return normalizeRegisterWheelValue(fieldName, value, role);
   return config ? formatRegisterWheelNumber(config.defaultValue) : "";
 }
 
-function formatRegisterWheelDisplay(fieldName, value) {
-  const config = getRegisterWheelConfig(fieldName);
+function formatRegisterWheelDisplay(fieldName, value, role = state.registerRole) {
+  const config = getRegisterWheelConfig(fieldName, role);
   if (!config || value === "" || value == null) return "未设置";
-  return `${formatRegisterWheelNumber(value)} ${config.unit}`;
+  return `${normalizeRegisterWheelValue(fieldName, value, role)} ${config.unit}`;
 }
 
 function syncRegisterWheelDom(fieldName) {
@@ -4682,7 +4719,7 @@ function syncRegisterWheelDom(fieldName) {
 
   const hiddenInput = overlay.querySelector(`input[name="${fieldName}"]`);
   if (hiddenInput) {
-    hiddenInput.value = selectedValue;
+    hiddenInput.value = formatRegisterWheelSubmitValue(fieldName, selectedValue);
   }
 }
 
@@ -4852,17 +4889,18 @@ function renderField(field, seed) {
 
   if (getRegisterWheelConfig(field.name)) {
     const wheelConfig = getRegisterWheelConfig(field.name);
+    const wheelValue = getRegisterWheelValue(field.name);
     return `
       <label class="form-field form-field--wheel">
         <span>${field.label}${field.required ? " *" : ""}</span>
         <button class="wheel-trigger" data-open-register-wheel="${field.name}" type="button">
           <div class="wheel-trigger-copy">
-            <strong>${escapeHtml(formatRegisterWheelDisplay(field.name, value))}</strong>
+            <strong>${escapeHtml(formatRegisterWheelDisplay(field.name, wheelValue))}</strong>
             <small>${escapeHtml(wheelConfig.helper)}</small>
           </div>
           <span class="wheel-trigger-mark">${escapeHtml(wheelConfig.unit)}</span>
         </button>
-        <input name="${field.name}" type="hidden" value="${escapeHtml(value)}">
+        <input name="${field.name}" type="hidden" value="${escapeHtml(formatRegisterWheelSubmitValue(field.name, wheelValue))}">
       </label>
     `;
   }
