@@ -40,6 +40,7 @@ def main() -> int:
     if not args.skip_syntax:
         steps.append(("Node syntax check", ["node", "--check", "app.js"]))
         steps.append(("Python syntax check", ["python3", "-m", "py_compile", "server.py"]))
+        steps.append(("WeChat Mini Program scaffold check", ["python3", "scripts/check_miniprogram.py"]))
     if not args.skip_api:
         steps.append(
             (

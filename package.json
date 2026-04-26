@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "check:syntax": "node --check app.js && python3 -m py_compile server.py",
+    "check:miniapp": "python3 scripts/check_miniprogram.py",
     "check:preflight": "python3 scripts/preflight_check.py",
     "check:smoke": "python3 scripts/deploy_smoke.py",
     "check:final": "python3 scripts/final_acceptance.py",

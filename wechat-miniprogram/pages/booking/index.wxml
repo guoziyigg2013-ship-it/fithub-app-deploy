@@ -1,0 +1,21 @@
+<view class="page">
+  <text class="eyebrow">BOOKING</text>
+  <view class="title">预约</view>
+
+  <view class="section-title">我的预约</view>
+  <view wx:if="{{!bookings.length}}" class="card empty">当前还没有预约，先选择一个健身房或教练。</view>
+  <view class="card booking" wx:for="{{bookings}}" wx:key="id">
+    <text class="booking-title">{{item.targetName || item.profileName || '预约记录'}}</text>
+    <text class="muted">{{item.time || item.timeLabel}} · {{item.status || '待确认'}}</text>
+  </view>
+
+  <view class="section-title">可预约对象</view>
+  <view class="card target" wx:for="{{targets}}" wx:key="id">
+    <image class="avatar" src="{{item.avatarImage}}" mode="aspectFill"></image>
+    <view class="target-info">
+      <text class="target-name">{{item.name}}</text>
+      <text class="muted">{{item.price}} · {{item.locationLabel}}</text>
+    </view>
+    <button class="ghost-button" data-id="{{item.id}}" bindtap="createBooking">预约</button>
+  </view>
+</view>

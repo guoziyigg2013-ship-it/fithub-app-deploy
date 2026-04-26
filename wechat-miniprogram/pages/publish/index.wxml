@@ -1,0 +1,15 @@
+<view class="page">
+  <text class="eyebrow">POST</text>
+  <view class="title">发布动态</view>
+  <view class="card publish-card">
+    <textarea class="content-input" value="{{content}}" maxlength="500" placeholder="分享今天的训练、课程体验或动作心得" bindinput="onContentInput"></textarea>
+    <view class="media-preview" wx:if="{{media.length}}">
+      <image wx:for="{{media}}" wx:key="tempFilePath" src="{{item.tempFilePath}}" class="preview" mode="aspectFill"></image>
+    </view>
+    <view class="space-between">
+      <button class="ghost-button" bindtap="chooseMedia">图片 / 视频</button>
+      <text class="muted">{{content.length || 0}} / 500</text>
+    </view>
+  </view>
+  <button class="primary-button publish-button" loading="{{uploading}}" bindtap="publish">立即发布</button>
+</view>

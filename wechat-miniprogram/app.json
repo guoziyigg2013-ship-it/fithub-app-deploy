@@ -1,0 +1,40 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/discover/index",
+    "pages/publish/index",
+    "pages/booking/index",
+    "pages/me/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "FitHub 健身圈",
+    "navigationBarBackgroundColor": "#fffaf4",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#fffaf4"
+  },
+  "tabBar": {
+    "color": "#7a726a",
+    "selectedColor": "#f28c28",
+    "backgroundColor": "#fffdf9",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/discover/index",
+        "text": "探索"
+      },
+      {
+        "pagePath": "pages/booking/index",
+        "text": "预约"
+      },
+      {
+        "pagePath": "pages/me/index",
+        "text": "我的"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json"
+}

@@ -1,0 +1,74 @@
+.profile-card {
+  display: flex;
+  gap: 22rpx;
+  margin-top: 34rpx;
+}
+
+.big-avatar {
+  width: 120rpx;
+  height: 120rpx;
+}
+
+.profile-main {
+  flex: 1;
+}
+
+.profile-name {
+  display: block;
+  font-size: 36rpx;
+  font-weight: 900;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16rpx;
+  margin-top: 24rpx;
+}
+
+.stats view {
+  padding: 18rpx 10rpx;
+  border-radius: 22rpx;
+  background: #faf5ee;
+  text-align: center;
+}
+
+.stat-value {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 900;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 22rpx;
+  margin-top: 34rpx;
+}
+
+.login-title {
+  font-size: 34rpx;
+  font-weight: 900;
+}
+
+.field {
+  min-height: 84rpx;
+  padding: 0 24rpx;
+  border: 2rpx solid #efe6da;
+  border-radius: 24rpx;
+  background: #fff;
+  font-size: 28rpx;
+}
+
+.code-row {
+  display: flex;
+  gap: 14rpx;
+}
+
+.code-field {
+  flex: 1;
+}
+
+.full {
+  width: 100%;
+}

@@ -1,0 +1,36 @@
+.empty {
+  color: #817872;
+  font-size: 27rpx;
+}
+
+.booking {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  margin-bottom: 18rpx;
+}
+
+.booking-title {
+  font-size: 30rpx;
+  font-weight: 900;
+}
+
+.target {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  margin-bottom: 18rpx;
+}
+
+.target-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.target-name {
+  font-size: 29rpx;
+  font-weight: 900;
+}

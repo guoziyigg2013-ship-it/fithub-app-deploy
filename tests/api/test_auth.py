@@ -69,3 +69,17 @@ class AuthRegressionTests(FitHubApiTestCase):
         login_account = next(item for item in login_payload["session"]["managedAccounts"] if item["id"] == enthusiast_account_id)
         self.assertEqual(sorted(login_account["roles"]), ["coach", "enthusiast", "gym"])
         self.assertEqual(login_payload["session"]["selectedRole"], "gym")
+
+    def test_wechat_mini_login_creates_reusable_provider_account(self):
+        client = self.make_client()
+        first_payload = client.wechat_mini_login(code="wx-code-a", dev_openid="openid-a")
+        self.assertTrue(first_payload["wechatLogin"]["ok"])
+        self.assertFalse(first_payload["wechatLogin"]["hasProfiles"])
+        account = first_payload["session"]["managedAccounts"][0]
+        self.assertEqual(account["primaryProvider"], "wechat")
+        self.assertTrue(any(item["type"] == "wechat" and item["verified"] for item in account["identityProviders"]))
+
+        second_client = self.make_client()
+        second_payload = second_client.wechat_mini_login(code="wx-code-b", dev_openid="openid-a")
+        second_account = second_payload["session"]["managedAccounts"][0]
+        self.assertEqual(second_account["id"], account["id"])

@@ -88,6 +88,12 @@ class ApiClient:
             },
         )
 
+    def wechat_mini_login(self, code="wx-test-code", role="enthusiast", dev_openid=""):
+        body = {"code": code, "role": role}
+        if dev_openid:
+            body["devOpenId"] = dev_openid
+        return self.post("/api/auth/wechat-mini-login", body)
+
     def lookup_phone(self, phone):
         return self.post("/api/auth/lookup-phone", {"phone": phone})
 
@@ -267,6 +273,7 @@ class FitHubApiTestCase(unittest.TestCase):
             {
                 "FITHUB_DATA_DIR": str(cls.data_dir),
                 "FITHUB_SMS_DEV_MODE": "true",
+                "FITHUB_WECHAT_MINIAPP_DEV_MODE": "true",
                 "SUPABASE_URL": "",
                 "SUPABASE_SERVICE_ROLE_KEY": "",
                 "FITHUB_MEDIA_MAINTENANCE_TOKEN": "test-maintenance-token",

@@ -169,6 +169,23 @@ npm run media:clean
 
 - [docs/fithub-sms-login.md](./docs/fithub-sms-login.md)
 
+## 微信小程序 MVP
+
+当前仓库已包含一个独立小程序骨架：
+
+- [wechat-miniprogram](./wechat-miniprogram)
+
+它复用当前后端 API，包含首页、探索、发布、预约、我的五个基础页面。
+
+导入微信开发者工具时选择 `wechat-miniprogram/` 目录。正式联调前需要在后端配置：
+
+- `FITHUB_WECHAT_MINIAPP_APP_ID`
+- `FITHUB_WECHAT_MINIAPP_APP_SECRET`
+
+详细说明见：
+
+- [docs/wechat-miniprogram-mvp.md](./docs/wechat-miniprogram-mvp.md)
+
 ## 回归与发布自检
 
 本地发布前推荐直接跑：

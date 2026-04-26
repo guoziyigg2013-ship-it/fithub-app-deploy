@@ -1,0 +1,15 @@
+{
+  "description": "FitHub 微信小程序 MVP",
+  "appid": "touristappid",
+  "projectname": "fithub-miniprogram",
+  "miniprogramRoot": "./",
+  "compileType": "miniprogram",
+  "setting": {
+    "urlCheck": true,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "coverView": true
+  }
+}

@@ -1,0 +1,52 @@
+<view class="page">
+  <view class="topbar">
+    <view>
+      <text class="location-dot"></text>
+      <text class="city">{{city}}</text>
+    </view>
+    <button class="pill">定位</button>
+  </view>
+
+  <view class="search">搜索健身房、教练、课程</view>
+
+  <view class="tabs">
+    <button class="tab {{tab === 'gym' ? 'active' : ''}}" data-tab="gym" bindtap="switchTab">健身房</button>
+    <button class="tab {{tab === 'coach' ? 'active' : ''}}" data-tab="coach" bindtap="switchTab">教练</button>
+  </view>
+
+  <view wx:if="{{loading}}" class="card muted">正在加载 FitHub...</view>
+
+  <view wx:if="{{tab === 'gym'}}">
+    <view class="section-title">附近健身房</view>
+    <view class="grid">
+      <view class="venue card" wx:for="{{gyms}}" wx:key="id">
+        <image class="cover" src="{{item.coverImage || item.avatarImage}}" mode="aspectFill"></image>
+        <view class="venue-body">
+          <text class="venue-title">{{item.name}}</text>
+          <text class="muted">{{item.shortDesc}}</text>
+          <view class="space-between">
+            <text class="price">{{item.price}}</text>
+            <button class="ghost-button" data-id="{{item.id}}" bindtap="follow">关注</button>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{tab === 'coach'}}">
+    <view class="section-title">精选教练</view>
+    <view class="grid">
+      <view class="venue card" wx:for="{{coaches}}" wx:key="id">
+        <image class="cover" src="{{item.coverImage || item.avatarImage}}" mode="aspectFill"></image>
+        <view class="venue-body">
+          <text class="venue-title">{{item.name}}</text>
+          <text class="muted">{{item.shortDesc}}</text>
+          <view class="space-between">
+            <text class="price">{{item.price}}</text>
+            <button class="ghost-button" data-id="{{item.id}}" bindtap="follow">关注</button>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

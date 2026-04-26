@@ -1,0 +1,86 @@
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24rpx;
+}
+
+.location-dot {
+  display: inline-block;
+  width: 16rpx;
+  height: 16rpx;
+  margin-right: 10rpx;
+  border-radius: 50%;
+  background: #f28c28;
+  box-shadow: 0 0 0 8rpx #fff0df;
+}
+
+.city {
+  font-size: 30rpx;
+  font-weight: 900;
+}
+
+.search {
+  height: 92rpx;
+  padding: 0 32rpx;
+  border-radius: 32rpx;
+  background: #f4f3f1;
+  color: #b0aaa4;
+  font-size: 28rpx;
+  line-height: 92rpx;
+}
+
+.tabs {
+  display: flex;
+  margin: 34rpx 0 20rpx;
+  border-bottom: 2rpx solid #eee8e0;
+}
+
+.tab {
+  flex: 1;
+  height: 78rpx;
+  color: #7a726a;
+  font-size: 32rpx;
+  font-weight: 800;
+}
+
+.tab.active {
+  color: #171717;
+  border-bottom: 6rpx solid #f28c28;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20rpx;
+}
+
+.venue {
+  padding: 0;
+  overflow: hidden;
+}
+
+.venue .cover {
+  height: 210rpx;
+  border-radius: 28rpx 28rpx 0 0;
+}
+
+.venue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  padding: 22rpx;
+}
+
+.venue-title {
+  min-height: 76rpx;
+  font-size: 27rpx;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.price {
+  color: #a35d12;
+  font-size: 28rpx;
+  font-weight: 900;
+}

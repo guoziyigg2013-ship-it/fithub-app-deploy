@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -83,6 +83,9 @@ TENCENT_SMS_APP_ID = (os.getenv("FITHUB_TENCENT_SMS_APP_ID") or "").strip()
 TENCENT_SMS_SIGN_NAME = (os.getenv("FITHUB_TENCENT_SMS_SIGN_NAME") or "").strip()
 TENCENT_SMS_TEMPLATE_ID = (os.getenv("FITHUB_TENCENT_SMS_TEMPLATE_ID") or "").strip()
 TENCENT_SMS_REGION = (os.getenv("FITHUB_TENCENT_SMS_REGION") or "ap-guangzhou").strip()
+WECHAT_MINIAPP_APP_ID = (os.getenv("FITHUB_WECHAT_MINIAPP_APP_ID") or "").strip()
+WECHAT_MINIAPP_APP_SECRET = (os.getenv("FITHUB_WECHAT_MINIAPP_APP_SECRET") or "").strip()
+WECHAT_MINIAPP_DEV_MODE = str(os.getenv("FITHUB_WECHAT_MINIAPP_DEV_MODE") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def url_with_prefix(path="/"):
@@ -127,6 +130,7 @@ def runtime_config():
         },
         "smsEnabled": sms_verification_enabled(),
         "smsProvider": SMS_PROVIDER if sms_provider_configured() else ("debug" if SMS_DEV_MODE else ""),
+        "wechatMiniappEnabled": bool(WECHAT_MINIAPP_APP_ID and WECHAT_MINIAPP_APP_SECRET) or WECHAT_MINIAPP_DEV_MODE,
     }
 
 
@@ -499,6 +503,10 @@ def sms_verification_enabled():
     return SMS_DEV_MODE or sms_provider_configured()
 
 
+def wechat_miniapp_login_enabled():
+    return WECHAT_MINIAPP_DEV_MODE or bool(WECHAT_MINIAPP_APP_ID and WECHAT_MINIAPP_APP_SECRET)
+
+
 def ensure_verification_registry(state):
     return state.setdefault("otpCodes", {})
 
@@ -543,6 +551,41 @@ def hmac_sha256(key, msg):
 
 def sha256_hex(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def exchange_wechat_miniapp_code(js_code, dev_openid=""):
+    code = str(js_code or "").strip()
+    if not code:
+        raise ValueError("缺少微信登录凭证。")
+    if WECHAT_MINIAPP_DEV_MODE and not (WECHAT_MINIAPP_APP_ID and WECHAT_MINIAPP_APP_SECRET):
+        seed = str(dev_openid or code).strip()
+        openid = f"dev-openid-{sha256_hex(seed)[:24]}"
+        return {
+            "openid": openid,
+            "unionid": "",
+            "session_key": f"dev-session-{sha256_hex(seed + ':session')[:24]}",
+            "source": "dev",
+        }
+    if not (WECHAT_MINIAPP_APP_ID and WECHAT_MINIAPP_APP_SECRET):
+        raise ValueError("微信小程序登录还没有配置 AppID 和 AppSecret。")
+
+    query = urlencode(
+        {
+            "appid": WECHAT_MINIAPP_APP_ID,
+            "secret": WECHAT_MINIAPP_APP_SECRET,
+            "js_code": code,
+            "grant_type": "authorization_code",
+        }
+    )
+    request = Request(f"https://api.weixin.qq.com/sns/jscode2session?{query}", method="GET")
+    with urlopen(request, timeout=12) as response:
+        payload = json.loads(response.read().decode("utf-8") or "{}")
+    if payload.get("errcode"):
+        raise ValueError(f"微信登录失败：{payload.get('errmsg') or payload.get('errcode')}")
+    if not payload.get("openid"):
+        raise ValueError("微信登录没有返回 openid。")
+    payload["source"] = "wechat"
+    return payload
 
 
 def send_sms_via_tencent(phone, code):
@@ -2395,6 +2438,44 @@ def ensure_account_identity_bindings(account):
     return providers
 
 
+def bind_account_identity_provider(account, provider_type, identifier, **extra):
+    provider_type = str(provider_type or "").strip()
+    identifier = str(identifier or "").strip()
+    if not provider_type or not identifier:
+        return None
+    providers = account.setdefault("identityProviders", {})
+    provider = providers.setdefault(provider_type, {})
+    provider.update(
+        {
+            "type": provider_type,
+            "identifier": identifier,
+            "maskedIdentifier": "已绑定",
+            "verified": True,
+            "verifiedAt": iso_at(),
+            "boundAt": provider.get("boundAt") or iso_at(),
+        }
+    )
+    for key, value in extra.items():
+        if value not in (None, ""):
+            provider[key] = value
+    if not account.get("primaryProvider"):
+        account["primaryProvider"] = provider_type
+    ensure_account_identity_bindings(account)
+    return provider
+
+
+def find_account_by_identity_provider(state, provider_type, identifier):
+    provider_type = str(provider_type or "").strip()
+    identifier = str(identifier or "").strip()
+    if not provider_type or not identifier:
+        return None
+    for account in ensure_account_registry(state).values():
+        provider = (account.get("identityProviders") or {}).get(provider_type)
+        if isinstance(provider, dict) and str(provider.get("identifier") or "").strip() == identifier:
+            return account
+    return None
+
+
 def resolve_account_by_phone(state, phone):
     phone_key = normalize_phone(phone)
     if not phone_key:
@@ -2542,6 +2623,21 @@ def reconcile_account_registry(state):
         if target["profilesByRole"].get(role) != preferred_profile_id:
             target["profilesByRole"][role] = preferred_profile_id
             changed = True
+
+    for account_id, account in old_accounts.items():
+        if account_id in rebuilt_accounts:
+            continue
+        providers = account.get("identityProviders") or {}
+        has_provider_identity = any(
+            isinstance(provider, dict) and str(provider.get("identifier") or "").strip()
+            for provider in providers.values()
+        )
+        if not has_provider_identity and not normalize_phone(account.get("phone")):
+            continue
+        preserved = build_account_seed(account, account.get("phone", ""))
+        rebuilt_accounts[preserved["id"]] = preserved
+        if preserved.get("phone"):
+            phone_index[preserved["phone"]] = preserved["id"]
 
     if rebuilt_accounts != old_accounts:
         state["accounts"] = rebuilt_accounts
@@ -5227,6 +5323,42 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 account = ensure_profile_account(state, profile, phone)
                 attach_account_to_session(state, session, account, role)
                 return bootstrap_response(state, session)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/auth/wechat-mini-login":
+            def action(state):
+                if not wechat_miniapp_login_enabled():
+                    raise ValueError("微信小程序登录还没有开启。")
+                session = ensure_session(state, session_id)
+                reconcile_account_registry(state)
+                login_info = exchange_wechat_miniapp_code(payload.get("code"), payload.get("devOpenId"))
+                provider_identifier = login_info.get("unionid") or login_info.get("openid")
+                account = find_account_by_identity_provider(state, "wechat", provider_identifier)
+                if not account:
+                    account = create_account_record("")
+                    account["primaryProvider"] = "wechat"
+                    ensure_account_registry(state)[account["id"]] = account
+                bind_account_identity_provider(
+                    account,
+                    "wechat",
+                    provider_identifier,
+                    openid=login_info.get("openid", ""),
+                    unionid=login_info.get("unionid", ""),
+                    source=login_info.get("source", "wechat"),
+                )
+                attach_account_to_session(state, session, account, str(payload.get("role") or "").strip())
+                response = bootstrap_response(state, session)
+                response["wechatLogin"] = {
+                    "ok": True,
+                    "provider": login_info.get("source", "wechat"),
+                    "hasProfiles": bool(session.get("managedProfileIds")),
+                }
+                return response
 
             try:
                 self._write_json(self._with_state(action))

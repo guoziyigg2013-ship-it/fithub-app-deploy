@@ -1,0 +1,31 @@
+<view class="page">
+  <text class="eyebrow">PROFILE</text>
+  <view class="title">我的</view>
+
+  <view wx:if="{{profile}}" class="card profile-card">
+    <image class="avatar big-avatar" src="{{profile.avatarImage}}" mode="aspectFill"></image>
+    <view class="profile-main">
+      <text class="profile-name">{{profile.name}}</text>
+      <text class="muted">{{profile.handle}} · {{profile.locationLabel}}</text>
+      <view class="stats">
+        <view><text class="stat-value">{{profile.followingCount || 0}}</text><text class="muted">关注</text></view>
+        <view><text class="stat-value">{{profile.followerCount || 0}}</text><text class="muted">粉丝</text></view>
+        <view><text class="stat-value">{{profile.posts.length || 0}}</text><text class="muted">动态</text></view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:else class="card login-card">
+    <text class="login-title">登录 / 注册</text>
+    <text class="muted">小程序支持微信登录，也可以继续用手机号验证码登录。</text>
+    <button class="primary-button" bindtap="wechatLogin">微信一键登录</button>
+    <input class="field" placeholder="手机号" type="number" value="{{phone}}" data-field="phone" bindinput="onInput" />
+    <view class="code-row">
+      <input class="field code-field" placeholder="验证码" type="number" value="{{code}}" data-field="code" bindinput="onInput" />
+      <button class="ghost-button" bindtap="sendCode">验证码</button>
+    </view>
+    <text wx:if="{{debugCode}}" class="muted">测试验证码：{{debugCode}}</text>
+    <button class="primary-button" bindtap="phoneLogin">登录已有账号</button>
+    <button class="ghost-button full" bindtap="quickRegister">注册训练者测试号</button>
+  </view>
+</view>

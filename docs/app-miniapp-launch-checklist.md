@@ -141,13 +141,35 @@
 
 ### 第 4 步：微信小程序 MVP
 
-待做：
+目标：
 
 - 小程序项目结构
 - 微信登录
 - 首页、探索、动态、预约、我的
 - 图片/视频上传
 - 内容安全接口
+
+当前已落地：
+
+- 新增 `wechat-miniprogram/` 独立小程序项目骨架
+- 小程序端已包含：
+  - 首页：健身房 / 教练列表
+  - 探索：推荐关注、关注动态、点赞、收藏、举报
+  - 发布：文字动态、图片/视频选择与上传
+  - 预约：预约列表和快速预约
+  - 我的：微信登录、手机号验证码登录、训练者快速注册
+- 后端新增 `POST /api/auth/wechat-mini-login`
+  - 配置真实 `FITHUB_WECHAT_MINIAPP_APP_ID` / `FITHUB_WECHAT_MINIAPP_APP_SECRET` 后走微信 `code2Session`
+  - 测试环境可用 `FITHUB_WECHAT_MINIAPP_DEV_MODE=true` 走 dev mock
+- 小程序端复用当前生产 API，后续备案域名完成后只需替换 `wechat-miniprogram/config.js`
+
+下一步：
+
+- 在微信开发者工具里导入 `wechat-miniprogram`
+- 用真实小程序 AppID 替换 `project.config.json`
+- 在微信后台配置合法 request/uploadFile 域名
+- 给后端配置微信 AppID 和 AppSecret
+- 接入微信内容安全接口，对图片、视频和文本做正式审核
 
 ### 第 5 步：iOS TestFlight MVP
 

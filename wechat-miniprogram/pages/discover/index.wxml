@@ -1,0 +1,47 @@
+<view class="page">
+  <view class="space-between">
+    <view>
+      <text class="eyebrow">DISCOVER</text>
+      <view class="title">探索</view>
+    </view>
+    <button class="primary-small" bindtap="goPublish">发布</button>
+  </view>
+
+  <view class="section-title">推荐关注</view>
+  <scroll-view scroll-x class="recommend-scroll" show-scrollbar="{{false}}">
+    <view class="recommend-row">
+      <view class="recommend-card card" wx:for="{{recommendations}}" wx:key="id">
+        <image class="avatar" src="{{item.avatarImage}}" mode="aspectFill"></image>
+        <text class="recommend-name">{{item.name}}</text>
+        <text class="muted">{{item.role === 'gym' ? '健身房' : item.role === 'coach' ? '健身教练' : '健身爱好者'}}</text>
+        <button class="ghost-button" data-id="{{item.id}}" bindtap="follow">关注</button>
+      </view>
+    </view>
+  </scroll-view>
+
+  <view class="section-title">关注动态</view>
+  <view wx:if="{{!feed.length}}" class="card empty">
+    <text>先关注几个附近对象，这里会按时间显示他们的最新动态。</text>
+  </view>
+
+  <view class="post card" wx:for="{{feed}}" wx:key="post.id">
+    <view class="row post-head">
+      <image class="avatar" src="{{item.profile.avatarImage}}" mode="aspectFill"></image>
+      <view class="post-meta">
+        <text class="post-name">{{item.profile.name}}</text>
+        <text class="muted">{{item.profile.handle}} · {{item.post.time}}</text>
+      </view>
+      <text class="role">{{item.profile.role === 'gym' ? '健身房' : item.profile.role === 'coach' ? '健身教练' : '健身爱好者'}}</text>
+    </view>
+    <text class="post-content">{{item.post.content}}</text>
+    <view wx:if="{{item.post.media && item.post.media.length}}" class="media-grid">
+      <image wx:for="{{item.post.media}}" wx:for-item="media" wx:key="url" class="media" src="{{media.thumbnailUrl || media.url}}" mode="aspectFill"></image>
+    </view>
+    <text class="muted">{{item.post.meta}}</text>
+    <view class="action-row">
+      <button data-id="{{item.post.id}}" bindtap="like">♡ {{item.post.likeCount || 0}}</button>
+      <button data-id="{{item.post.id}}" bindtap="favorite">☆ {{item.post.favoriteCount || 0}}</button>
+      <button data-id="{{item.post.id}}" bindtap="report">举报</button>
+    </view>
+  </view>
+</view>
