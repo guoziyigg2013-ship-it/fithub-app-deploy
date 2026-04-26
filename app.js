@@ -6198,8 +6198,7 @@ function renderBooking() {
 
     <section class="stack-list">
       ${renderManagedBookingList(myProfile, bookingList, {
-        emptyText,
-        primaryAction: myProfile?.role === "enthusiast" ? "查看主页" : "查看预约"
+        emptyText
       })}
     </section>
 
@@ -7853,7 +7852,7 @@ function renderSocialProfilesSection(mode = "following") {
   `;
 }
 
-function renderManagedBookingList(profile, bookings, { emptyText = "", primaryAction = "查看主页" } = {}) {
+function renderManagedBookingList(profile, bookings, { emptyText = "" } = {}) {
   const profileRole = profile?.role || "enthusiast";
   if (!bookings.length) {
     return `<article class="empty-card">${emptyText}</article>`;
@@ -7871,13 +7870,27 @@ function renderManagedBookingList(profile, bookings, { emptyText = "", primaryAc
           const scheduleText = card.scheduledDate || card.scheduledTime
             ? formatAvailabilitySlot(card)
             : card.time || "待确认";
+          const profileTargetId = card.counterpartProfileId || card.targetProfileId || card.createdByProfileId || "";
+          const titleText = card.title || `${counterpartLabel} · 预约记录`;
+          const profileLink = profileTargetId
+            ? `
+              <button class="booking-profile-link" data-open-profile="${profileTargetId}" type="button" aria-label="打开${escapeHtml(counterpartLabel)}主页">
+                <strong>${escapeHtml(titleText)}</strong>
+                <span>${escapeHtml(metaLeft)}</span>
+              </button>
+            `
+            : `
+              <div class="booking-profile-link booking-profile-link--static">
+                <strong>${escapeHtml(titleText)}</strong>
+                <span>${escapeHtml(metaLeft)}</span>
+              </div>
+            `;
           return `
             <article class="booking-card">
               <div class="booking-top">
-                <strong>${escapeHtml(card.title || `${counterpartLabel} · 预约记录`)}</strong>
+                ${profileLink}
                 <span class="status-pill">${escapeHtml(card.status || "待确认")}</span>
               </div>
-              <p>${escapeHtml(metaLeft)}</p>
               <div class="community-meta">
                 <span>${escapeHtml(card.price || "待确认")}</span>
                 <span>${escapeHtml(scheduleText)}</span>
@@ -7885,9 +7898,6 @@ function renderManagedBookingList(profile, bookings, { emptyText = "", primaryAc
               ${card.slotNote ? `<p class="booking-slot-note">${escapeHtml(card.slotNote)}</p>` : ""}
               <div class="booking-bottom">
                 <span>${escapeHtml(card.place || card.counterpartLocationLabel || "位置待确认")}</span>
-                <button class="cta" type="button" data-open-profile="${card.counterpartProfileId || card.targetProfileId || card.createdByProfileId || ""}">
-                  ${escapeHtml(primaryAction)}
-                </button>
               </div>
             </article>
           `;
@@ -9696,8 +9706,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
       title: "订单",
       subtitle: profile.role === "enthusiast" ? "查看最近预约、付款与订单状态" : "查看别人给我的订单、预约和待服务记录",
       content: renderManagedBookingList(profile, bookings, {
-        emptyText: profile.role === "enthusiast" ? "你还没有正式预约。去首页、探索或教练/场馆主页完成第一次预约后，这里才会出现记录。" : emptyIncomingBookingMarkup.replace(/<\/?article[^>]*>/g, ""),
-        primaryAction: profile.role === "enthusiast" ? "查看主页" : "联系对方"
+        emptyText: profile.role === "enthusiast" ? "你还没有正式预约。去首页、探索或教练/场馆主页完成第一次预约后，这里才会出现记录。" : emptyIncomingBookingMarkup.replace(/<\/?article[^>]*>/g, "")
       })
     },
     favorites: {
@@ -9751,8 +9760,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
       title: "预约",
       subtitle: profile.role === "enthusiast" ? "查看你的课程排期与待上课记录" : "查看别人对你的预约、待接待和服务排期",
       content: renderManagedBookingList(profile, profile.role === "enthusiast" ? bookings : incomingBookings, {
-        emptyText: profile.role === "enthusiast" ? emptyOutgoingBookingMarkup.replace(/<\/?article[^>]*>/g, "") : emptyIncomingBookingMarkup.replace(/<\/?article[^>]*>/g, ""),
-        primaryAction: profile.role === "enthusiast" ? "查看主页" : "查看预约"
+        emptyText: profile.role === "enthusiast" ? emptyOutgoingBookingMarkup.replace(/<\/?article[^>]*>/g, "") : emptyIncomingBookingMarkup.replace(/<\/?article[^>]*>/g, "")
       })
     },
     health: {
@@ -11489,7 +11497,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-8`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260427-1`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

@@ -84,6 +84,9 @@ test("训练者可以预约教练，教练端能看到别人给我的预约", as
   await expect(outgoingBooking).toContainText("已预约");
   await expect(outgoingBooking).toContainText("¥260/小时");
   await expect(outgoingBooking).toContainText("18:30");
+  await expect(outgoingBooking.getByText("查看主页", { exact: true })).toHaveCount(0);
+  await outgoingBooking.locator(".booking-profile-link").click();
+  await expect(page.getByRole("heading", { name: "主页", exact: true })).toBeVisible();
 
   const coachPage = await context.newPage();
   await loginWithPhone(coachPage, { phone: coach.phone, role: "coach" });
@@ -95,5 +98,6 @@ test("训练者可以预约教练，教练端能看到别人给我的预约", as
   await expect(incomingBooking).toContainText("已预约");
   await expect(incomingBooking).toContainText("健身爱好者");
   await expect(incomingBooking).toContainText("18:30");
+  await expect(incomingBooking.getByText("查看主页", { exact: true })).toHaveCount(0);
   await coachPage.close();
 });

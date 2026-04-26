@@ -1556,6 +1556,38 @@ form.is-submitting button[type="submit"] {
   padding: 16px;
 }
 
+.booking-top {
+  align-items: flex-start;
+}
+
+.booking-profile-link {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  display: grid;
+  gap: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.booking-profile-link strong {
+  display: block;
+}
+
+.booking-profile-link span {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.booking-profile-link:not(.booking-profile-link--static):active {
+  opacity: 0.62;
+}
+
 .booking-card p {
   margin: 8px 0 14px;
   color: var(--muted);
