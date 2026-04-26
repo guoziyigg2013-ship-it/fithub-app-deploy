@@ -1652,6 +1652,8 @@ const state = {
   activeProfileId: "",
   followSet: new Set(),
   followerSet: new Set(),
+  blockSet: new Set(),
+  blockedBySet: new Set(),
   favoritePostIds: new Set(),
   favoritePosts: [],
   notifications: [],
@@ -2514,6 +2516,8 @@ function clearStaleManagedSession({ keepStoredAccounts = true } = {}) {
   state.composeProfileId = "";
   state.followSet = new Set();
   state.followerSet = new Set();
+  state.blockSet = new Set();
+  state.blockedBySet = new Set();
   state.favoritePostIds = new Set();
   state.favoritePosts = [];
   state.notifications = [];
@@ -2720,6 +2724,8 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   const previousRegisterRole = state.registerRole;
   const previousFollowSet = new Set(state.followSet);
   const previousFollowerSet = new Set(state.followerSet);
+  const previousBlockSet = new Set(state.blockSet);
+  const previousBlockedBySet = new Set(state.blockedBySet);
   const previousFavoritePostIds = new Set(state.favoritePostIds);
   const previousFavoritePosts = [...state.favoritePosts];
   const previousNotifications = [...state.notifications];
@@ -2761,6 +2767,8 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
     : payload.session.currentActorProfileId || state.managedProfileIds[0] || "";
   state.followSet = preserveManagedSession ? previousFollowSet : new Set(payload.followSet || []);
   state.followerSet = preserveManagedSession ? previousFollowerSet : new Set(payload.followerSet || []);
+  state.blockSet = preserveManagedSession ? previousBlockSet : new Set(payload.blockSet || []);
+  state.blockedBySet = preserveManagedSession ? previousBlockedBySet : new Set(payload.blockedBySet || []);
   applyPendingFollowMutations();
   state.favoritePostIds = preserveManagedSession ? previousFavoritePostIds : new Set(payload.favoritePostIds || []);
   state.favoritePosts = preserveManagedSession ? previousFavoritePosts : (Array.isArray(payload.favoritePosts) ? payload.favoritePosts : []);
@@ -3407,6 +3415,53 @@ async function runTask(task) {
     await task();
   } catch (error) {
     showError(error?.message || "操作失败，请稍后再试。");
+  }
+}
+
+async function runButtonTask(button, task, loadingText = "处理中") {
+  const originalText = button?.textContent || "";
+  if (button) {
+    button.classList.add("is-loading");
+    button.setAttribute("aria-busy", "true");
+    button.disabled = true;
+    if (loadingText) button.textContent = loadingText;
+  }
+  try {
+    await task();
+  } catch (error) {
+    showError(error?.message || "操作失败，请稍后再试。");
+  } finally {
+    if (button?.isConnected) {
+      button.classList.remove("is-loading");
+      button.removeAttribute("aria-busy");
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+async function runSubmitTask(form, task, loadingText = "处理中") {
+  const submit = form?.querySelector('button[type="submit"]');
+  const originalText = submit?.textContent || "";
+  if (form) form.classList.add("is-submitting");
+  if (submit) {
+    submit.classList.add("is-loading");
+    submit.setAttribute("aria-busy", "true");
+    submit.disabled = true;
+    submit.textContent = loadingText;
+  }
+  try {
+    await task();
+  } catch (error) {
+    showError(error?.message || "操作失败，请稍后再试。");
+  } finally {
+    if (form?.isConnected) form.classList.remove("is-submitting");
+    if (submit?.isConnected) {
+      submit.classList.remove("is-loading");
+      submit.removeAttribute("aria-busy");
+      submit.disabled = false;
+      submit.textContent = originalText;
+    }
   }
 }
 
@@ -4681,6 +4736,9 @@ async function toggleFollow(profileId) {
   if (profileId === actor.id) {
     throw new Error("不能关注当前身份自己。");
   }
+  if (state.blockSet.has(profileId) || state.blockedBySet.has(profileId)) {
+    throw new Error("当前无法关注这个用户，请先解除拉黑。");
+  }
 
   const previousFollowing = state.followSet.has(profileId);
   const desiredFollowing = !previousFollowing;
@@ -4704,6 +4762,45 @@ async function toggleFollow(profileId) {
   flushFollowMutation(profileId).catch((error) => {
     showError(error?.message || "关注同步失败，请稍后再试。");
   });
+}
+
+async function toggleBlock(profileId) {
+  const actor = getCurrentActor();
+  if (!actor?.id) {
+    throw new Error("请先登录后再操作。");
+  }
+  if (profileId === actor.id) {
+    throw new Error("不能拉黑当前身份自己。");
+  }
+
+  const wasBlocked = state.blockSet.has(profileId);
+  const desiredBlocked = !wasBlocked;
+  if (desiredBlocked) {
+    state.blockSet.add(profileId);
+    state.followSet.delete(profileId);
+    state.followerSet.delete(profileId);
+  } else {
+    state.blockSet.delete(profileId);
+  }
+  renderPage();
+
+  try {
+    await postAndSync(`${API_BASE}/block/toggle`, {
+      sourceProfileId: actor.id,
+      selectedRole: actor.role || state.selectedRole,
+      targetProfileId: profileId,
+      desiredBlocked
+    });
+    showToast(desiredBlocked ? "已拉黑，对方将不能给你发私信。" : "已解除拉黑。");
+  } catch (error) {
+    if (wasBlocked) {
+      state.blockSet.add(profileId);
+    } else {
+      state.blockSet.delete(profileId);
+    }
+    renderPage();
+    throw error;
+  }
 }
 
 function openProfile(profileId) {
@@ -5762,6 +5859,12 @@ async function submitReport(targetType, targetId) {
 async function sendDirectMessage(profileId) {
   const text = state.chatDraft.trim();
   if (!text) return;
+  if (state.blockSet.has(profileId)) {
+    throw new Error("你已拉黑对方，解除拉黑后才能继续私信。");
+  }
+  if (state.blockedBySet.has(profileId)) {
+    throw new Error("对方暂不接收你的私信。");
+  }
 
   const previousDraft = state.chatDraft;
   state.chatDraft = "";
@@ -7844,7 +7947,7 @@ function renderMessagesFeature(profile) {
               <div class="section-title-row">
                 <div>
                   <h3>私信咨询</h3>
-                  <p class="result-tip">已关注后可继续沟通预约、课程和训练安排。</p>
+                  <p class="result-tip">默认可直接私信沟通；如遇骚扰，可进入对方主页拉黑。</p>
                 </div>
               </div>
               <section class="stack-list">
@@ -7852,8 +7955,10 @@ function renderMessagesFeature(profile) {
                   .map(
                     (thread) => `
                       <article class="feature-follow-item">
-                        <button class="feature-follow-main" data-open-chat="${thread.withProfileId}" type="button">
+                        <button class="profile-avatar-button" data-open-profile="${thread.withProfileId}" type="button" aria-label="打开${escapeHtml(thread.withProfileName)}主页">
                           ${renderAvatarMarkup({ name: thread.withProfileName, avatarImage: thread.withProfileAvatarImage, role: "enthusiast", unreadCount: getThreadUnreadCount(thread) }, "avatar")}
+                        </button>
+                        <button class="feature-follow-main feature-follow-main--chat" data-open-chat="${thread.withProfileId}" type="button">
                           <div>
                             <strong>${escapeHtml(thread.withProfileName)}</strong>
                             <p>${escapeHtml(thread.lastMessage?.text || "打开查看最新消息")}</p>
@@ -9720,6 +9825,8 @@ function renderProfilePage(profile) {
   const managed = isManagedProfile(profile.id);
   const isCurrentActor = profile.id === getCurrentActor()?.id;
   const followed = state.followSet.has(profile.id);
+  const blocked = state.blockSet.has(profile.id);
+  const blockedBy = state.blockedBySet.has(profile.id);
   const draftRate = Number(state.ratingDrafts[profile.id] || 0);
   const draftReview = state.reviewDrafts[profile.id] || "";
   const returnLabel = getProfileReturnLabel();
@@ -9788,19 +9895,27 @@ function renderProfilePage(profile) {
             ${
               isCurrentActor
                 ? `<button class="mini-button mini-button--accent" data-edit-role="${profile.role}" type="button">编辑资料</button>`
-                : `<button class="follow-button ${followed ? "is-active" : ""}" data-toggle-follow="${profile.id}" type="button">${followed ? "已关注" : "关注"}</button>`
+                : blocked
+                  ? `<button class="follow-button is-blocked" data-toggle-block="${profile.id}" type="button">已拉黑</button>`
+                  : `<button class="follow-button ${followed ? "is-active" : ""}" data-toggle-follow="${profile.id}" type="button">${followed ? "已关注" : "关注"}</button>`
             }
             ${
-              !isCurrentActor && followed
+              !isCurrentActor && !blocked && !blockedBy
                 ? `<button class="mini-button" data-open-chat="${profile.id}" type="button">私信</button>`
                 : ""
             }
             ${
-              !isCurrentActor && profile.role !== "enthusiast"
+              !isCurrentActor && !blocked && !blockedBy && profile.role !== "enthusiast"
                 ? `<button class="mini-button" data-create-booking="${profile.id}" type="button">预约</button>`
                 : ""
             }
+            ${
+              !isCurrentActor
+                ? `<button class="mini-button mini-button--danger-soft" data-toggle-block="${profile.id}" type="button">${blocked ? "解除拉黑" : "拉黑"}</button>`
+                : ""
+            }
           </div>
+          ${blockedBy ? '<p class="helper-note helper-note--profile">对方暂不接收你的关注、私信和预约。</p>' : ""}
         </div>
       </div>
     </article>
@@ -10317,6 +10432,9 @@ function renderChatOverlay() {
   const thread = getThreadForProfile(state.chatTargetProfileId);
   const isSendingChat = state.pendingMessageProfileIds.has(state.chatTargetProfileId);
   const canSendChat = Boolean(state.chatDraft.trim());
+  const blocked = state.blockSet.has(state.chatTargetProfileId);
+  const blockedBy = state.blockedBySet.has(state.chatTargetProfileId);
+  const chatLocked = blocked || blockedBy;
 
   if (!targetProfile) {
     return `
@@ -10337,11 +10455,14 @@ function renderChatOverlay() {
     <div class="overlay-backdrop" data-close-overlay="1"></div>
     <div class="overlay-panel overlay-panel--chat">
       <div class="overlay-head">
-        <div>
-          <p class="page-label">私信</p>
-          <h2>${escapeHtml(targetProfile.name)}</h2>
-          <p>已关注后可继续沟通预约、课程和训练安排。</p>
-        </div>
+        <button class="chat-profile-link" data-open-profile="${targetProfile.id}" type="button">
+          ${renderAvatarMarkup(targetProfile, "avatar")}
+          <span>
+            <small>私信</small>
+            <strong>${escapeHtml(targetProfile.name)}</strong>
+            <em>${blocked ? "你已拉黑对方，解除后可继续沟通。" : blockedBy ? "对方暂不接收你的私信。" : "点头像/名字进入主页，可关注或拉黑。"}</em>
+          </span>
+        </button>
         <button class="close-button" data-close-overlay="1" type="button">×</button>
       </div>
 
@@ -10375,8 +10496,8 @@ function renderChatOverlay() {
       </section>
 
       <form class="chat-form ${isSendingChat ? "is-sending" : ""}" id="chatForm">
-        <input data-chat-input="1" type="text" value="${escapeHtml(state.chatDraft)}" placeholder="输入私信内容，约课或咨询都可以">
-        <button class="compose-submit-top" type="submit" ${canSendChat ? "" : "disabled"}>发送</button>
+        <input data-chat-input="1" type="text" value="${escapeHtml(state.chatDraft)}" ${chatLocked ? "disabled" : ""} placeholder="${chatLocked ? "当前不能发送私信" : "输入私信内容，约课或咨询都可以"}">
+        <button class="compose-submit-top" type="submit" ${canSendChat && !chatLocked ? "" : "disabled"}>发送</button>
       </form>
     </div>
   `;
@@ -10483,12 +10604,13 @@ function syncChatComposerState() {
   const input = chatForm.querySelector('[data-chat-input="1"]');
   const submit = chatForm.querySelector('button[type="submit"]');
   const isSendingChat = state.pendingMessageProfileIds.has(state.chatTargetProfileId);
+  const chatLocked = state.blockSet.has(state.chatTargetProfileId) || state.blockedBySet.has(state.chatTargetProfileId);
   const canSendChat = Boolean((state.chatDraft || "").trim());
   if (input) {
-    input.disabled = false;
+    input.disabled = chatLocked;
   }
   if (submit) {
-    submit.disabled = !canSendChat;
+    submit.disabled = !canSendChat || chatLocked;
     submit.textContent = "发送";
   }
   if (chatForm) {
@@ -10563,7 +10685,7 @@ appView.addEventListener("click", (event) => {
   }
 
   if (target.dataset.logoutAccount) {
-    runTask(() => logoutCurrentDevice());
+    runButtonTask(target, () => logoutCurrentDevice(), "正在退出");
     return;
   }
 
@@ -10693,8 +10815,18 @@ appView.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.dataset.toggleBlock) {
+    runTask(() => toggleBlock(target.dataset.toggleBlock));
+    return;
+  }
+
   if (target.dataset.followBack) {
     runTask(() => toggleFollow(target.dataset.followBack));
+    return;
+  }
+
+  if (target.dataset.logoutAccount) {
+    runButtonTask(target, () => logoutCurrentDevice(), "正在退出");
     return;
   }
 
@@ -10770,7 +10902,12 @@ appView.addEventListener("click", (event) => {
   }
 
   if (target.dataset.submitRating) {
-    runTask(() => submitRating(target.dataset.submitRating));
+    runButtonTask(target, () => submitRating(target.dataset.submitRating), "提交中");
+    return;
+  }
+
+  if (target.dataset.toggleBlock) {
+    runTask(() => toggleBlock(target.dataset.toggleBlock));
     return;
   }
 
@@ -10791,7 +10928,7 @@ appView.addEventListener("click", (event) => {
   }
 
   if (target.dataset.saveCommonSports) {
-    runTask(() => saveFavoriteSports());
+    runButtonTask(target, () => saveFavoriteSports(), "保存中");
     return;
   }
 
@@ -10841,17 +10978,17 @@ appView.addEventListener("click", (event) => {
     const profile = getProfile(target.dataset.createBooking);
     const planIndex = Number(target.dataset.planIndex || 0);
     const plan = profile?.pricingPlans?.[planIndex] || null;
-    runTask(() => createBooking(target.dataset.createBooking, plan, target.dataset.availabilitySlot || ""));
+    runButtonTask(target, () => createBooking(target.dataset.createBooking, plan, target.dataset.availabilitySlot || ""), "预约中");
     return;
   }
 
   if (target.dataset.createAvailability) {
-    runTask(() => createAvailabilitySlot(target.dataset.createAvailability));
+    runButtonTask(target, () => createAvailabilitySlot(target.dataset.createAvailability), "发布中");
     return;
   }
 
   if (target.dataset.deleteAvailability) {
-    runTask(() => deleteAvailabilitySlot(target.dataset.availabilityProfile, target.dataset.deleteAvailability));
+    runButtonTask(target, () => deleteAvailabilitySlot(target.dataset.availabilityProfile, target.dataset.deleteAvailability), "取消中");
     return;
   }
 });
@@ -11139,20 +11276,20 @@ overlay.addEventListener("change", (event) => {
 overlay.addEventListener("submit", (event) => {
   if (event.target.id === "authForm") {
     event.preventDefault();
-    runTask(() => submitAuthLogin());
+    runSubmitTask(event.target, () => submitAuthLogin(), "正在登录");
     return;
   }
 
   if (event.target.id === "registerForm") {
     event.preventDefault();
     const formData = new FormData(event.target);
-    runTask(() => upsertManagedProfile(state.registerRole, formData));
+    runSubmitTask(event.target, () => upsertManagedProfile(state.registerRole, formData), "正在提交");
     return;
   }
 
   if (event.target.id === "composeForm") {
     event.preventDefault();
-    runTask(() => submitComposePost());
+    runSubmitTask(event.target, () => submitComposePost(), "发布中");
     return;
   }
 
@@ -11352,7 +11489,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-7`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-8`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

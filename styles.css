@@ -704,6 +704,39 @@ body.is-workout-live .app {
   box-shadow: 0 8px 18px rgba(242, 140, 40, 0.2);
 }
 
+.mini-button--danger-soft {
+  color: #9a3c23;
+  background: #fff1ec;
+}
+
+.follow-button.is-blocked {
+  color: #9a3c23;
+  border-color: rgba(154, 60, 35, 0.2);
+  background: #fff1ec;
+}
+
+.helper-note--profile {
+  margin-top: 8px;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled) {
+  transition: transform 120ms ease, opacity 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+button.is-loading,
+form.is-submitting button[type="submit"] {
+  opacity: 0.72;
+  cursor: wait;
+}
+
 .location-card,
 .helper-card,
 .role-entry {
@@ -4660,6 +4693,56 @@ body.is-workout-live .app {
 
 .chat-row--self {
   justify-content: flex-end;
+}
+
+.profile-avatar-button,
+.chat-profile-link,
+.feature-follow-main--chat {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.profile-avatar-button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.chat-profile-link {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+}
+
+.chat-profile-link span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-profile-link small,
+.chat-profile-link em {
+  color: var(--muted);
+  font-style: normal;
+  line-height: 1.3;
+}
+
+.chat-profile-link strong {
+  font-size: 24px;
+  line-height: 1.08;
+}
+
+.feature-follow-main--chat {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
 }
 
 .chat-avatar {

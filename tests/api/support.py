@@ -157,6 +157,9 @@ class ApiClient:
     def toggle_follow(self, target_profile_id):
         return self.post("/api/follow/toggle", {"targetProfileId": target_profile_id})
 
+    def toggle_block(self, target_profile_id):
+        return self.post("/api/block/toggle", {"targetProfileId": target_profile_id})
+
     def create_post(self, profile_id, content, meta="测试动态", media=None):
         return self.post(
             "/api/post/create",

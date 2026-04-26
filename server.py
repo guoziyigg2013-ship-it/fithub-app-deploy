@@ -418,10 +418,12 @@ def sanitize_state(state):
     state.setdefault("reports", [])
     state.setdefault("moderationQueue", [])
     state.setdefault("adminActions", [])
+    state.setdefault("blocks", [])
     for profile in state.get("profiles", {}).values():
         profile["avatarImage"] = compact_avatar_image(profile.get("avatarImage"), profile.get("role", "enthusiast"))
     for post in state.get("posts", {}).values():
         post["media"] = [compact_media_item(item) for item in post.get("media", [])]
+    normalize_blocks(state)
     return state
 
 
@@ -1765,6 +1767,11 @@ def build_phone_recovery_slice(state, phone):
         for item in (state.get("follows") or [])
         if item.get("sourceProfileId") in alias_profile_ids or item.get("targetProfileId") in alias_profile_ids
     ]
+    related_blocks = [
+        deepcopy(item)
+        for item in (state.get("blocks") or [])
+        if item.get("sourceProfileId") in alias_profile_ids or item.get("targetProfileId") in alias_profile_ids
+    ]
     favorite_post_ids = {
         item.get("postId")
         for item in (state.get("postFavorites") or [])
@@ -1807,6 +1814,7 @@ def build_phone_recovery_slice(state, phone):
         "profiles": related_profiles,
         "accounts": related_accounts,
         "follows": related_follows,
+        "blocks": related_blocks,
         "posts": related_posts,
         "bookings": related_bookings,
         "threads": related_threads,
@@ -1912,6 +1920,18 @@ def merge_phone_recovery_slice(state, payload):
         existing_follows.add(key)
         changed = True
 
+    existing_blocks = {
+        (item.get("sourceProfileId"), item.get("targetProfileId"))
+        for item in (state.get("blocks") or [])
+    }
+    for item in payload.get("blocks") or []:
+        key = (item.get("sourceProfileId"), item.get("targetProfileId"))
+        if not all(key) or key in existing_blocks:
+            continue
+        state.setdefault("blocks", []).append(deepcopy(item))
+        existing_blocks.add(key)
+        changed = True
+
     existing_posts = state.setdefault("posts", {})
     for post_id, post in (payload.get("posts") or {}).items():
         if not post_id or not isinstance(post, dict):
@@ -1975,6 +1995,7 @@ def merge_phone_recovery_slice(state, payload):
 
     if changed:
         normalize_follows(state)
+        normalize_blocks(state)
         normalize_threads(state)
         reconcile_account_registry(state)
     return changed
@@ -3656,6 +3677,7 @@ def initial_state():
         "profiles": profiles,
         "posts": posts,
         "follows": follows,
+        "blocks": [],
         "profileAliases": {},
         "postFavorites": [],
         "bookings": bookings,
@@ -3964,6 +3986,71 @@ def follower_count(state, profile_id):
 
 def following_count(state, profile_id):
     return len(get_follow_set(state, profile_id))
+
+
+def normalize_blocks(state):
+    unique = []
+    seen = set()
+    for item in state.get("blocks", []) or []:
+        source_id = resolve_canonical_profile_id(state, item.get("sourceProfileId"))
+        target_id = resolve_canonical_profile_id(state, item.get("targetProfileId"))
+        if not source_id or not target_id or source_id == target_id:
+            continue
+        key = (source_id, target_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append({
+            "sourceProfileId": source_id,
+            "targetProfileId": target_id,
+            "createdAt": item.get("createdAt") or iso_at(),
+        })
+    state["blocks"] = unique
+
+
+def get_block_set(state, current_actor_profile_id):
+    if not current_actor_profile_id:
+        return set()
+    source_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
+    return {
+        resolve_canonical_profile_id(state, item.get("targetProfileId"))
+        for item in state.get("blocks", [])
+        if item.get("sourceProfileId") in source_alias_ids and resolve_canonical_profile_id(state, item.get("targetProfileId"))
+    }
+
+
+def get_blocked_by_set(state, current_actor_profile_id):
+    if not current_actor_profile_id:
+        return set()
+    target_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
+    return {
+        resolve_canonical_profile_id(state, item.get("sourceProfileId"))
+        for item in state.get("blocks", [])
+        if item.get("targetProfileId") in target_alias_ids and resolve_canonical_profile_id(state, item.get("sourceProfileId"))
+    }
+
+
+def is_blocking_profile(state, source_profile_id, target_profile_id):
+    source_alias_ids = collect_profile_alias_ids(state, source_profile_id)
+    target_alias_ids = collect_profile_alias_ids(state, target_profile_id)
+    return any(
+        item.get("sourceProfileId") in source_alias_ids and item.get("targetProfileId") in target_alias_ids
+        for item in state.get("blocks", []) or []
+    )
+
+
+def remove_relationship_between_profiles(state, source_profile_id, target_profile_id):
+    source_alias_ids = collect_profile_alias_ids(state, source_profile_id)
+    target_alias_ids = collect_profile_alias_ids(state, target_profile_id)
+    state["follows"] = [
+        item for item in state.get("follows", [])
+        if not (
+            item.get("sourceProfileId") in source_alias_ids and item.get("targetProfileId") in target_alias_ids
+        )
+        and not (
+            item.get("sourceProfileId") in target_alias_ids and item.get("targetProfileId") in source_alias_ids
+        )
+    ]
 
 
 def serialize_review(state, review):
@@ -4552,6 +4639,8 @@ def bootstrap_response(state, session):
         "profiles": profiles,
         "followSet": sorted(get_follow_set(state, current_actor_profile_id)),
         "followerSet": sorted(get_follower_set(state, current_actor_profile_id)),
+        "blockSet": sorted(get_block_set(state, current_actor_profile_id)),
+        "blockedBySet": sorted(get_blocked_by_set(state, current_actor_profile_id)),
         "favoritePostIds": sorted(
             str(item.get("postId") or "")
             for item in state.get("postFavorites", [])
@@ -5762,6 +5851,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     raise ValueError("没有找到要关注的对象。")
                 if target_profile_id == source_profile_id:
                     raise ValueError("不能关注当前身份自己。")
+                if is_blocking_profile(state, source_profile_id, target_profile_id) or is_blocking_profile(state, target_profile_id, source_profile_id):
+                    raise ValueError("当前无法关注这个用户，请先解除拉黑。")
                 source_profile = state.get("profiles", {}).get(source_profile_id)
                 if source_profile:
                     session["currentActorProfileId"] = source_profile_id
@@ -5790,6 +5881,60 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         follows.remove(item)
                 if payload.get("compact"):
                     return compact_follow_response(state, session, source_profile_id, target_profile_id)
+                return bootstrap_response(state, session)
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/block/toggle":
+            def action(state):
+                session = ensure_session(state, session_id)
+                requested_source_profile_id = payload.get("sourceProfileId") or session.get("currentActorProfileId")
+                preferred_role = str(payload.get("selectedRole") or session.get("selectedRole") or "").strip()
+                allowed, source_profile_id = ensure_session_identity(
+                    state,
+                    session,
+                    preferred_role=preferred_role,
+                    requested_profile_id=requested_source_profile_id,
+                )
+                target_profile_id = resolve_canonical_profile_id(state, payload.get("targetProfileId"))
+                if not allowed or not source_profile_id:
+                    raise ValueError("请先登录后再操作。")
+                if not target_profile_id or target_profile_id not in state.get("profiles", {}):
+                    raise ValueError("没有找到要拉黑的对象。")
+                if target_profile_id == source_profile_id:
+                    raise ValueError("不能拉黑当前身份自己。")
+
+                source_profile = state.get("profiles", {}).get(source_profile_id)
+                if source_profile:
+                    session["currentActorProfileId"] = source_profile_id
+                    session["selectedRole"] = source_profile.get("role") or session.get("selectedRole") or "enthusiast"
+
+                source_alias_ids = collect_profile_alias_ids(state, source_profile_id)
+                target_alias_ids = collect_profile_alias_ids(state, target_profile_id)
+                existing = [
+                    item for item in state.get("blocks", [])
+                    if item.get("sourceProfileId") in source_alias_ids and item.get("targetProfileId") in target_alias_ids
+                ]
+                desired_blocked = payload.get("desiredBlocked")
+                should_block = (not existing) if desired_blocked is None else bool(desired_blocked)
+
+                if existing and not should_block:
+                    state["blocks"] = [item for item in state.get("blocks", []) if item not in existing]
+                elif not existing and should_block:
+                    state.setdefault("blocks", []).append({
+                        "sourceProfileId": source_profile_id,
+                        "targetProfileId": target_profile_id,
+                        "createdAt": iso_at(),
+                    })
+                    remove_relationship_between_profiles(state, source_profile_id, target_profile_id)
+                elif len(existing) > 1:
+                    state["blocks"] = [item for item in state.get("blocks", []) if item not in existing[1:]]
+
+                normalize_blocks(state)
+                normalize_follows(state)
                 return bootstrap_response(state, session)
             try:
                 self._write_json(self._with_state(action))
@@ -6244,11 +6389,15 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 session = ensure_session(state, session_id)
                 actor = session.get("currentActorProfileId")
-                target_profile_id = payload["targetProfileId"]
+                target_profile_id = resolve_canonical_profile_id(state, payload.get("targetProfileId"))
                 if not actor:
                     raise ValueError("请先注册后再发送私信。")
-                if target_profile_id not in get_follow_set(state, actor):
-                    raise ValueError("请先关注对方，再发送私信。")
+                if not target_profile_id or target_profile_id not in state.get("profiles", {}):
+                    raise ValueError("没有找到私信对象。")
+                if is_blocking_profile(state, actor, target_profile_id):
+                    raise ValueError("你已拉黑对方，解除拉黑后才能继续私信。")
+                if is_blocking_profile(state, target_profile_id, actor):
+                    raise ValueError("对方暂不接收你的私信。")
                 text = (payload.get("text") or "").strip()
                 if not text:
                     raise ValueError("私信内容不能为空。")

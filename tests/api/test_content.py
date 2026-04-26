@@ -136,6 +136,34 @@ class ContentRegressionTests(FitHubApiTestCase):
         self.assertIsNotNone(thread)
         self.assertEqual(thread["lastMessage"]["text"], "这是一条自动化测试私信。")
 
+    def test_private_message_does_not_require_follow_but_respects_block(self):
+        phone_a = self.make_phone(66)
+        phone_b = self.make_phone(67)
+
+        sender_client = self.make_client()
+        sender_code = sender_client.send_code(phone_a, purpose="register")["debugCode"]
+        sender_payload = sender_client.register_enthusiast(phone_a, "私信发送者", sender_code)
+        sender_profile = self.current_profile(sender_payload)
+
+        receiver_client = self.make_client()
+        receiver_code = receiver_client.send_code(phone_b, purpose="register")["debugCode"]
+        receiver_payload = receiver_client.register_enthusiast(phone_b, "私信接收者", receiver_code)
+        receiver_profile = self.current_profile(receiver_payload)
+
+        direct_payload = sender_client.send_message(receiver_profile["id"], "未关注也可以先咨询。")
+        thread = next((item for item in direct_payload.get("threads", []) if item.get("withProfileId") == receiver_profile["id"]), None)
+        self.assertIsNotNone(thread)
+        self.assertEqual(thread["lastMessage"]["text"], "未关注也可以先咨询。")
+
+        blocked_payload = receiver_client.toggle_block(sender_profile["id"])
+        self.assertIn(sender_profile["id"], blocked_payload.get("blockSet", []))
+        denied = sender_client.post(
+            "/api/message/send",
+            {"targetProfileId": receiver_profile["id"], "text": "这条应该被拒绝。"},
+            expected_status=400,
+        )
+        self.assertIn("私信", denied.get("error", ""))
+
     def test_like_favorite_comment_and_notifications_surface(self):
         phone_a = self.make_phone(40)
         phone_b = self.make_phone(41)

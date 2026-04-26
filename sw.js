@@ -1,4 +1,4 @@
-const CACHE_NAME = "fithub-shell-v26";
+const CACHE_NAME = "fithub-shell-v27";
 
 function coreUrls() {
   const scope = self.registration.scope;
