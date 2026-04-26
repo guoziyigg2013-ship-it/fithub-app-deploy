@@ -107,6 +107,43 @@ class ApiClient:
             },
         )
 
+    def register_coach(self, phone, name, verification_code, **extra):
+        profile = {
+            "name": name,
+            "phone": phone,
+            "gender": extra.get("gender", "男"),
+            "specialties": extra.get("specialties", "减脂 力量 私教"),
+            "years": extra.get("years", "3"),
+            "price": extra.get("price", "¥220/小时"),
+            "intro": extra.get("intro", "API 回归测试教练"),
+        }
+        return self.post(
+            "/api/register",
+            {
+                "role": "coach",
+                "profile": profile,
+                "verificationCode": verification_code,
+            },
+        )
+
+    def register_gym(self, phone, name, verification_code, **extra):
+        profile = {
+            "gymName": name,
+            "name": name,
+            "phone": phone,
+            "facilities": extra.get("facilities", "力量区 团课区 淋浴"),
+            "price": extra.get("price", "¥169/月起"),
+            "intro": extra.get("intro", "API 回归测试场馆"),
+        }
+        return self.post(
+            "/api/register",
+            {
+                "role": "gym",
+                "profile": profile,
+                "verificationCode": verification_code,
+            },
+        )
+
     def toggle_follow(self, target_profile_id):
         return self.post("/api/follow/toggle", {"targetProfileId": target_profile_id})
 

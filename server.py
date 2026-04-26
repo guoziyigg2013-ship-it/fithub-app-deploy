@@ -1685,6 +1685,15 @@ def merge_phone_recovery_slice(state, payload):
         if existing.get("profilesByRole") != merged_roles:
             existing["profilesByRole"] = merged_roles
             changed = True
+        merged_providers = {**(existing.get("identityProviders") or {}), **(account.get("identityProviders") or {})}
+        if existing.get("identityProviders") != merged_providers:
+            existing["identityProviders"] = merged_providers
+            changed = True
+        before_identity = json.dumps(existing.get("identityProviders", {}), ensure_ascii=False, sort_keys=True)
+        ensure_account_identity_bindings(existing)
+        after_identity = json.dumps(existing.get("identityProviders", {}), ensure_ascii=False, sort_keys=True)
+        if before_identity != after_identity:
+            changed = True
 
     for profile_id, profile in (payload.get("profiles") or {}).items():
         if not profile_id or not isinstance(profile, dict):
@@ -2140,12 +2149,21 @@ def register_profile_alias(state, source_profile_id, target_profile_id):
 
 
 def create_account_record(phone=""):
-    return {
+    phone_key = normalize_phone(phone)
+    created_at = iso_at()
+    account = {
         "id": f"acct-{uuid.uuid4().hex[:10]}",
         "restoreToken": f"restore-{uuid.uuid4().hex}",
-        "phone": normalize_phone(phone),
+        "phone": phone_key,
         "profilesByRole": {},
-        "createdAt": iso_at(),
+        "primaryProvider": "phone" if phone_key else "",
+        "identityProviders": {},
+        "authVersion": 1,
+        "createdAt": created_at,
+    }
+    ensure_account_identity_bindings(account)
+    return {
+        **account,
     }
 
 
@@ -2171,6 +2189,7 @@ def ensure_profile_account(state, profile, phone=""):
     if normalized_phone:
         account["phone"] = normalized_phone
 
+    ensure_account_identity_bindings(account)
     account.setdefault("profilesByRole", {})[profile["role"]] = profile["id"]
     profile["accountId"] = account["id"]
     return account
@@ -2199,6 +2218,45 @@ def validate_phone_or_raise(phone):
     return phone_key
 
 
+def mask_phone(phone):
+    phone_key = normalize_phone(phone)
+    if len(phone_key) != 11:
+        return phone_key
+    return f"{phone_key[:3]}****{phone_key[-4:]}"
+
+
+def ensure_account_identity_bindings(account):
+    if not isinstance(account, dict):
+        return {}
+    providers = account.setdefault("identityProviders", {})
+    if not isinstance(providers, dict):
+        providers = {}
+        account["identityProviders"] = providers
+
+    phone_key = normalize_phone(account.get("phone"))
+    if phone_key:
+        phone_provider = providers.setdefault("phone", {})
+        phone_provider["type"] = "phone"
+        phone_provider["identifier"] = phone_key
+        phone_provider["maskedIdentifier"] = mask_phone(phone_key)
+        phone_provider["verified"] = True
+        phone_provider.setdefault("verifiedAt", account.get("createdAt") or iso_at())
+        phone_provider.setdefault("boundAt", account.get("createdAt") or iso_at())
+
+    for provider_type in ["wechat", "apple"]:
+        provider = providers.get(provider_type)
+        if not isinstance(provider, dict):
+            continue
+        provider["type"] = provider_type
+        provider.setdefault("verified", bool(provider.get("identifier")))
+        provider.setdefault("maskedIdentifier", "已绑定" if provider.get("identifier") else "")
+
+    if not account.get("primaryProvider"):
+        account["primaryProvider"] = "phone" if phone_key else next(iter(providers.keys()), "")
+    account["authVersion"] = max(1, int(account.get("authVersion") or 1))
+    return providers
+
+
 def resolve_account_by_phone(state, phone):
     phone_key = normalize_phone(phone)
     if not phone_key:
@@ -2218,6 +2276,7 @@ def resolve_account_by_phone(state, phone):
 
     account["phone"] = phone_key
     role_map = account.setdefault("profilesByRole", {})
+    ensure_account_identity_bindings(account)
 
     roles_to_reconcile = set(role_map.keys())
     roles_to_reconcile.update(
@@ -2290,13 +2349,18 @@ def reconcile_account_registry(state):
 
     def build_account_seed(existing_account, phone=""):
         normalized_phone = normalize_phone(phone or (existing_account or {}).get("phone"))
-        return {
+        seed = {
             "id": (existing_account or {}).get("id") or f"acct-{uuid.uuid4().hex[:10]}",
             "restoreToken": (existing_account or {}).get("restoreToken") or f"restore-{uuid.uuid4().hex}",
             "phone": normalized_phone,
             "profilesByRole": {},
+            "primaryProvider": (existing_account or {}).get("primaryProvider") or ("phone" if normalized_phone else ""),
+            "identityProviders": deepcopy((existing_account or {}).get("identityProviders") or {}),
+            "authVersion": max(1, int((existing_account or {}).get("authVersion") or 1)),
             "createdAt": (existing_account or {}).get("createdAt") or iso_at(),
         }
+        ensure_account_identity_bindings(seed)
+        return seed
 
     for profile in state.get("profiles", {}).values():
         role = str(profile.get("role") or "").strip()
@@ -2324,6 +2388,11 @@ def reconcile_account_registry(state):
                 target["phone"] = phone_key
                 changed = True
             phone_index[phone_key] = target["id"]
+        before_identity = json.dumps(target.get("identityProviders", {}), ensure_ascii=False, sort_keys=True)
+        ensure_account_identity_bindings(target)
+        after_identity = json.dumps(target.get("identityProviders", {}), ensure_ascii=False, sort_keys=True)
+        if before_identity != after_identity:
+            changed = True
 
         if profile.get("accountId") != target["id"]:
             profile["accountId"] = target["id"]
@@ -2688,12 +2757,35 @@ def serialize_managed_accounts(state, session):
         if account["id"] in seen:
             continue
         seen.add(account["id"])
+        providers = ensure_account_identity_bindings(account)
+        serialized_providers = []
+        for provider_type, provider in sorted(providers.items()):
+            if not isinstance(provider, dict):
+                continue
+            serialized_providers.append(
+                {
+                    "type": provider_type,
+                    "maskedIdentifier": provider.get("maskedIdentifier", ""),
+                    "verified": bool(provider.get("verified")),
+                    "boundAt": provider.get("boundAt", ""),
+                    "verifiedAt": provider.get("verifiedAt", ""),
+                }
+            )
         items.append(
             {
                 "id": account["id"],
                 "restoreToken": account["restoreToken"],
                 "phone": account.get("phone", ""),
+                "phoneMasked": mask_phone(account.get("phone", "")),
                 "roles": sorted(account.get("profilesByRole", {}).keys()),
+                "primaryProvider": account.get("primaryProvider", ""),
+                "identityProviders": serialized_providers,
+                "pendingProviderBindings": [
+                    provider_type
+                    for provider_type in ["wechat", "apple"]
+                    if provider_type not in providers
+                ],
+                "authVersion": max(1, int(account.get("authVersion") or 1)),
             }
         )
 

@@ -37,3 +37,35 @@ class AuthRegressionTests(FitHubApiTestCase):
         self.assertEqual(profile_b["id"], profile_id_a)
         lookup = client_b.lookup_phone(phone)
         self.assertEqual(len(lookup["matches"]), 1)
+
+    def test_same_phone_three_roles_share_one_formal_account(self):
+        phone = self.make_phone(6)
+        client = self.make_client()
+
+        code_enthusiast = client.send_code(phone, purpose="register")["debugCode"]
+        enthusiast_payload = client.register_enthusiast(phone, "三端账号用户", code_enthusiast)
+        enthusiast_account_id = enthusiast_payload["session"]["managedAccounts"][0]["id"]
+
+        code_coach = client.send_code(phone, purpose="register")["debugCode"]
+        coach_payload = client.register_coach(phone, "三端账号教练", code_coach)
+        coach_account = next(item for item in coach_payload["session"]["managedAccounts"] if item["id"] == enthusiast_account_id)
+
+        code_gym = client.send_code(phone, purpose="register")["debugCode"]
+        gym_payload = client.register_gym(phone, "三端账号场馆", code_gym)
+        formal_account = next(item for item in gym_payload["session"]["managedAccounts"] if item["id"] == enthusiast_account_id)
+
+        self.assertEqual(sorted(formal_account["roles"]), ["coach", "enthusiast", "gym"])
+        self.assertEqual(formal_account["phone"], phone)
+        self.assertEqual(formal_account["phoneMasked"], "132****0006")
+        self.assertEqual(formal_account["primaryProvider"], "phone")
+        self.assertIn("wechat", formal_account["pendingProviderBindings"])
+        self.assertIn("apple", formal_account["pendingProviderBindings"])
+        self.assertTrue(any(item["type"] == "phone" and item["verified"] for item in formal_account["identityProviders"]))
+        self.assertEqual(coach_account["id"], formal_account["id"])
+
+        fresh_client = self.make_client()
+        login_code = fresh_client.send_code(phone, purpose="login")["debugCode"]
+        login_payload = fresh_client.login(phone, "gym", login_code)
+        login_account = next(item for item in login_payload["session"]["managedAccounts"] if item["id"] == enthusiast_account_id)
+        self.assertEqual(sorted(login_account["roles"]), ["coach", "enthusiast", "gym"])
+        self.assertEqual(login_payload["session"]["selectedRole"], "gym")
