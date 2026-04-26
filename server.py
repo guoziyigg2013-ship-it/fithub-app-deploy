@@ -1584,10 +1584,20 @@ def build_phone_recovery_slice(state, phone):
         for item in (state.get("follows") or [])
         if item.get("sourceProfileId") in alias_profile_ids or item.get("targetProfileId") in alias_profile_ids
     ]
+    favorite_post_ids = {
+        item.get("postId")
+        for item in (state.get("postFavorites") or [])
+        if item.get("sourceProfileId") in alias_profile_ids and item.get("postId")
+    }
     related_posts = {
         post_id: deepcopy(post)
         for post_id, post in (state.get("posts") or {}).items()
-        if post.get("authorProfileId") in alias_profile_ids
+        if (
+            post.get("authorProfileId") in alias_profile_ids
+            or post_id in favorite_post_ids
+            or any(profile_id in alias_profile_ids for profile_id in post.get("likes", []) or [])
+            or any((comment or {}).get("authorProfileId") in alias_profile_ids for comment in post.get("comments", []) or [])
+        )
     }
     related_bookings = [
         deepcopy(item)
@@ -1716,8 +1726,15 @@ def merge_phone_recovery_slice(state, payload):
     for post_id, post in (payload.get("posts") or {}).items():
         if not post_id or not isinstance(post, dict):
             continue
-        if post_id not in existing_posts:
+        existing_post = existing_posts.get(post_id)
+        if not existing_post:
             existing_posts[post_id] = deepcopy(post)
+            changed = True
+            continue
+        before = json.dumps(existing_post, ensure_ascii=False, sort_keys=True)
+        merge_recovered_post_data(existing_post, post)
+        after = json.dumps(existing_post, ensure_ascii=False, sort_keys=True)
+        if before != after:
             changed = True
 
     existing_booking_ids = {
@@ -1740,7 +1757,15 @@ def merge_phone_recovery_slice(state, payload):
     }
     for item in payload.get("threads") or []:
         item_id = item.get("id")
-        if not item_id or item_id in existing_thread_ids:
+        if not item_id:
+            continue
+        existing_thread = next((thread for thread in state.get("threads", []) if thread.get("id") == item_id), None)
+        if existing_thread:
+            before = json.dumps(existing_thread, ensure_ascii=False, sort_keys=True)
+            merge_recovered_thread_data(existing_thread, item)
+            after = json.dumps(existing_thread, ensure_ascii=False, sort_keys=True)
+            if before != after:
+                changed = True
             continue
         state.setdefault("threads", []).append(deepcopy(item))
         existing_thread_ids.add(item_id)
@@ -1763,6 +1788,47 @@ def merge_phone_recovery_slice(state, payload):
         normalize_threads(state)
         reconcile_account_registry(state)
     return changed
+
+
+def merge_recovered_post_data(existing_post, recovered_post):
+    for field in ["authorProfileId", "createdAt", "content", "meta"]:
+        if existing_post.get(field) in (None, "") and recovered_post.get(field) not in (None, ""):
+            existing_post[field] = recovered_post.get(field)
+
+    if not existing_post.get("media") and recovered_post.get("media"):
+        existing_post["media"] = deepcopy(recovered_post.get("media") or [])
+    if not existing_post.get("checkin") and recovered_post.get("checkin"):
+        existing_post["checkin"] = deepcopy(recovered_post.get("checkin"))
+
+    likes = []
+    for profile_id in (existing_post.get("likes") or []) + (recovered_post.get("likes") or []):
+        if profile_id and profile_id not in likes:
+            likes.append(profile_id)
+    existing_post["likes"] = likes
+
+    existing_post["comments"] = merge_records_by_id(
+        recovered_post.get("comments", []),
+        existing_post.get("comments", []),
+    )
+
+
+def merge_recovered_thread_data(existing_thread, recovered_thread):
+    participants = []
+    for profile_id in (existing_thread.get("participants") or []) + (recovered_thread.get("participants") or []):
+        if profile_id and profile_id not in participants:
+            participants.append(profile_id)
+    existing_thread["participants"] = participants
+
+    messages = {}
+    for message in recovered_thread.get("messages", []) or []:
+        message_id = (message or {}).get("id")
+        if message_id:
+            messages[message_id] = deepcopy(message)
+    for message in existing_thread.get("messages", []) or []:
+        message_id = (message or {}).get("id")
+        if message_id:
+            messages[message_id] = deepcopy(message)
+    existing_thread["messages"] = sorted(messages.values(), key=lambda item: item.get("createdAt", ""))
 
 
 def load_phone_recovery_from_supabase(phone):
@@ -1804,6 +1870,47 @@ def load_phone_recovery_from_supabase(phone):
             best_metrics = candidate_metrics
 
     return best_payload
+
+
+def load_phone_recovery_rows_from_supabase(limit=500):
+    if not supabase_storage_enabled():
+        return []
+    rows = supabase_request(
+        "GET",
+        f"{SUPABASE_STATE_TABLE}?select=id,payload,updated_at&order=updated_at.desc&limit={max(1, int(limit))}",
+    ) or []
+    latest_by_phone = {}
+    prefix = f"{SUPABASE_PHONE_RECOVERY_PREFIX}-"
+    for row in rows:
+        row_id = str(row.get("id") or "")
+        payload = row.get("payload")
+        if not row_id.startswith(prefix) or not isinstance(payload, dict):
+            continue
+        phone_key = normalize_phone(payload.get("phone") or row_id[len(prefix):])
+        if len(phone_key) != 11 or phone_key in latest_by_phone:
+            continue
+        latest_by_phone[phone_key] = payload
+    return list(latest_by_phone.values())
+
+
+def merge_phone_recovery_rows_from_supabase(state):
+    if not supabase_storage_enabled():
+        return False
+    try:
+        payloads = load_phone_recovery_rows_from_supabase()
+    except Exception as exc:
+        storage_log(f"Phone recovery row scan skipped: {exc}")
+        return False
+
+    changed = False
+    merged_count = 0
+    for payload in payloads:
+        if merge_phone_recovery_slice(state, payload):
+            changed = True
+            merged_count += 1
+    if changed:
+        storage_log(f"Merged {merged_count} phone recovery row(s) into primary state.")
+    return changed
 
 
 def restore_phone_identity_from_supabase(state, phone):
@@ -3251,6 +3358,7 @@ def load_state():
             else:
                 set_runtime_storage_state("supabase", True, state)
             changed = bool(STATE_RUNTIME_META.pop("remote_repair_required", False))
+            changed = merge_phone_recovery_rows_from_supabase(state) or changed
             changed = merge_demo_state(state) or changed
             if reconcile_account_registry(state):
                 changed = True
@@ -3332,6 +3440,7 @@ def refresh_state_cache_from_supabase():
         if not state:
             return False
         changed = bool(STATE_RUNTIME_META.pop("remote_repair_required", False))
+        changed = merge_phone_recovery_rows_from_supabase(state) or changed
         changed = merge_demo_state(state) or changed
         if reconcile_account_registry(state):
             changed = True
