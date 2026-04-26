@@ -7,6 +7,20 @@ from tests.api.support import FitHubApiTestCase
 
 
 class PersistenceRecoveryTests(FitHubApiTestCase):
+    def test_storage_status_endpoint_exposes_safe_runtime_diagnostics(self):
+        client = self.make_client()
+        status = client.storage_status()
+
+        self.assertIn(status["status"], {"ok", "local-only", "degraded"})
+        self.assertIn("storage", status)
+        self.assertIn("metrics", status)
+        self.assertEqual(status["storage"]["loadedFrom"], "local-file")
+        self.assertFalse(status["storage"]["supabaseConfigured"])
+        self.assertEqual(status["media"]["storageProvider"], "inline")
+        serialized = json.dumps(status, ensure_ascii=False)
+        self.assertNotIn("service_role", serialized)
+        self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", serialized)
+
     def test_phone_recovery_slice_restores_social_and_content_state(self):
         author_phone = self.make_phone(70)
         viewer_phone = self.make_phone(71)
@@ -97,6 +111,48 @@ class PersistenceRecoveryTests(FitHubApiTestCase):
 
 
 class SupabaseRecoveryUnitTests(unittest.TestCase):
+    def test_supabase_backup_pruning_keeps_latest_and_retention_window(self):
+        original_enabled = server.supabase_storage_enabled
+        original_request = server.supabase_request
+        original_retention = server.SUPABASE_BACKUP_RETENTION
+        original_last_prune = server.SUPABASE_LAST_BACKUP_PRUNE_TS
+        deleted_paths = []
+        rows = [
+            {"id": f"{server.SUPABASE_BACKUP_PREFIX}-latest", "updated_at": "2026-04-26T10:00:00Z"},
+            {"id": f"{server.SUPABASE_BACKUP_PREFIX}-2026042610", "updated_at": "2026-04-26T10:00:00Z"},
+            {"id": f"{server.SUPABASE_BACKUP_PREFIX}-2026042609", "updated_at": "2026-04-26T09:00:00Z"},
+            {"id": f"{server.SUPABASE_BACKUP_PREFIX}-2026042608", "updated_at": "2026-04-26T08:00:00Z"},
+            {"id": f"{server.SUPABASE_BACKUP_PREFIX}-2026042607", "updated_at": "2026-04-26T07:00:00Z"},
+            {"id": f"{server.SUPABASE_PHONE_RECOVERY_PREFIX}-13215990000", "updated_at": "2026-04-26T07:00:00Z"},
+        ]
+
+        def fake_request(method, path, payload=None, prefer=None):
+            if method == "GET":
+                self.assertIn("select=id,updated_at", path)
+                return rows
+            if method == "DELETE":
+                deleted_paths.append(path)
+                return None
+            raise AssertionError(f"Unexpected request: {method} {path}")
+
+        try:
+            server.supabase_storage_enabled = lambda: True
+            server.supabase_request = fake_request
+            server.SUPABASE_BACKUP_RETENTION = 2
+            server.SUPABASE_LAST_BACKUP_PRUNE_TS = 0
+            result = server.prune_supabase_backup_rows(force=True)
+        finally:
+            server.supabase_storage_enabled = original_enabled
+            server.supabase_request = original_request
+            server.SUPABASE_BACKUP_RETENTION = original_retention
+            server.SUPABASE_LAST_BACKUP_PRUNE_TS = original_last_prune
+
+        self.assertEqual(result["deleted"], 2)
+        self.assertTrue(any("2026042608" in path for path in deleted_paths))
+        self.assertTrue(any("2026042607" in path for path in deleted_paths))
+        self.assertFalse(any("latest" in path for path in deleted_paths))
+        self.assertFalse(any("13215990000" in path for path in deleted_paths))
+
     def test_phone_recovery_rows_are_merged_without_restoring_stale_backup_rows(self):
         phone = "13215997100"
         state = server.initial_state()

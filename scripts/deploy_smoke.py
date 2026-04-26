@@ -53,6 +53,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the FitHub deploy smoke test.")
     parser.add_argument("--frontend-url", default=DEFAULT_FRONTEND)
     parser.add_argument("--backend-url", default=DEFAULT_BACKEND)
+    parser.add_argument(
+        "--allow-local-storage",
+        action="store_true",
+        help="Do not fail if the backend reports local JSON storage. Use only for local/dev smoke runs.",
+    )
     args = parser.parse_args()
 
     frontend_url = args.frontend_url.rstrip("/") + "/"
@@ -70,6 +75,22 @@ def main() -> int:
         ensure(code == 200, f"Health endpoint returned {code}")
         ensure("ok" in health.lower(), "Health endpoint did not return ok")
         print("  OK backend health")
+
+        print(f"Checking backend storage status: {backend_url}/api/storage/status")
+        code, storage = fetch_json(f"{backend_url}/api/storage/status", attempts=3, timeout=30, delay=3)
+        ensure(code == 200, f"Storage status returned {code}")
+        ensure(isinstance(storage, dict), "Storage status payload is not an object")
+        ensure("storage" in storage and "metrics" in storage, "Storage status missing diagnostics")
+        if not args.allow_local_storage:
+            ensure(
+                storage.get("storage", {}).get("supabaseConfigured"),
+                "Production smoke requires Supabase persistent storage. Use --allow-local-storage only for dev.",
+            )
+            ensure(
+                storage.get("storage", {}).get("loadedFrom") != "local-fallback",
+                "Backend is serving from local fallback; persistent writes are protected but production is degraded.",
+            )
+        print(f"  OK storage status ({storage.get('storage', {}).get('loadedFrom', 'unknown')})")
 
         print(f"Checking backend bootstrap: {backend_url}/api/bootstrap")
         code, bootstrap = fetch_json(f"{backend_url}/api/bootstrap", attempts=3, timeout=25, delay=3)

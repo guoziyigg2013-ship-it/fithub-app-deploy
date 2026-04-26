@@ -18,6 +18,10 @@
   默认值：`primary`
 - `FITHUB_SUPABASE_TIMEOUT`
   默认值：`12`
+- `FITHUB_SUPABASE_BACKUP_RETENTION`
+  默认值：`96`，表示保留最近 96 个小时备份
+- `FITHUB_SUPABASE_PRUNE_INTERVAL_SECONDS`
+  默认值：`3600`，表示最多每小时清理一次过期小时备份
 
 ## 1. 在 Supabase 执行 SQL
 
@@ -66,8 +70,31 @@ create index if not exists idx_fithub_app_state_updated_at
 - 注册用户不会因为 Render 实例重启而消失
 - 关注、动态、预约、私信、打卡等共享数据会保存在 Supabase
 - 即使没有 Render Disk，也能保留核心业务数据
+- 访问 `/api/storage/status` 可以看到当前是否正在使用 Supabase，而不是本地 JSON fallback
 
-## 5. 当前限制
+## 5. 发布后检查
+
+线上发布后执行：
+
+```bash
+npm run check:smoke
+```
+
+这一步现在会检查：
+
+- 前端固定域是否正常
+- 后端 `/healthz` 是否正常
+- 后端 `/api/storage/status` 是否仍为 Supabase 持久化
+- 后端 `/api/bootstrap` 是否能返回完整业务结构
+
+如果 `/api/storage/status` 显示 `local-fallback`，说明后端最近读取 Supabase 失败。此时服务会保护远端数据，不会用本地 fallback 覆盖生产数据，但需要检查：
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- Supabase 项目是否暂停或网络不可达
+- Render 环境变量是否被清空
+
+## 6. 当前限制
 
 当前是“整份状态 JSON 持久化”方案，优点是改动小、上线快。
 

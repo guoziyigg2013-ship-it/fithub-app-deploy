@@ -15,8 +15,14 @@ services:
       - key: FITHUB_URL_PREFIX
         value: /
       - key: FITHUB_DATA_DIR
-        value: /var/data/fithub
-    disk:
-      name: fithub-data
-      mountPath: /var/data
-      sizeGB: 1
+        value: /tmp/fithub
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: FITHUB_SUPABASE_TABLE
+        value: fithub_app_state
+      - key: FITHUB_SUPABASE_ROW_ID
+        value: primary
+      - key: FITHUB_SUPABASE_BACKUP_RETENTION
+        value: 96

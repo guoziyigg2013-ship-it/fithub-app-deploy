@@ -93,6 +93,7 @@ npm run check:smoke
 
 - 前端首页返回正常
 - `healthz` 返回 `ok`
+- `storage/status` 显示后端仍在使用 Supabase 持久化，不是本地 JSON fallback
 - `bootstrap` 结构正常
 
 ### 2. 手工确认最小 5 条

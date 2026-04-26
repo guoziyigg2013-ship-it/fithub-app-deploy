@@ -9,6 +9,7 @@ import re
 import secrets
 import sys
 import threading
+import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,17 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+def read_int_env(name, default, minimum=None):
+    raw_value = os.getenv(name)
+    try:
+        value = int(str(raw_value if raw_value is not None else default).strip())
+    except (TypeError, ValueError):
+        value = int(default)
+    if minimum is not None:
+        value = max(int(minimum), value)
+    return value
 
 
 def normalize_url_prefix(raw_value):
@@ -44,6 +56,8 @@ SUPABASE_SERVICE_ROLE_KEY = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip
 SUPABASE_STATE_TABLE = (os.getenv("FITHUB_SUPABASE_TABLE") or "fithub_app_state").strip()
 SUPABASE_STATE_ROW_ID = (os.getenv("FITHUB_SUPABASE_ROW_ID") or "primary").strip()
 SUPABASE_TIMEOUT_SECONDS = float(os.getenv("FITHUB_SUPABASE_TIMEOUT") or "12")
+SUPABASE_BACKUP_RETENTION = read_int_env("FITHUB_SUPABASE_BACKUP_RETENTION", 96, minimum=4)
+SUPABASE_BACKUP_PRUNE_INTERVAL_SECONDS = read_int_env("FITHUB_SUPABASE_PRUNE_INTERVAL_SECONDS", 3600, minimum=60)
 SUPABASE_BACKUP_PREFIX = f"{SUPABASE_STATE_ROW_ID}-backup"
 SUPABASE_PHONE_RECOVERY_PREFIX = f"{SUPABASE_STATE_ROW_ID}-phone"
 MAP_PROVIDER = (os.getenv("FITHUB_MAP_PROVIDER") or "").strip().lower()
@@ -135,6 +149,7 @@ DEFAULT_LOCATION_STATUS = "默认城市为厦门，你可以点击顶部城市�
 STORE_LOCK = threading.Lock()
 STATE_CACHE = None
 SUPABASE_MEDIA_BUCKET_READY = False
+SUPABASE_LAST_BACKUP_PRUNE_TS = 0.0
 STATE_RUNTIME_META = {
     "loaded_from": "uninitialized",
     "supabase_writable": True,
@@ -1241,6 +1256,119 @@ def is_materially_richer_state(candidate_metrics, baseline_metrics):
     return candidate_score >= max(baseline_score + 120, int(max(1, baseline_score) * 1.35))
 
 
+def storage_runtime_status(state=None):
+    loaded_from = str(STATE_RUNTIME_META.get("loaded_from") or "uninitialized")
+    supabase_configured = supabase_storage_enabled()
+    supabase_writable = bool(STATE_RUNTIME_META.get("supabase_writable", True))
+    metrics = state_integrity_metrics(state)
+    warnings = []
+
+    if not supabase_configured:
+        warnings.append("Supabase 未启用，当前只能使用本地 JSON；生产环境不建议这样运行。")
+    if loaded_from == "local-fallback":
+        warnings.append("最近一次远端读取失败，服务正在使用本地 fallback，写入不会覆盖远端数据。")
+    if supabase_configured and not supabase_writable:
+        warnings.append("Supabase 当前不可写，用户新数据可能暂存在本地 fallback。")
+    if metrics["real_profiles"] > 0 and loaded_from in {"local-file", "supabase-empty"} and supabase_configured:
+        warnings.append("检测到真实用户数据，但当前加载源不是常规 Supabase 主状态，请关注部署环境。")
+
+    status = "ok"
+    if warnings:
+        status = "degraded" if supabase_configured else "local-only"
+
+    return {
+        "ok": status == "ok",
+        "status": status,
+        "checkedAt": iso_at(),
+        "storage": {
+            "loadedFrom": loaded_from,
+            "supabaseConfigured": bool(supabase_configured),
+            "supabaseConfigValid": bool(STATE_RUNTIME_META.get("supabase_config_valid", True)),
+            "supabaseWritable": supabase_writable,
+            "remoteWriteProtected": loaded_from == "local-fallback" or not supabase_writable,
+            "dataDir": str(DATA_DIR),
+        },
+        "supabase": {
+            "table": SUPABASE_STATE_TABLE if supabase_configured else "",
+            "rowId": SUPABASE_STATE_ROW_ID if supabase_configured else "",
+            "timeoutSeconds": SUPABASE_TIMEOUT_SECONDS,
+            "backupRetention": SUPABASE_BACKUP_RETENTION,
+            "backupPruneIntervalSeconds": SUPABASE_BACKUP_PRUNE_INTERVAL_SECONDS,
+        },
+        "media": {
+            "storageProvider": "supabase" if supabase_media_storage_enabled() else "inline",
+            "bucket": SUPABASE_MEDIA_BUCKET if supabase_media_storage_enabled() else "",
+            "imageLimitBytes": MEDIA_IMAGE_LIMIT_BYTES,
+            "videoLimitBytes": MEDIA_VIDEO_LIMIT_BYTES,
+            "thumbnailLimitBytes": MEDIA_THUMB_LIMIT_BYTES,
+        },
+        "metrics": metrics,
+        "warnings": warnings,
+    }
+
+
+def supabase_state_rows_report(limit=160):
+    if not supabase_storage_enabled():
+        return {
+            "reachable": False,
+            "primaryRowPresent": False,
+            "backupRows": 0,
+            "phoneRecoveryRows": 0,
+            "latestUpdatedAt": "",
+        }
+
+    rows = supabase_request(
+        "GET",
+        f"{SUPABASE_STATE_TABLE}?select=id,updated_at&order=updated_at.desc&limit={max(1, int(limit))}",
+    ) or []
+    backup_prefix = f"{SUPABASE_BACKUP_PREFIX}-20"
+    phone_prefix = f"{SUPABASE_PHONE_RECOVERY_PREFIX}-"
+    return {
+        "reachable": True,
+        "primaryRowPresent": any(str(row.get("id") or "") == SUPABASE_STATE_ROW_ID for row in rows),
+        "backupRows": sum(1 for row in rows if str(row.get("id") or "").startswith(backup_prefix)),
+        "latestBackupPresent": any(str(row.get("id") or "") == f"{SUPABASE_BACKUP_PREFIX}-latest" for row in rows),
+        "phoneRecoveryRows": sum(1 for row in rows if str(row.get("id") or "").startswith(phone_prefix)),
+        "latestUpdatedAt": str((rows[0] or {}).get("updated_at") or "") if rows else "",
+    }
+
+
+def prune_supabase_backup_rows(force=False):
+    global SUPABASE_LAST_BACKUP_PRUNE_TS
+    if not supabase_storage_enabled() or SUPABASE_BACKUP_RETENTION <= 0:
+        return {"deleted": 0, "skipped": True}
+
+    current_ts = time.monotonic()
+    if not force and SUPABASE_LAST_BACKUP_PRUNE_TS and current_ts - SUPABASE_LAST_BACKUP_PRUNE_TS < SUPABASE_BACKUP_PRUNE_INTERVAL_SECONDS:
+        return {"deleted": 0, "skipped": True}
+
+    rows = supabase_request(
+        "GET",
+        f"{SUPABASE_STATE_TABLE}?select=id,updated_at&order=updated_at.desc&limit={max(120, SUPABASE_BACKUP_RETENTION + 80)}",
+    ) or []
+    backup_prefix = f"{SUPABASE_BACKUP_PREFIX}-20"
+    hourly_backups = [
+        row
+        for row in rows
+        if str(row.get("id") or "").startswith(backup_prefix)
+    ]
+    expired = hourly_backups[SUPABASE_BACKUP_RETENTION:]
+    deleted = 0
+    for row in expired:
+        row_id = str(row.get("id") or "")
+        if not row_id:
+            continue
+        supabase_request(
+            "DELETE",
+            f"{SUPABASE_STATE_TABLE}?id=eq.{quote(row_id, safe='')}",
+            prefer="return=minimal",
+        )
+        deleted += 1
+
+    SUPABASE_LAST_BACKUP_PRUNE_TS = current_ts
+    return {"deleted": deleted, "skipped": False}
+
+
 def supabase_rest_url(path):
     return f"{SUPABASE_URL}/rest/v1/{path.lstrip('/')}"
 
@@ -1404,6 +1532,12 @@ def save_state_to_supabase(state):
         rows_to_save,
         prefer="resolution=merge-duplicates,return=minimal",
     )
+    try:
+        prune_result = prune_supabase_backup_rows()
+        if prune_result.get("deleted"):
+            storage_log(f"Pruned {prune_result['deleted']} old Supabase backup row(s).")
+    except Exception as exc:
+        storage_log(f"Supabase backup prune skipped: {exc}")
     set_runtime_storage_state("supabase", True, payload)
 
 
@@ -4793,6 +4927,15 @@ class FitHubHandler(BaseHTTPRequestHandler):
             save_state(state)
             return result
 
+    def _read_state(self, reader):
+        global STATE_CACHE
+        with STORE_LOCK:
+            if STATE_CACHE is None:
+                STATE_CACHE = load_state()
+            elif STATE_RUNTIME_META.get("loaded_from") == "local-fallback":
+                refresh_state_cache_from_supabase()
+            return reader(STATE_CACHE)
+
     def _handle_api_get(self, parsed):
         if parsed.path == f"{API_PREFIX}/bootstrap":
             query = parse_qs(parsed.query)
@@ -4805,6 +4948,27 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 return bootstrap_response(state, session)
 
             self._write_json(self._with_state(action))
+            return
+        if parsed.path == f"{API_PREFIX}/storage/status":
+            query = parse_qs(parsed.query)
+            include_remote = str(query.get("remote", [""])[0]).strip().lower() in {"1", "true", "yes"}
+
+            def action(state):
+                response = storage_runtime_status(state)
+                if include_remote:
+                    try:
+                        response["remoteRows"] = supabase_state_rows_report()
+                    except Exception as exc:
+                        response["remoteRows"] = {
+                            "reachable": False,
+                            "error": str(exc),
+                        }
+                        response["status"] = "degraded"
+                        response["ok"] = False
+                        response.setdefault("warnings", []).append("Supabase 远端行诊断失败，请检查数据库或网络。")
+                return response
+
+            self._write_json(self._read_state(action))
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 

@@ -62,6 +62,10 @@ class ApiClient:
         self.last_bootstrap = payload
         return payload
 
+    def storage_status(self, remote=False):
+        suffix = "?remote=1" if remote else ""
+        return self.request("GET", f"/api/storage/status{suffix}")
+
     def post(self, path, body=None, expected_status=200):
         body = dict(body or {})
         body.setdefault("sessionId", self.session_id)
