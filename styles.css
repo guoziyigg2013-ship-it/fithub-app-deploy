@@ -985,17 +985,39 @@ body.is-workout-live .app {
 }
 
 .managed-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 999px;
   padding: 8px 12px;
   background: #f2f2f2;
   color: #666;
+  min-height: 34px;
 }
 
 .managed-chip.is-active {
   background: rgba(242, 140, 40, 0.16);
   color: #9d580f;
   font-weight: 700;
+}
+
+.managed-chip-badge {
+  position: absolute;
+  top: -5px;
+  right: -3px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ff3b30;
+  color: #fff;
+  border: 2px solid #fff;
+  font-size: 10px;
+  line-height: 13px;
+  font-weight: 800;
+  box-shadow: 0 6px 12px rgba(255, 59, 48, 0.22);
 }
 
 .info-card {

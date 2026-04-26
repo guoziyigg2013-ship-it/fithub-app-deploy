@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { gotoApp, registerCoach, registerEnthusiast, registerGym, openMyPage } = require("./helpers");
+const { buildUniquePhone, gotoApp, registerCoach, registerEnthusiast, registerGym, openMyPage } = require("./helpers");
 
 test("训练者可以关注推荐对象，并在我关注的列表里看到对方", async ({ page }) => {
   await registerEnthusiast(page, { name: "关注测试用户" });
@@ -159,6 +159,122 @@ test("教练身份关注推荐对象也会立即反馈并移出推荐区", async
   await openMyPage(page);
   await page.locator('[data-open-my-feature="favorites"]').click();
   await expect(page.getByText(targetName)).toBeVisible();
+});
+
+test("多身份切换先本地即时反馈，再后台同步", async ({ page }) => {
+  const phone = buildUniquePhone();
+  await registerEnthusiast(page, { name: "身份切换训练者", phone });
+  await registerCoach(page, { name: "身份切换教练", phone });
+
+  await openMyPage(page);
+  await expect(page.getByText("身份切换教练")).toBeVisible();
+
+  let releaseSelect;
+  let markSelectStarted;
+  const selectCanContinue = new Promise((resolve) => {
+    releaseSelect = resolve;
+  });
+  const selectStarted = new Promise((resolve) => {
+    markSelectStarted = resolve;
+  });
+
+  await page.route("**/api/session/select", async (route) => {
+    markSelectStarted();
+    await selectCanContinue;
+    await route.continue();
+  });
+
+  await page
+    .locator(".managed-strip--dashboard [data-switch-managed]")
+    .filter({ hasText: "健身爱好者" })
+    .click();
+  await selectStarted;
+  await expect(page.getByText("身份切换训练者")).toBeVisible({ timeout: 300 });
+
+  releaseSelect();
+  await expect(page.getByText("身份切换训练者")).toBeVisible();
+});
+
+test("同一账号的教练身份可以关注自己的训练者身份", async ({ page }) => {
+  const phone = buildUniquePhone();
+  const enthusiast = await registerEnthusiast(page, { name: "自我关注训练者", phone });
+  await registerCoach(page, { name: "自我关注教练", phone });
+
+  const ids = await page.evaluate(async () => {
+    const sessionId = window.localStorage.getItem("fithub_trial_session_id") || "";
+    const payload = await fetch(`/api/bootstrap?session_id=${encodeURIComponent(sessionId)}`).then((response) => response.json());
+    return {
+      enthusiastId: payload.profiles.find((profile) => profile.name === "自我关注训练者")?.id || "",
+      coachId: payload.profiles.find((profile) => profile.name === "自我关注教练")?.id || "",
+    };
+  });
+  expect(ids.enthusiastId).toBeTruthy();
+  expect(ids.coachId).toBeTruthy();
+
+  await page.evaluate((profileId) => {
+    const button = document.createElement("button");
+    button.dataset.openProfile = profileId;
+    button.type = "button";
+    document.querySelector("#appView").appendChild(button);
+    button.click();
+    button.remove();
+  }, ids.enthusiastId);
+
+  await expect(page.getByRole("heading", { name: enthusiast.name })).toBeVisible();
+  const followButton = page.locator(`[data-toggle-follow="${ids.enthusiastId}"]`).first();
+  await expect(followButton).toBeVisible();
+  await followButton.click();
+  await expect(followButton).toHaveText("已关注");
+
+  await openMyPage(page);
+  await page.locator('[data-open-my-feature="favorites"]').click();
+  await expect(page.getByText("自我关注训练者")).toBeVisible();
+});
+
+test("其他身份有新私信时，顶部身份栏显示提醒角标", async ({ page }) => {
+  const phone = buildUniquePhone();
+  await registerEnthusiast(page, { name: "角标训练者", phone });
+  await registerCoach(page, { name: "角标教练", phone });
+
+  const ids = await page.evaluate(async () => {
+    const sessionId = window.localStorage.getItem("fithub_trial_session_id") || "";
+    const payload = await fetch(`/api/bootstrap?session_id=${encodeURIComponent(sessionId)}`).then((response) => response.json());
+    return {
+      sessionId,
+      enthusiastId: payload.profiles.find((profile) => profile.name === "角标训练者")?.id || "",
+      coachId: payload.profiles.find((profile) => profile.name === "角标教练")?.id || "",
+    };
+  });
+  expect(ids.enthusiastId).toBeTruthy();
+  expect(ids.coachId).toBeTruthy();
+
+  await page.evaluate(async ({ sessionId, enthusiastId, coachId }) => {
+    await fetch("/api/follow/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        sourceProfileId: enthusiastId,
+        selectedRole: "enthusiast",
+        targetProfileId: coachId,
+        desiredFollowing: true,
+      }),
+    });
+    await fetch("/api/message/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        targetProfileId: coachId,
+        text: "教练身份提醒角标测试",
+      }),
+    });
+  }, ids);
+
+  await gotoApp(page);
+  await openMyPage(page);
+  const coachChip = page.locator(".managed-strip--dashboard [data-switch-managed]").filter({ hasText: "健身教练" });
+  await expect(coachChip.locator(".managed-chip-badge")).toHaveText("1");
 });
 
 test("动态点赞和取消点赞会立即反馈，连续点击不锁按钮", async ({ page }) => {

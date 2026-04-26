@@ -1562,6 +1562,7 @@ const FOLLOW_BACKUP_STORAGE_KEY = "fithub_trial_follow_backups_v1";
 const ACTIVE_ACCOUNT_STORAGE_KEY = "fithub_trial_active_account_v1";
 const LOGOUT_MARKER_STORAGE_KEY = "fithub_trial_logged_out_v1";
 const MESSAGE_READ_STATE_STORAGE_KEY = "fithub_trial_message_read_state_v1";
+const IDENTITY_BADGE_SEEN_STORAGE_KEY = "fithub_trial_identity_badge_seen_v1";
 const DEFAULT_RUNTIME_CONFIG = Object.freeze(normalizeRuntimeConfig(window.__FITHUB_CONFIG__ || {}));
 const DEFAULT_LOCATION_STATUS = "默认城市为厦门，你可以点击顶部城市切换成自己的城市或使用实时定位。";
 const REGISTER_WHEEL_ITEM_HEIGHT = 52;
@@ -1654,6 +1655,7 @@ const state = {
   favoritePostIds: new Set(),
   favoritePosts: [],
   notifications: [],
+  managedProfileBadges: {},
   followMutationQueue: new Map(),
   likeMutationQueue: new Map(),
   favoriteMutationQueue: new Map(),
@@ -1706,6 +1708,7 @@ let lastSuccessfulSyncAt = 0;
 let authLookupTimeout = null;
 let mapSdkPromise = null;
 let mapSdkProvider = "";
+let managedSwitchSequence = 0;
 
 function wait(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -2056,6 +2059,28 @@ function storeMessageReadState(payload) {
   }
 }
 
+function getStoredIdentityBadgeSeenState() {
+  try {
+    const raw = window.localStorage.getItem(IDENTITY_BADGE_SEEN_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function markIdentityBadgeSeen(profileId, seenAt = new Date().toISOString()) {
+  const actorId = String(profileId || "");
+  if (!actorId) return;
+  try {
+    const stored = getStoredIdentityBadgeSeenState();
+    stored[actorId] = String(seenAt || new Date().toISOString());
+    window.localStorage.setItem(IDENTITY_BADGE_SEEN_STORAGE_KEY, JSON.stringify(stored));
+  } catch (_error) {
+    // Ignore storage failures.
+  }
+}
+
 function getActorMessageReadState(profileId = state.currentActorProfileId) {
   const actorId = String(profileId || "");
   if (!actorId) return { notificationsSeenAt: "", threads: {} };
@@ -2091,6 +2116,22 @@ function getThreadUnreadCount(thread, actorId = state.currentActorProfileId) {
     const createdAt = new Date(message.createdAt || 0).getTime() || 0;
     return message.senderProfileId !== actorId && createdAt > lastReadAt;
   }).length;
+}
+
+function normalizeManagedProfileBadges(items = []) {
+  if (!Array.isArray(items)) return {};
+  const seenState = getStoredIdentityBadgeSeenState();
+  return items.reduce((badges, item) => {
+    const profileId = String(item?.profileId || "").trim();
+    const count = Number(item?.count || 0);
+    const latestAt = new Date(item?.latestAt || 0).getTime() || 0;
+    const seenAt = new Date(seenState[profileId] || 0).getTime() || 0;
+    if (latestAt && seenAt && latestAt <= seenAt) return badges;
+    if (profileId && Number.isFinite(count) && count > 0) {
+      badges[profileId] = Math.min(99, Math.round(count));
+    }
+    return badges;
+  }, {});
 }
 
 function getUnreadNotificationCount(actorId = state.currentActorProfileId) {
@@ -2475,6 +2516,7 @@ function clearStaleManagedSession({ keepStoredAccounts = true } = {}) {
   state.favoritePostIds = new Set();
   state.favoritePosts = [];
   state.notifications = [];
+  state.managedProfileBadges = {};
   state.bookings = [];
   state.threads = [];
   state.selectedRole = "enthusiast";
@@ -2680,6 +2722,7 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   const previousFavoritePostIds = new Set(state.favoritePostIds);
   const previousFavoritePosts = [...state.favoritePosts];
   const previousNotifications = [...state.notifications];
+  const previousManagedProfileBadges = { ...(state.managedProfileBadges || {}) };
   const previousBookings = [...state.bookings];
   const previousThreads = [...state.threads];
   const incomingProfiles = enhanceProfiles(payload.profiles || []);
@@ -2721,6 +2764,9 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   state.favoritePostIds = preserveManagedSession ? previousFavoritePostIds : new Set(payload.favoritePostIds || []);
   state.favoritePosts = preserveManagedSession ? previousFavoritePosts : (Array.isArray(payload.favoritePosts) ? payload.favoritePosts : []);
   state.notifications = preserveManagedSession ? previousNotifications : (Array.isArray(payload.notifications) ? payload.notifications : []);
+  state.managedProfileBadges = preserveManagedSession
+    ? previousManagedProfileBadges
+    : normalizeManagedProfileBadges(payload.session.managedProfileBadges || []);
   state.bookings = preserveManagedSession ? previousBookings : (payload.bookings || []);
   state.threads = preserveManagedSession ? previousThreads : (payload.threads || []);
   state.composeProfileId = state.composeProfileId || state.currentActorProfileId || state.managedProfileIds[0] || "";
@@ -2885,7 +2931,8 @@ function clearStoredAuthArtifacts() {
     ACCOUNT_STORAGE_KEY,
     PROFILE_BACKUP_STORAGE_KEY,
     FOLLOW_BACKUP_STORAGE_KEY,
-    ACTIVE_ACCOUNT_STORAGE_KEY
+    ACTIVE_ACCOUNT_STORAGE_KEY,
+    IDENTITY_BADGE_SEEN_STORAGE_KEY
   ].forEach((key) => {
     try {
       window.localStorage.removeItem(key);
@@ -2919,6 +2966,7 @@ async function logoutCurrentDevice() {
   state.favoritePostIds = new Set();
   state.favoritePosts = [];
   state.notifications = [];
+  state.managedProfileBadges = {};
   state.bookings = [];
   state.threads = [];
   state.authPhone = "";
@@ -4006,6 +4054,37 @@ function getMyPageProfile() {
   return getManagedProfileByRole(state.selectedRole) || getCurrentActor() || getManagedProfiles()[0] || null;
 }
 
+function getMatchedAccountForProfile(profile) {
+  if (!profile) return null;
+  return (
+    state.managedAccounts.find(
+      (item) =>
+        item.roles.includes(profile.role) &&
+        (!normalizePhone(profile.phone) || item.phone === normalizePhone(profile.phone))
+    ) ||
+    state.managedAccounts.find((item) => item.roles.includes(profile.role)) ||
+    state.managedAccounts[0] ||
+    null
+  );
+}
+
+function getManagedProfileBadgeCount(profileId) {
+  if (!profileId || profileId === state.currentActorProfileId) return 0;
+  const count = Number((state.managedProfileBadges || {})[profileId] || 0);
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return Math.min(99, Math.round(count));
+}
+
+function renderManagedIdentityChip(profile, activeProfileId) {
+  const badgeCount = getManagedProfileBadgeCount(profile.id);
+  return `
+    <button class="managed-chip ${profile.id === activeProfileId ? "is-active" : ""}" data-switch-managed="${profile.id}" type="button">
+      <span>${escapeHtml(getRoleLabel(profile.role))}</span>
+      ${badgeCount ? `<span class="managed-chip-badge">${badgeCount}</span>` : ""}
+    </button>
+  `;
+}
+
 function renderCardCover(profile) {
   const coverImage = getProfileCoverImage(profile);
   if (!coverImage) {
@@ -4594,11 +4673,12 @@ function isManagedProfile(profileId) {
 }
 
 async function toggleFollow(profileId) {
-  if (isManagedProfile(profileId)) return;
-
   const actor = getCurrentActor();
   if (!actor?.id) {
     throw new Error("请先注册后再关注。");
+  }
+  if (profileId === actor.id) {
+    throw new Error("不能关注当前身份自己。");
   }
 
   const previousFollowing = state.followSet.has(profileId);
@@ -5720,21 +5800,87 @@ async function createBooking(profileId, plan = null) {
   appView.scrollTop = 0;
 }
 
+function applyLocalManagedSwitch(profile) {
+  const previousActor = getCurrentActor();
+  if (previousActor?.id) {
+    rememberFollowBackup(previousActor, getMatchedAccountForProfile(previousActor), state.followSet, state.followerSet);
+  }
+
+  state.selectedRole = profile.role;
+  state.registerRole = profile.role;
+  state.currentActorProfileId = profile.id;
+  state.composeProfileId = profile.id;
+  markIdentityBadgeSeen(profile.id);
+  state.managedProfileBadges = {
+    ...(state.managedProfileBadges || {}),
+    [profile.id]: 0
+  };
+
+  const backup = findStoredFollowBackup(profile, getMatchedAccountForProfile(profile));
+  state.followSet = new Set(Array.isArray(backup?.followSet) ? backup.followSet.filter(Boolean) : []);
+  state.followerSet = new Set(Array.isArray(backup?.followerSet) ? backup.followerSet.filter(Boolean) : []);
+  applyPendingFollowMutations();
+
+  if (state.activePage === "profile") {
+    state.activeProfileId = profile.id;
+    state.profileSubpage = "";
+  }
+}
+
+async function switchManagedProfile(profileId, { waitForSync = false, closeAfterSwitch = false } = {}) {
+  const managedProfile = getProfile(profileId);
+  if (!managedProfile || !isManagedProfile(managedProfile.id)) return;
+
+  const sequence = ++managedSwitchSequence;
+  applyLocalManagedSwitch(managedProfile);
+  if (closeAfterSwitch) {
+    closeOverlay();
+    renderPage();
+  } else {
+    renderPage();
+  }
+
+  const syncPromise = postAndSync(`${API_BASE}/session/select`, {
+    selectedRole: managedProfile.role,
+    currentActorProfileId: managedProfile.id
+  }, { keepOverlay: true })
+    .then(() => {
+      if (sequence !== managedSwitchSequence) return;
+      const latestProfile = getProfile(managedProfile.id);
+      if (latestProfile) {
+        state.selectedRole = latestProfile.role;
+        state.currentActorProfileId = latestProfile.id;
+        state.composeProfileId = latestProfile.id;
+        if (state.activePage === "profile") {
+          state.activeProfileId = latestProfile.id;
+          state.profileSubpage = "";
+        }
+      }
+      renderPage();
+    })
+    .catch((error) => {
+      if (sequence === managedSwitchSequence) {
+        showError(error?.message || "身份切换同步失败，请稍后再试。");
+      }
+    });
+
+  if (waitForSync) {
+    await syncPromise;
+  }
+}
+
 async function selectRole(role) {
   const managedProfile = getManagedProfileByRole(role);
+  if (managedProfile?.id) {
+    await switchManagedProfile(managedProfile.id, { waitForSync: true });
+    return;
+  }
+
   await postAndSync(`${API_BASE}/session/select`, {
     selectedRole: role,
-    currentActorProfileId: managedProfile?.id || ""
+    currentActorProfileId: ""
   }, { keepOverlay: true });
   state.selectedRole = role;
-  if (managedProfile?.id) {
-    state.currentActorProfileId = managedProfile.id;
-    state.composeProfileId = managedProfile.id;
-    if (state.activePage === "profile") {
-      state.activeProfileId = managedProfile.id;
-      state.profileSubpage = "";
-    }
-  }
   renderPage();
 }
 
@@ -8760,13 +8906,7 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
   return `
     <section class="managed-strip managed-strip--dashboard">
       ${managedProfiles
-        .map(
-          (item) => `
-            <button class="managed-chip ${item.id === profile.id ? "is-active" : ""}" data-switch-managed="${item.id}" type="button">
-              ${escapeHtml(getRoleLabel(item.role))}
-            </button>
-          `
-        )
+        .map((item) => renderManagedIdentityChip(item, profile.id))
         .join("")}
     </section>
 
@@ -9394,13 +9534,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
 
     <section class="managed-strip managed-strip--dashboard">
       ${managedProfiles
-        .map(
-          (item) => `
-            <button class="managed-chip ${item.id === profile.id ? "is-active" : ""}" data-switch-managed="${item.id}" type="button">
-              ${escapeHtml(getRoleLabel(item.role))}
-            </button>
-          `
-        )
+        .map((item) => renderManagedIdentityChip(item, profile.id))
         .join("")}
     </section>
 
@@ -9424,6 +9558,7 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
 function renderProfilePage(profile) {
   const managedProfiles = getManagedProfiles();
   const managed = isManagedProfile(profile.id);
+  const isCurrentActor = profile.id === getCurrentActor()?.id;
   const followed = state.followSet.has(profile.id);
   const draftRate = Number(state.ratingDrafts[profile.id] || 0);
   const draftReview = state.reviewDrafts[profile.id] || "";
@@ -9455,13 +9590,7 @@ function renderProfilePage(profile) {
 
     <section class="managed-strip">
       ${managedProfiles
-        .map(
-          (item) => `
-            <button class="managed-chip ${item.id === profile.id ? "is-active" : ""}" data-switch-managed="${item.id}" type="button">
-              ${escapeHtml(getRoleLabel(item.role))}
-            </button>
-          `
-        )
+        .map((item) => renderManagedIdentityChip(item, profile.id))
         .join("")}
     </section>
 
@@ -9497,17 +9626,17 @@ function renderProfilePage(profile) {
           </div>
           <div class="profile-actions">
             ${
-              managed
+              isCurrentActor
                 ? `<button class="mini-button mini-button--accent" data-edit-role="${profile.role}" type="button">编辑资料</button>`
                 : `<button class="follow-button ${followed ? "is-active" : ""}" data-toggle-follow="${profile.id}" type="button">${followed ? "已关注" : "关注"}</button>`
             }
             ${
-              !managed && followed
+              !isCurrentActor && followed
                 ? `<button class="mini-button" data-open-chat="${profile.id}" type="button">私信</button>`
                 : ""
             }
             ${
-              !managed && profile.role !== "enthusiast"
+              !isCurrentActor && profile.role !== "enthusiast"
                 ? `<button class="mini-button" data-create-booking="${profile.id}" type="button">预约</button>`
                 : ""
             }
@@ -10465,10 +10594,7 @@ appView.addEventListener("click", (event) => {
   if (target.dataset.switchManaged) {
     const managedProfile = getProfile(target.dataset.switchManaged);
     if (!managedProfile) return;
-    state.activeProfileId = managedProfile.id;
-    state.currentActorProfileId = managedProfile.id;
-    state.composeProfileId = managedProfile.id;
-    runTask(() => selectRole(managedProfile.role));
+    switchManagedProfile(managedProfile.id);
     return;
   }
 
@@ -10618,10 +10744,10 @@ overlay.addEventListener("click", (event) => {
 
   if (target.dataset.chooseRole) {
     if (hasManagedRole(target.dataset.chooseRole)) {
-      runTask(async () => {
-        await selectRole(target.dataset.chooseRole);
-        closeOverlay();
-      });
+      const managedProfile = getManagedProfileByRole(target.dataset.chooseRole);
+      if (managedProfile) {
+        switchManagedProfile(managedProfile.id, { closeAfterSwitch: true });
+      }
       return;
     }
     openRegister(target.dataset.chooseRole);
@@ -11055,7 +11181,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-5`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-6`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

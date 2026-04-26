@@ -4173,6 +4173,32 @@ def serialize_notifications(state, current_actor_profile_id):
     return notifications[:60]
 
 
+def serialize_managed_profile_badges(state, session):
+    badges = []
+    for profile_id in session.get("managedProfileIds", []) or []:
+        canonical_profile_id = resolve_canonical_profile_id(state, profile_id)
+        if not canonical_profile_id:
+            continue
+        notification_items = serialize_notifications(state, canonical_profile_id)
+        notification_count = len(notification_items)
+        thread_count = 0
+        latest_at_values = [item.get("createdAt") for item in notification_items if item.get("createdAt")]
+        for thread in serialize_threads(state, canonical_profile_id):
+            last_message = thread.get("lastMessage") or {}
+            if last_message.get("senderProfileId") and last_message.get("senderProfileId") != canonical_profile_id:
+                thread_count += 1
+                if last_message.get("createdAt"):
+                    latest_at_values.append(last_message.get("createdAt"))
+        count = min(99, notification_count + thread_count)
+        if count:
+            badges.append({
+                "profileId": canonical_profile_id,
+                "count": count,
+                "latestAt": max(latest_at_values) if latest_at_values else "",
+            })
+    return badges
+
+
 def serialize_favorite_posts(state, current_actor_profile_id):
     if not current_actor_profile_id:
         return []
@@ -4493,6 +4519,7 @@ def bootstrap_response(state, session):
             "managedProfileIds": session["managedProfileIds"],
             "managedAccountIds": session["managedAccountIds"],
             "managedAccounts": serialize_managed_accounts(state, session),
+            "managedProfileBadges": serialize_managed_profile_badges(state, session),
             "currentActorProfileId": current_actor_profile_id,
             "userPosition": session["userPosition"],
             "locationStatus": session["locationStatus"],
@@ -5706,6 +5733,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     raise ValueError("请先注册后再关注。")
                 if not target_profile_id or target_profile_id not in state.get("profiles", {}):
                     raise ValueError("没有找到要关注的对象。")
+                if target_profile_id == source_profile_id:
+                    raise ValueError("不能关注当前身份自己。")
                 source_profile = state.get("profiles", {}).get(source_profile_id)
                 if source_profile:
                     session["currentActorProfileId"] = source_profile_id
