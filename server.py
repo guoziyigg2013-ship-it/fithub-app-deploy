@@ -4527,6 +4527,26 @@ def compact_post_interaction_response(state, session, post):
     }
 
 
+def compact_follow_response(state, session, source_profile_id, target_profile_id):
+    source_profile_id = resolve_canonical_profile_id(state, source_profile_id)
+    target_profile_id = resolve_canonical_profile_id(state, target_profile_id)
+    return {
+        "ok": True,
+        "session": {
+            "id": session["id"],
+            "selectedRole": session["selectedRole"],
+            "currentActorProfileId": session.get("currentActorProfileId"),
+        },
+        "follow": {
+            "sourceProfileId": source_profile_id,
+            "targetProfileId": target_profile_id,
+            "following": target_profile_id in get_follow_set(state, source_profile_id),
+            "followSet": sorted(get_follow_set(state, source_profile_id)),
+            "followerSet": sorted(get_follower_set(state, source_profile_id)),
+        },
+    }
+
+
 def compact_message_response(state, session, target_profile_id):
     current_actor_profile_id = session.get("currentActorProfileId")
     target_profile_id = resolve_canonical_profile_id(state, target_profile_id) or target_profile_id
@@ -5673,16 +5693,23 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/follow/toggle":
             def action(state):
                 session = ensure_session(state, session_id)
+                requested_source_profile_id = payload.get("sourceProfileId") or session.get("currentActorProfileId")
+                preferred_role = str(payload.get("selectedRole") or session.get("selectedRole") or "").strip()
                 allowed, source_profile_id = ensure_session_identity(
                     state,
                     session,
-                    preferred_role=str(session.get("selectedRole") or "").strip(),
+                    preferred_role=preferred_role,
+                    requested_profile_id=requested_source_profile_id,
                 )
                 target_profile_id = resolve_canonical_profile_id(state, payload["targetProfileId"])
                 if not allowed or not source_profile_id:
                     raise ValueError("请先注册后再关注。")
                 if not target_profile_id or target_profile_id not in state.get("profiles", {}):
                     raise ValueError("没有找到要关注的对象。")
+                source_profile = state.get("profiles", {}).get(source_profile_id)
+                if source_profile:
+                    session["currentActorProfileId"] = source_profile_id
+                    session["selectedRole"] = source_profile.get("role") or session.get("selectedRole") or "enthusiast"
                 source_alias_ids = collect_profile_alias_ids(state, source_profile_id)
                 target_alias_ids = collect_profile_alias_ids(state, target_profile_id)
                 follows = state["follows"]
@@ -5705,6 +5732,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 elif len(existing) > 1:
                     for item in existing[1:]:
                         follows.remove(item)
+                if payload.get("compact"):
+                    return compact_follow_response(state, session, source_profile_id, target_profile_id)
                 return bootstrap_response(state, session)
             try:
                 self._write_json(self._with_state(action))

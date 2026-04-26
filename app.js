@@ -3643,6 +3643,88 @@ function applyPendingFollowMutations() {
   });
 }
 
+function ensureDiscoverRecommendationEmptyState() {
+  const rail = document.querySelector(".discover-avatar-rail");
+  if (!rail) return;
+  const hasCards = Boolean(rail.querySelector(".discover-avatar-card"));
+  const existingEmpty = rail.querySelector(".empty-card");
+  if (hasCards) {
+    existingEmpty?.remove();
+    return;
+  }
+  if (!existingEmpty) {
+    rail.insertAdjacentHTML(
+      "beforeend",
+      `
+        <article class="empty-card empty-card--compact">
+          你已经关注完当前推荐对象了，可以直接看下面的关注动态。
+        </article>
+      `
+    );
+  }
+}
+
+function refreshFollowViews(profileId) {
+  if (!profileId) return;
+  const following = state.followSet.has(profileId);
+
+  document.querySelectorAll(".discover-avatar-card").forEach((card) => {
+    if (card.dataset.profileId === profileId && following) {
+      card.remove();
+    }
+  });
+  ensureDiscoverRecommendationEmptyState();
+
+  document.querySelectorAll("[data-toggle-follow], [data-follow-back]").forEach((button) => {
+    const targetProfileId = button.dataset.toggleFollow || button.dataset.followBack || "";
+    if (targetProfileId !== profileId) return;
+
+    if (button.dataset.followBack) {
+      button.textContent = following ? "已回关" : "回关";
+      button.disabled = following;
+      button.classList.toggle("is-reciprocal", following);
+      button.classList.toggle("is-active", following);
+      return;
+    }
+
+    button.textContent = following ? "已关注" : "关注";
+    button.disabled = false;
+    button.classList.toggle("is-active", following);
+  });
+
+  document.querySelectorAll(".profile-actions").forEach((actions) => {
+    const followButton = Array.from(actions.querySelectorAll("[data-toggle-follow]")).find(
+      (button) => button.dataset.toggleFollow === profileId
+    );
+    if (!followButton) return;
+    const chatButton = Array.from(actions.querySelectorAll("[data-open-chat]")).find(
+      (button) => button.dataset.openChat === profileId
+    );
+    if (following && !chatButton) {
+      followButton.insertAdjacentHTML(
+        "afterend",
+        `<button class="mini-button" data-open-chat="${escapeHtml(profileId)}" type="button">私信</button>`
+      );
+    }
+    if (!following && chatButton) {
+      chatButton.remove();
+    }
+  });
+}
+
+function isTransientFollowError(error) {
+  const message = String(error?.message || "");
+  return (
+    error?.retryable ||
+    error?.name === "AbortError" ||
+    error instanceof TypeError ||
+    message.includes("响应较慢") ||
+    message.includes("Failed to fetch") ||
+    message.includes("Load failed") ||
+    message.includes("NetworkError")
+  );
+}
+
 async function flushFollowMutation(profileId) {
   const mutation = state.followMutationQueue.get(profileId);
   if (!mutation || mutation.inFlight) return;
@@ -3656,16 +3738,40 @@ async function flushFollowMutation(profileId) {
   mutation.inFlight = true;
 
   try {
-    await postAndSync(`${API_BASE}/follow/toggle`, {
+    const payload = await postWithoutStateSync(`${API_BASE}/follow/toggle`, {
       targetProfileId: profileId,
-      desiredFollowing: desiredForRequest
-    }, { keepOverlay: true });
-    mutation.confirmedFollowing = desiredForRequest;
+      desiredFollowing: desiredForRequest,
+      sourceProfileId: mutation.sourceProfileId || state.currentActorProfileId || "",
+      selectedRole: mutation.selectedRole || state.selectedRole
+    });
+    const confirmedFollowing =
+      typeof payload?.follow?.following === "boolean"
+        ? payload.follow.following
+        : desiredForRequest;
+    mutation.confirmedFollowing = confirmedFollowing;
+    if (confirmedFollowing !== state.followSet.has(profileId)) {
+      applyFollowState(profileId, confirmedFollowing);
+      refreshFollowViews(profileId);
+    }
+    setConnectionNotice("");
   } catch (error) {
+    if (isTransientFollowError(error)) {
+      mutation.retryCount = Math.min(Number(mutation.retryCount || 0) + 1, 6);
+      const retryDelay = Math.min(8000, 900 * mutation.retryCount);
+      setConnectionNotice("关注已先更新，正在后台同步。");
+      window.setTimeout(() => {
+        flushFollowMutation(profileId).catch((retryError) => {
+          if (!isTransientFollowError(retryError)) {
+            showError(retryError?.message || "关注同步失败，请稍后再试。");
+          }
+        });
+      }, retryDelay);
+      return;
+    }
     if (mutation.desiredFollowing === desiredForRequest) {
       applyFollowState(profileId, Boolean(mutation.confirmedFollowing));
+      refreshFollowViews(profileId);
       state.followMutationQueue.delete(profileId);
-      renderPage();
       throw error;
     }
   } finally {
@@ -3684,7 +3790,7 @@ async function flushFollowMutation(profileId) {
   }
 
   state.followMutationQueue.delete(profileId);
-  renderPage();
+  refreshFollowViews(profileId);
 }
 
 async function flushPostLikeQueue(postId) {
@@ -4502,14 +4608,18 @@ async function toggleFollow(profileId) {
     {
       inFlight: false,
       confirmedFollowing: previousFollowing,
-      desiredFollowing: previousFollowing
+      desiredFollowing: previousFollowing,
+      retryCount: 0
     };
 
   mutation.desiredFollowing = desiredFollowing;
+  mutation.sourceProfileId = actor.id;
+  mutation.selectedRole = actor.role || state.selectedRole;
+  mutation.retryCount = 0;
   state.followMutationQueue.set(profileId, mutation);
 
   applyFollowState(profileId, desiredFollowing);
-  renderPage();
+  refreshFollowViews(profileId);
   flushFollowMutation(profileId).catch((error) => {
     showError(error?.message || "关注同步失败，请稍后再试。");
   });
@@ -10945,7 +11055,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-4`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260426-5`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
