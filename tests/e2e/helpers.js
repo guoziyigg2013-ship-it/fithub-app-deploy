@@ -106,13 +106,20 @@ async function setHiddenInput(page, selector, value) {
   }, value);
 }
 
+async function setRegisterAvatar(page, avatarFile) {
+  if (!avatarFile) return;
+  await page.locator('#registerForm input[name="avatar_file"]').setInputFiles(avatarFile);
+  await expect(page.locator("#registerForm .upload-picker-status", { hasText: "头像已保存" })).toBeVisible({ timeout: 10000 });
+}
+
 async function openMyPage(page) {
   await page.locator('.bottom-nav [data-page="profile"]').evaluate((element) => element.click());
   await expect(page.getByText("我的功能")).toBeVisible();
 }
 
-async function registerEnthusiast(page, { name = "测试训练者", phone = buildUniquePhone() } = {}) {
+async function registerEnthusiast(page, { name = "测试训练者", phone = buildUniquePhone(), avatarFile = null } = {}) {
   await openRegister(page, "enthusiast");
+  await setRegisterAvatar(page, avatarFile);
   await page.locator('#registerForm input[name="name"]').fill(name);
   const code = await sendRegisterCode(page, phone);
   await page.locator('#registerForm input[name="verification_code"]').fill(code);
@@ -126,8 +133,9 @@ async function registerEnthusiast(page, { name = "测试训练者", phone = buil
   return { name, phone };
 }
 
-async function registerCoach(page, { name = "测试教练", phone = buildUniquePhone() } = {}) {
+async function registerCoach(page, { name = "测试教练", phone = buildUniquePhone(), avatarFile = null } = {}) {
   await openRegister(page, "coach");
+  await setRegisterAvatar(page, avatarFile);
   await page.locator('#registerForm input[name="name"]').fill(name);
   const code = await sendRegisterCode(page, phone);
   await page.locator('#registerForm input[name="verification_code"]').fill(code);
@@ -144,8 +152,9 @@ async function registerCoach(page, { name = "测试教练", phone = buildUniqueP
   return { name, phone };
 }
 
-async function registerGym(page, { name = "测试健身房", phone = buildUniquePhone() } = {}) {
+async function registerGym(page, { name = "测试健身房", phone = buildUniquePhone(), avatarFile = null } = {}) {
   await openRegister(page, "gym");
+  await setRegisterAvatar(page, avatarFile);
   await page.locator('#registerForm input[name="gym_name"]').fill(name);
   const code = await sendRegisterCode(page, phone);
   await page.locator('#registerForm input[name="verification_code"]').fill(code);

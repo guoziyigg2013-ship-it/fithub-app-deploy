@@ -3216,11 +3216,111 @@ function openMediaViewer(postId, index = 0) {
   openOverlay("media");
 }
 
+function getRegisterUploadStatusText(uploadDraft) {
+  if (!uploadDraft) return "";
+  if (uploadDraft.status === "processing") return "正在处理图片";
+  if (uploadDraft.status === "uploading") return "正在保存头像";
+  if (uploadDraft.status === "ready") return "头像已保存";
+  if (uploadDraft.status === "error") return uploadDraft.error || "头像上传失败，请重新选择";
+  return "";
+}
+
+function setRegisterUploadDraft(inputName, nextDraft) {
+  state.registerUploadDrafts = {
+    ...(state.registerUploadDrafts || {}),
+    [inputName]: nextDraft
+  };
+}
+
+async function uploadRegisterImageDraft(inputName, draft, dataUrl) {
+  if (!dataUrl) {
+    throw new Error("头像读取失败，请重新选择图片。");
+  }
+
+  const uploadPromise = uploadManagedMedia({
+    dataUrl,
+    fileName: draft.fileName || `${inputName}.jpg`,
+    assetType: "image",
+    category: "avatars"
+  }).then((uploaded) => {
+    const current = state.registerUploadDrafts?.[inputName];
+    if (current?.token === draft.token) {
+      current.uploadedUrl = uploaded.url;
+      current.status = "ready";
+      current.label = "头像已保存";
+      current.error = "";
+      renderOverlay();
+    }
+    return uploaded.url;
+  }).catch((error) => {
+    const current = state.registerUploadDrafts?.[inputName];
+    if (current?.token === draft.token) {
+      current.status = "error";
+      current.error = error?.message || "头像上传失败，请重新选择";
+      current.uploadPromise = null;
+      renderOverlay();
+    }
+    throw error;
+  });
+
+  draft.uploadPromise = uploadPromise;
+  return uploadPromise;
+}
+
+async function prepareRegisterUploadDraft(inputName, files) {
+  if (!files.length) {
+    delete state.registerUploadDrafts[inputName];
+    renderOverlay();
+    return;
+  }
+
+  const file = files[0];
+  if (!file.type?.startsWith("image/")) {
+    throw new Error("头像只支持图片，请重新选择。");
+  }
+
+  const token = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const draft = {
+    token,
+    fileName: file.name || `${inputName}.jpg`,
+    label: file.name || "已选择头像",
+    preview: "",
+    uploadedUrl: "",
+    uploadPromise: null,
+    status: "processing",
+    error: ""
+  };
+  setRegisterUploadDraft(inputName, draft);
+  renderOverlay();
+
+  const dataUrl = await optimizeImageFile(file, { maxEdge: 512, quality: 0.8 });
+  const current = state.registerUploadDrafts?.[inputName];
+  if (current?.token !== token) return;
+  current.preview = dataUrl;
+  current.status = "uploading";
+  current.label = "正在保存头像";
+  renderOverlay();
+
+  await uploadRegisterImageDraft(inputName, current, dataUrl);
+}
+
 async function readSingleFile(inputName, formData) {
-  const draftPreview = state.registerUploadDrafts?.[inputName]?.preview;
+  const draft = state.registerUploadDrafts?.[inputName];
+  if (draft?.uploadedUrl) return draft.uploadedUrl;
+  if (draft?.uploadPromise) return await draft.uploadPromise;
+  if (draft?.status === "error") {
+    throw new Error(draft.error || "头像上传失败，请重新选择。");
+  }
+  if (draft?.preview) {
+    draft.status = "uploading";
+    draft.label = "正在保存头像";
+    renderOverlay();
+    return await uploadRegisterImageDraft(inputName, draft, draft.preview);
+  }
+
   const value = formData.get(inputName);
   if (!isProvidedFile(value) || !value.size) return "";
-  const dataUrl = draftPreview || await optimizeImageFile(value, { maxEdge: 360, quality: 0.72 });
+  const dataUrl = await optimizeImageFile(value, { maxEdge: 512, quality: 0.8 });
   const uploaded = await uploadManagedMedia({
     dataUrl,
     fileName: value.name || `${inputName}.jpg`,
@@ -5142,10 +5242,12 @@ function renderField(field, seed) {
     const uploadDraft = state.registerUploadDrafts[field.name];
     const currentPreview = uploadDraft?.preview || (isAvatarField ? seed.avatarImage : "");
     const currentLabel = uploadDraft?.label || (currentPreview ? "已选择文件" : field.multiple ? "可选，多张上传" : "可选，轻触上传");
+    const statusText = getRegisterUploadStatusText(uploadDraft);
+    const statusClass = uploadDraft?.status ? `is-${uploadDraft.status}` : "";
     return `
       <div class="form-field">
         <span>${field.label}${field.required ? " *" : "（可选）"}</span>
-        <label class="upload-picker ${currentPreview ? "has-preview" : ""}">
+        <label class="upload-picker ${currentPreview ? "has-preview" : ""} ${statusClass}">
           <input
             class="upload-picker-input"
             name="${field.name}"
@@ -5156,6 +5258,7 @@ function renderField(field, seed) {
           <div class="upload-picker-copy">
             <strong>${isAvatarField ? "上传头像" : field.multiple ? "上传资料图片" : "上传文件"}</strong>
             <p>${currentLabel}</p>
+            ${statusText ? `<small class="upload-picker-status">${escapeHtml(statusText)}</small>` : ""}
           </div>
           ${
             currentPreview
@@ -11265,18 +11368,7 @@ overlay.addEventListener("change", (event) => {
   if (event.target.type === "file" && event.target.name) {
     runTask(async () => {
       const files = Array.from(event.target.files || []);
-      if (!files.length) {
-        delete state.registerUploadDrafts[event.target.name];
-        renderOverlay();
-        return;
-      }
-      state.registerUploadDrafts[event.target.name] = {
-        label: files.length === 1 ? files[0].name : `已选择 ${files.length} 个文件`,
-        preview: files[0].type.startsWith("image/")
-          ? await optimizeImageFile(files[0], { maxEdge: 240, quality: 0.74 })
-          : ""
-      };
-      renderOverlay();
+      await prepareRegisterUploadDraft(event.target.name, files);
     });
   }
 });
@@ -11497,7 +11589,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260427-1`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260427-2`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

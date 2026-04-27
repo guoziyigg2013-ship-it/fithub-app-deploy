@@ -4359,6 +4359,22 @@ form.is-submitting button[type="submit"] {
   overflow: hidden;
 }
 
+.upload-picker.is-uploading,
+.upload-picker.is-processing {
+  border-color: rgba(242, 140, 40, 0.34);
+  background: linear-gradient(180deg, #fff4e7, #ffffff);
+}
+
+.upload-picker.is-ready {
+  border-color: rgba(38, 180, 112, 0.28);
+  background: linear-gradient(180deg, #f3fff8, #ffffff);
+}
+
+.upload-picker.is-error {
+  border-color: rgba(225, 82, 82, 0.32);
+  background: linear-gradient(180deg, #fff3f1, #ffffff);
+}
+
 .upload-picker-input {
   position: absolute;
   inset: 0;
@@ -4379,6 +4395,28 @@ form.is-submitting button[type="submit"] {
   margin: 6px 0 0;
   color: var(--muted);
   line-height: 1.4;
+}
+
+.upload-picker-status {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(242, 140, 40, 0.1);
+  color: #a45b13;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.upload-picker.is-ready .upload-picker-status {
+  background: rgba(38, 180, 112, 0.12);
+  color: #19774b;
+}
+
+.upload-picker.is-error .upload-picker-status {
+  background: rgba(225, 82, 82, 0.12);
+  color: #a53030;
 }
 
 .upload-picker-preview {

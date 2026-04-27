@@ -395,6 +395,8 @@ def default_avatar_for_role(role):
 def compact_avatar_image(url, role):
     if not url:
         return default_avatar_for_role(role)
+    if isinstance(url, str) and url.startswith("blob:"):
+        return default_avatar_for_role(role)
     if isinstance(url, str) and url.startswith("data:") and len(url) > MAX_INLINE_AVATAR_CHARS:
         return default_avatar_for_role(role)
     return url
