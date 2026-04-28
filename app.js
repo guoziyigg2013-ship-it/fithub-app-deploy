@@ -1658,6 +1658,8 @@ const state = {
   favoritePosts: [],
   notifications: [],
   managedProfileBadges: {},
+  profileEnvironments: {},
+  identitySyncingProfileId: "",
   followMutationQueue: new Map(),
   likeMutationQueue: new Map(),
   favoriteMutationQueue: new Map(),
@@ -2184,6 +2186,63 @@ function markThreadRead(threadId, actorId = state.currentActorProfileId) {
   }));
 }
 
+function cloneProfileEnvironmentValue(value) {
+  try {
+    return JSON.parse(JSON.stringify(value || []));
+  } catch (_error) {
+    return Array.isArray(value) ? [...value] : [];
+  }
+}
+
+function rememberProfileEnvironment(profileId = state.currentActorProfileId) {
+  const actorId = String(profileId || "").trim();
+  if (!actorId) return;
+  state.profileEnvironments = {
+    ...(state.profileEnvironments || {}),
+    [actorId]: {
+      followSet: Array.from(state.followSet || []),
+      followerSet: Array.from(state.followerSet || []),
+      blockSet: Array.from(state.blockSet || []),
+      blockedBySet: Array.from(state.blockedBySet || []),
+      favoritePostIds: Array.from(state.favoritePostIds || []),
+      favoritePosts: cloneProfileEnvironmentValue(state.favoritePosts),
+      notifications: cloneProfileEnvironmentValue(state.notifications),
+      bookings: cloneProfileEnvironmentValue(state.bookings),
+      threads: cloneProfileEnvironmentValue(state.threads)
+    }
+  };
+}
+
+function applyProfileEnvironment(profileId) {
+  const actorId = String(profileId || "").trim();
+  const environment = actorId ? state.profileEnvironments?.[actorId] : null;
+  if (!environment) return false;
+  state.followSet = new Set(environment.followSet || []);
+  state.followerSet = new Set(environment.followerSet || []);
+  state.blockSet = new Set(environment.blockSet || []);
+  state.blockedBySet = new Set(environment.blockedBySet || []);
+  state.favoritePostIds = new Set(environment.favoritePostIds || []);
+  state.favoritePosts = cloneProfileEnvironmentValue(environment.favoritePosts);
+  state.notifications = cloneProfileEnvironmentValue(environment.notifications);
+  state.bookings = cloneProfileEnvironmentValue(environment.bookings);
+  state.threads = cloneProfileEnvironmentValue(environment.threads);
+  return true;
+}
+
+function clearProfileScopedEnvironment({ keepFollowBackup = false } = {}) {
+  if (!keepFollowBackup) {
+    state.followSet = new Set();
+    state.followerSet = new Set();
+  }
+  state.blockSet = new Set();
+  state.blockedBySet = new Set();
+  state.favoritePostIds = new Set();
+  state.favoritePosts = [];
+  state.notifications = [];
+  state.bookings = [];
+  state.threads = [];
+}
+
 function rememberManagedAccounts(accounts = []) {
   if (!accounts.length) return;
   const merged = new Map();
@@ -2522,6 +2581,8 @@ function clearStaleManagedSession({ keepStoredAccounts = true } = {}) {
   state.favoritePosts = [];
   state.notifications = [];
   state.managedProfileBadges = {};
+  state.profileEnvironments = {};
+  state.identitySyncingProfileId = "";
   state.bookings = [];
   state.threads = [];
   state.selectedRole = "enthusiast";
@@ -2735,6 +2796,10 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   const incomingProfiles = enhanceProfiles(payload.profiles || []);
   const mergedProfileMap = new Map(incomingProfiles.map((profile) => [profile.id, profile]));
 
+  if (previousCurrentActorProfileId) {
+    rememberProfileEnvironment(previousCurrentActorProfileId);
+  }
+
   if (preserveManagedSession) {
     state.profiles.forEach((profile) => {
       if (profile?.id && previousManagedIds.includes(profile.id) && !mergedProfileMap.has(profile.id)) {
@@ -2778,6 +2843,10 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
     : normalizeManagedProfileBadges(payload.session.managedProfileBadges || []);
   state.bookings = preserveManagedSession ? previousBookings : (payload.bookings || []);
   state.threads = preserveManagedSession ? previousThreads : (payload.threads || []);
+  if (!preserveManagedSession && state.currentActorProfileId) {
+    state.identitySyncingProfileId = "";
+    rememberProfileEnvironment(state.currentActorProfileId);
+  }
   state.composeProfileId = state.composeProfileId || state.currentActorProfileId || state.managedProfileIds[0] || "";
 
   const activeProfile = getProfile(state.currentActorProfileId || state.managedProfileIds[0] || "");
@@ -6024,14 +6093,20 @@ function applyLocalManagedSwitch(profile) {
     [profile.id]: 0
   };
 
-  const backup = findStoredFollowBackup(profile, getMatchedAccountForProfile(profile));
-  state.followSet = new Set(Array.isArray(backup?.followSet) ? backup.followSet.filter(Boolean) : []);
-  state.followerSet = new Set(Array.isArray(backup?.followerSet) ? backup.followerSet.filter(Boolean) : []);
+  const restoredEnvironment = applyProfileEnvironment(profile.id);
+  if (!restoredEnvironment) {
+    const backup = findStoredFollowBackup(profile, getMatchedAccountForProfile(profile));
+    state.followSet = new Set(Array.isArray(backup?.followSet) ? backup.followSet.filter(Boolean) : []);
+    state.followerSet = new Set(Array.isArray(backup?.followerSet) ? backup.followerSet.filter(Boolean) : []);
+    clearProfileScopedEnvironment({ keepFollowBackup: true });
+    state.identitySyncingProfileId = profile.id;
+  } else {
+    state.identitySyncingProfileId = "";
+  }
   applyPendingFollowMutations();
 
   if (state.activePage === "profile") {
     state.activeProfileId = profile.id;
-    state.profileSubpage = "";
   }
 }
 
@@ -6061,7 +6136,6 @@ async function switchManagedProfile(profileId, { waitForSync = false, closeAfter
         state.composeProfileId = latestProfile.id;
         if (state.activePage === "profile") {
           state.activeProfileId = latestProfile.id;
-          state.profileSubpage = "";
         }
       }
       renderPage();
@@ -8014,6 +8088,10 @@ function renderMessagesFeature(profile) {
   const notifications = Array.isArray(state.notifications) ? state.notifications : [];
   const threads = (state.threads || []).filter(Boolean);
   const notificationsSeenAt = new Date(getActorMessageReadState().notificationsSeenAt || 0).getTime() || 0;
+  const isSyncingThisIdentity = state.identitySyncingProfileId && state.identitySyncingProfileId === profile?.id;
+  if (isSyncingThisIdentity && !notifications.length && !threads.length) {
+    return '<article class="empty-card">正在同步这个身份的消息环境，稍等一下会自动恢复赞、评论、@ 和私信。</article>';
+  }
   if (!notifications.length && !threads.length) {
     return '<article class="empty-card">还没有新的互动消息。别人给你的赞、评论、@和私信会集中显示在这里。</article>';
   }
@@ -11589,7 +11667,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260427-2`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260428-1`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

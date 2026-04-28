@@ -4363,13 +4363,11 @@ def serialize_availability_slots(profile):
 
 
 def serialize_bookings(state, session):
-    managed = set(session["managedProfileIds"])
-    managed_alias_ids = set()
-    for profile_id in managed:
-        managed_alias_ids.update(collect_profile_alias_ids(state, profile_id))
+    current_actor_profile_id = resolve_canonical_profile_id(state, session.get("currentActorProfileId"))
+    current_actor_alias_ids = set(collect_profile_alias_ids(state, current_actor_profile_id))
     bookings = [
         item for item in state["bookings"]
-        if item["createdByProfileId"] in managed_alias_ids or item["targetProfileId"] in managed_alias_ids
+        if item["createdByProfileId"] in current_actor_alias_ids or item["targetProfileId"] in current_actor_alias_ids
     ]
     bookings.sort(key=lambda item: item["createdAt"], reverse=True)
     serialized = []
@@ -4378,9 +4376,9 @@ def serialize_bookings(state, session):
         target_id = resolve_canonical_profile_id(state, item.get("targetProfileId"))
         source_profile = state["profiles"].get(source_id)
         target_profile = state["profiles"].get(target_id)
-        if item.get("createdByProfileId") in managed_alias_ids and item.get("targetProfileId") in managed_alias_ids:
+        if item.get("createdByProfileId") in current_actor_alias_ids and item.get("targetProfileId") in current_actor_alias_ids:
             direction = "internal"
-        elif item.get("targetProfileId") in managed_alias_ids:
+        elif item.get("targetProfileId") in current_actor_alias_ids:
             direction = "incoming"
         else:
             direction = "outgoing"

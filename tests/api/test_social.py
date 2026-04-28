@@ -49,3 +49,52 @@ class SocialRegressionTests(FitHubApiTestCase):
 
         a_bootstrap = client_a.bootstrap()
         self.assertIn(profile_b["id"], a_bootstrap["followerSet"])
+
+    def test_multi_identity_threads_are_scoped_to_current_identity(self):
+        owner_phone = self.make_phone(32)
+        sender_phone = self.make_phone(33)
+
+        owner_client = self.make_client()
+        code_enthusiast = owner_client.send_code(owner_phone, purpose="register")["debugCode"]
+        enthusiast_payload = owner_client.register_enthusiast(owner_phone, "双身份消息训练者", code_enthusiast)
+        enthusiast_profile = self.current_profile(enthusiast_payload)
+
+        code_coach = owner_client.send_code(owner_phone, purpose="register")["debugCode"]
+        coach_payload = owner_client.register_coach(owner_phone, "双身份消息教练", code_coach)
+        coach_profile = self.current_profile(coach_payload)
+
+        sender_client = self.make_client()
+        sender_code = sender_client.send_code(sender_phone, purpose="register")["debugCode"]
+        sender_client.register_enthusiast(sender_phone, "双身份消息发送者", sender_code)
+        sender_client.send_message(enthusiast_profile["id"], "发给训练者身份的私信")
+        sender_client.send_message(coach_profile["id"], "发给教练身份的私信")
+
+        enthusiast_view = owner_client.post(
+            "/api/session/select",
+            {
+                "selectedRole": "enthusiast",
+                "currentActorProfileId": enthusiast_profile["id"],
+            },
+        )
+        enthusiast_texts = [
+            message.get("text")
+            for thread in enthusiast_view.get("threads", [])
+            for message in thread.get("messages", [])
+        ]
+        self.assertIn("发给训练者身份的私信", enthusiast_texts)
+        self.assertNotIn("发给教练身份的私信", enthusiast_texts)
+
+        coach_view = owner_client.post(
+            "/api/session/select",
+            {
+                "selectedRole": "coach",
+                "currentActorProfileId": coach_profile["id"],
+            },
+        )
+        coach_texts = [
+            message.get("text")
+            for thread in coach_view.get("threads", [])
+            for message in thread.get("messages", [])
+        ]
+        self.assertIn("发给教练身份的私信", coach_texts)
+        self.assertNotIn("发给训练者身份的私信", coach_texts)

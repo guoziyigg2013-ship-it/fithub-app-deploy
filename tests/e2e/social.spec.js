@@ -195,6 +195,81 @@ test("多身份切换先本地即时反馈，再后台同步", async ({ page }) 
   await expect(page.getByText("身份切换训练者")).toBeVisible();
 });
 
+test("多身份消息页切换使用独立缓存，慢网络不显示空消息", async ({ page }) => {
+  const phone = buildUniquePhone();
+  await registerEnthusiast(page, { name: "消息缓存训练者", phone });
+  await registerCoach(page, { name: "消息缓存教练", phone });
+
+  const ids = await page.evaluate(async () => {
+    const sessionId = window.localStorage.getItem("fithub_trial_session_id") || "";
+    const payload = await fetch(`/api/bootstrap?session_id=${encodeURIComponent(sessionId)}`).then((response) => response.json());
+    return {
+      sessionId,
+      enthusiastId: payload.profiles.find((profile) => profile.name === "消息缓存训练者")?.id || "",
+      coachId: payload.profiles.find((profile) => profile.name === "消息缓存教练")?.id || "",
+    };
+  });
+  expect(ids.enthusiastId).toBeTruthy();
+  expect(ids.coachId).toBeTruthy();
+
+  const messageText = `训练者身份私信 ${Date.now()}`;
+  await page.evaluate(async ({ sessionId, enthusiastId, messageText }) => {
+    const response = await fetch("/api/message/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        targetProfileId: enthusiastId,
+        text: messageText,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+  }, { sessionId: ids.sessionId, enthusiastId: ids.enthusiastId, messageText });
+
+  await openMyPage(page);
+  await page
+    .locator(".managed-strip--dashboard [data-switch-managed]")
+    .filter({ hasText: "健身爱好者" })
+    .click();
+  await page.locator('[data-open-my-feature="messages"]').click();
+  await expect(page.getByText(messageText)).toBeVisible();
+
+  await page
+    .locator(".managed-strip--dashboard [data-switch-managed]")
+    .filter({ hasText: "健身教练" })
+    .click();
+  await expect(
+    page.locator(".managed-strip--dashboard [data-switch-managed].is-active").filter({ hasText: "健身教练" })
+  ).toBeVisible();
+
+  let releaseSelect;
+  let markSelectStarted;
+  const selectCanContinue = new Promise((resolve) => {
+    releaseSelect = resolve;
+  });
+  const selectStarted = new Promise((resolve) => {
+    markSelectStarted = resolve;
+  });
+
+  await page.route("**/api/session/select", async (route) => {
+    markSelectStarted();
+    await selectCanContinue;
+    await route.continue();
+  });
+
+  await page
+    .locator(".managed-strip--dashboard [data-switch-managed]")
+    .filter({ hasText: "健身爱好者" })
+    .click();
+  await selectStarted;
+  await expect(page.getByText(messageText)).toBeVisible({ timeout: 300 });
+
+  releaseSelect();
+  await expect(page.getByText(messageText)).toBeVisible();
+});
+
 test("同一账号的教练身份可以关注自己的训练者身份", async ({ page }) => {
   const phone = buildUniquePhone();
   const enthusiast = await registerEnthusiast(page, { name: "自我关注训练者", phone });
