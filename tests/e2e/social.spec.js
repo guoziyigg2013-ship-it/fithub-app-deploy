@@ -270,6 +270,64 @@ test("多身份消息页切换使用独立缓存，慢网络不显示空消息",
   await expect(page.getByText(messageText)).toBeVisible();
 });
 
+test("刷新后先使用本地身份环境缓存，后台慢同步不挡住旧消息", async ({ page }) => {
+  const phone = buildUniquePhone();
+  await registerEnthusiast(page, { name: "刷新缓存训练者", phone });
+  await registerCoach(page, { name: "刷新缓存教练", phone });
+
+  const ids = await page.evaluate(async () => {
+    const sessionId = window.localStorage.getItem("fithub_trial_session_id") || "";
+    const payload = await fetch(`/api/bootstrap?session_id=${encodeURIComponent(sessionId)}`).then((response) => response.json());
+    return {
+      sessionId,
+      enthusiastId: payload.profiles.find((profile) => profile.name === "刷新缓存训练者")?.id || "",
+    };
+  });
+  expect(ids.enthusiastId).toBeTruthy();
+
+  const messageText = `刷新后缓存私信 ${Date.now()}`;
+  await page.evaluate(async ({ sessionId, enthusiastId, messageText }) => {
+    const response = await fetch("/api/message/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        targetProfileId: enthusiastId,
+        text: messageText,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+  }, { sessionId: ids.sessionId, enthusiastId: ids.enthusiastId, messageText });
+
+  await openMyPage(page);
+  await page
+    .locator(".managed-strip--dashboard [data-switch-managed]")
+    .filter({ hasText: "健身爱好者" })
+    .click();
+  await page.locator('[data-open-my-feature="messages"]').click();
+  await expect(page.getByText(messageText)).toBeVisible();
+
+  let releaseBootstrap;
+  const bootstrapCanContinue = new Promise((resolve) => {
+    releaseBootstrap = resolve;
+  });
+  await page.route("**/api/bootstrap**", async (route) => {
+    await bootstrapCanContinue;
+    await route.continue();
+  });
+
+  await page.reload();
+  await openMyPage(page);
+  await page.locator('[data-open-my-feature="messages"]').click();
+  await expect(page.getByText(messageText)).toBeVisible({ timeout: 500 });
+  await expect(page.getByText("正在同步这个身份的消息环境")).toHaveCount(0);
+
+  releaseBootstrap();
+  await expect(page.getByText(messageText)).toBeVisible();
+});
+
 test("同一账号的教练身份可以关注自己的训练者身份", async ({ page }) => {
   const phone = buildUniquePhone();
   const enthusiast = await registerEnthusiast(page, { name: "自我关注训练者", phone });

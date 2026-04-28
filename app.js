@@ -1559,6 +1559,7 @@ const SNAPSHOT_STORAGE_KEY = "fithub_trial_snapshot_v2";
 const ACCOUNT_STORAGE_KEY = "fithub_trial_accounts_v1";
 const PROFILE_BACKUP_STORAGE_KEY = "fithub_trial_profile_backups_v1";
 const FOLLOW_BACKUP_STORAGE_KEY = "fithub_trial_follow_backups_v1";
+const PROFILE_ENVIRONMENT_STORAGE_KEY = "fithub_trial_profile_environments_v1";
 const ACTIVE_ACCOUNT_STORAGE_KEY = "fithub_trial_active_account_v1";
 const LOGOUT_MARKER_STORAGE_KEY = "fithub_trial_logged_out_v1";
 const MESSAGE_READ_STATE_STORAGE_KEY = "fithub_trial_message_read_state_v1";
@@ -1658,7 +1659,7 @@ const state = {
   favoritePosts: [],
   notifications: [],
   managedProfileBadges: {},
-  profileEnvironments: {},
+  profileEnvironments: getStoredProfileEnvironments(),
   identitySyncingProfileId: "",
   followMutationQueue: new Map(),
   likeMutationQueue: new Map(),
@@ -1776,6 +1777,60 @@ function getStoredSnapshot() {
   }
 }
 
+function normalizeStoredProfileEnvironment(environment = {}) {
+  return {
+    followSet: Array.isArray(environment.followSet) ? environment.followSet.filter(Boolean) : [],
+    followerSet: Array.isArray(environment.followerSet) ? environment.followerSet.filter(Boolean) : [],
+    blockSet: Array.isArray(environment.blockSet) ? environment.blockSet.filter(Boolean) : [],
+    blockedBySet: Array.isArray(environment.blockedBySet) ? environment.blockedBySet.filter(Boolean) : [],
+    favoritePostIds: Array.isArray(environment.favoritePostIds) ? environment.favoritePostIds.filter(Boolean) : [],
+    favoritePosts: cloneProfileEnvironmentValue(environment.favoritePosts),
+    notifications: cloneProfileEnvironmentValue(environment.notifications),
+    bookings: cloneProfileEnvironmentValue(environment.bookings),
+    threads: cloneProfileEnvironmentValue(environment.threads)
+  };
+}
+
+function hasUsefulProfileEnvironment(environment = {}) {
+  return [
+    environment.followSet,
+    environment.followerSet,
+    environment.blockSet,
+    environment.blockedBySet,
+    environment.favoritePostIds,
+    environment.favoritePosts,
+    environment.notifications,
+    environment.bookings,
+    environment.threads
+  ].some((items) => Array.isArray(items) && items.length > 0);
+}
+
+function getStoredProfileEnvironments() {
+  try {
+    const directRaw = window.localStorage.getItem(PROFILE_ENVIRONMENT_STORAGE_KEY);
+    const snapshot = getStoredSnapshot();
+    const parsed = directRaw ? JSON.parse(directRaw) : snapshot?.profileEnvironments || {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.entries(parsed).reduce((environments, [profileId, environment]) => {
+      const actorId = String(profileId || "").trim();
+      if (actorId) {
+        environments[actorId] = normalizeStoredProfileEnvironment(environment);
+      }
+      return environments;
+    }, {});
+  } catch (_error) {
+    return {};
+  }
+}
+
+function storeProfileEnvironments(environments) {
+  try {
+    window.localStorage.setItem(PROFILE_ENVIRONMENT_STORAGE_KEY, JSON.stringify(environments || {}));
+  } catch (_error) {
+    // Ignore storage quota failures. Server sync is still the source of truth.
+  }
+}
+
 function storeSnapshot(payload) {
   if (!payload?.session) return;
   try {
@@ -1786,7 +1841,16 @@ function storeSnapshot(payload) {
       : [];
     const snapshotToStore =
       !incomingManagedIds.length && previousManagedIds.length ? previous : payload;
-    window.localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshotToStore));
+    window.localStorage.setItem(
+      SNAPSHOT_STORAGE_KEY,
+      JSON.stringify({
+        ...snapshotToStore,
+        profileEnvironments: {
+          ...(snapshotToStore?.profileEnvironments || {}),
+          ...(state.profileEnvironments || {})
+        }
+      })
+    );
   } catch (_error) {
     // Ignore storage quota failures.
   }
@@ -2194,28 +2258,59 @@ function cloneProfileEnvironmentValue(value) {
   }
 }
 
-function rememberProfileEnvironment(profileId = state.currentActorProfileId) {
+function getProfileEnvironment(profileId) {
   const actorId = String(profileId || "").trim();
-  if (!actorId) return;
+  if (!actorId) return null;
+  if (state.profileEnvironments?.[actorId]) {
+    return state.profileEnvironments[actorId];
+  }
+  const storedEnvironment = getStoredProfileEnvironments()[actorId];
+  if (!storedEnvironment) return null;
   state.profileEnvironments = {
     ...(state.profileEnvironments || {}),
-    [actorId]: {
-      followSet: Array.from(state.followSet || []),
-      followerSet: Array.from(state.followerSet || []),
-      blockSet: Array.from(state.blockSet || []),
-      blockedBySet: Array.from(state.blockedBySet || []),
-      favoritePostIds: Array.from(state.favoritePostIds || []),
-      favoritePosts: cloneProfileEnvironmentValue(state.favoritePosts),
-      notifications: cloneProfileEnvironmentValue(state.notifications),
-      bookings: cloneProfileEnvironmentValue(state.bookings),
-      threads: cloneProfileEnvironmentValue(state.threads)
-    }
+    [actorId]: storedEnvironment
   };
+  return storedEnvironment;
+}
+
+function rememberProfileEnvironment(profileId = state.currentActorProfileId, { preferExistingWhenEmpty = false } = {}) {
+  const actorId = String(profileId || "").trim();
+  if (!actorId) return;
+  const nextEnvironment = normalizeStoredProfileEnvironment({
+    followSet: Array.from(state.followSet || []),
+    followerSet: Array.from(state.followerSet || []),
+    blockSet: Array.from(state.blockSet || []),
+    blockedBySet: Array.from(state.blockedBySet || []),
+    favoritePostIds: Array.from(state.favoritePostIds || []),
+    favoritePosts: cloneProfileEnvironmentValue(state.favoritePosts),
+    notifications: cloneProfileEnvironmentValue(state.notifications),
+    bookings: cloneProfileEnvironmentValue(state.bookings),
+    threads: cloneProfileEnvironmentValue(state.threads)
+  });
+  const existingEnvironment = getProfileEnvironment(actorId);
+  if (
+    preferExistingWhenEmpty &&
+    existingEnvironment &&
+    hasUsefulProfileEnvironment(existingEnvironment) &&
+    !hasUsefulProfileEnvironment(nextEnvironment)
+  ) {
+    state.profileEnvironments = {
+      ...(state.profileEnvironments || {}),
+      [actorId]: existingEnvironment
+    };
+    storeProfileEnvironments(state.profileEnvironments);
+    return;
+  }
+  state.profileEnvironments = {
+    ...(state.profileEnvironments || {}),
+    [actorId]: nextEnvironment
+  };
+  storeProfileEnvironments(state.profileEnvironments);
 }
 
 function applyProfileEnvironment(profileId) {
   const actorId = String(profileId || "").trim();
-  const environment = actorId ? state.profileEnvironments?.[actorId] : null;
+  const environment = getProfileEnvironment(actorId);
   if (!environment) return false;
   state.followSet = new Set(environment.followSet || []);
   state.followerSet = new Set(environment.followerSet || []);
@@ -2528,6 +2623,7 @@ function bootstrapRememberedAccountLocally() {
   if (!cachedProfile?.id) return false;
 
   const snapshot = getStoredSnapshot();
+  const storedEnvironment = getProfileEnvironment(cachedProfile.id);
   const baseProfiles = Array.isArray(snapshot?.profiles) && snapshot.profiles.length
     ? snapshot.profiles
     : createInitialProfiles();
@@ -2552,13 +2648,13 @@ function bootstrapRememberedAccountLocally() {
         locationStatus: "已从这个设备恢复上次登录的账号。"
       },
       profiles: mergedProfiles,
-      followSet: snapshot?.followSet || [],
-      followerSet: snapshot?.followerSet || [],
-      favoritePostIds: snapshot?.favoritePostIds || [],
-      favoritePosts: snapshot?.favoritePosts || [],
-      notifications: snapshot?.notifications || [],
-      bookings: snapshot?.bookings || [],
-      threads: snapshot?.threads || []
+      followSet: storedEnvironment?.followSet || snapshot?.followSet || [],
+      followerSet: storedEnvironment?.followerSet || snapshot?.followerSet || [],
+      favoritePostIds: storedEnvironment?.favoritePostIds || snapshot?.favoritePostIds || [],
+      favoritePosts: storedEnvironment?.favoritePosts || snapshot?.favoritePosts || [],
+      notifications: storedEnvironment?.notifications || snapshot?.notifications || [],
+      bookings: storedEnvironment?.bookings || snapshot?.bookings || [],
+      threads: storedEnvironment?.threads || snapshot?.threads || []
     },
     { keepOverlay: true }
   );
@@ -2581,7 +2677,7 @@ function clearStaleManagedSession({ keepStoredAccounts = true } = {}) {
   state.favoritePosts = [];
   state.notifications = [];
   state.managedProfileBadges = {};
-  state.profileEnvironments = {};
+  state.profileEnvironments = getStoredProfileEnvironments();
   state.identitySyncingProfileId = "";
   state.bookings = [];
   state.threads = [];
@@ -2797,7 +2893,9 @@ function syncStateFromServer(payload, { keepOverlay = false } = {}) {
   const mergedProfileMap = new Map(incomingProfiles.map((profile) => [profile.id, profile]));
 
   if (previousCurrentActorProfileId) {
-    rememberProfileEnvironment(previousCurrentActorProfileId);
+    rememberProfileEnvironment(previousCurrentActorProfileId, {
+      preferExistingWhenEmpty: state.identitySyncingProfileId === previousCurrentActorProfileId
+    });
   }
 
   if (preserveManagedSession) {
@@ -3009,6 +3107,7 @@ function clearStoredAuthArtifacts() {
     ACCOUNT_STORAGE_KEY,
     PROFILE_BACKUP_STORAGE_KEY,
     FOLLOW_BACKUP_STORAGE_KEY,
+    PROFILE_ENVIRONMENT_STORAGE_KEY,
     ACTIVE_ACCOUNT_STORAGE_KEY,
     IDENTITY_BADGE_SEEN_STORAGE_KEY
   ].forEach((key) => {
@@ -6080,6 +6179,9 @@ async function createBooking(profileId, plan = null, availabilitySlotId = "") {
 function applyLocalManagedSwitch(profile) {
   const previousActor = getCurrentActor();
   if (previousActor?.id) {
+    rememberProfileEnvironment(previousActor.id, {
+      preferExistingWhenEmpty: state.identitySyncingProfileId === previousActor.id
+    });
     rememberFollowBackup(previousActor, getMatchedAccountForProfile(previousActor), state.followSet, state.followerSet);
   }
 
@@ -11667,7 +11769,7 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260428-1`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260428-2`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
