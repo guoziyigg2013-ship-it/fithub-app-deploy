@@ -147,8 +147,9 @@ def main() -> int:
         ensure_elapsed("Backend health", elapsed, args.max_health_seconds)
         print(f"  OK backend health ({elapsed:.2f}s)")
 
-        print(f"Checking backend storage status: {backend_url}/api/storage/status")
-        code, storage, elapsed = fetch_json(f"{backend_url}/api/storage/status", attempts=3, timeout=30, delay=3)
+        storage_status_url = f"{backend_url}/api/storage/status?remote=1"
+        print(f"Checking backend storage status: {storage_status_url}")
+        code, storage, elapsed = fetch_json(storage_status_url, attempts=3, timeout=30, delay=3)
         ensure(code == 200, f"Storage status returned {code}")
         ensure_elapsed("Storage status", elapsed, args.max_storage_seconds)
         validate_storage_status(
