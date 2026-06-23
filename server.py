@@ -174,6 +174,7 @@ STATE_RUNTIME_META = {
     "last_known_remote_signal_score": 0,
     "remote_repair_required": False,
     "supabase_config_valid": True,
+    "supabase_config_issue": "",
     "last_supabase_refresh_attempt": 0.0,
     "last_supabase_refresh_attempt_at": "",
     "last_supabase_refresh_error": "",
@@ -774,10 +775,57 @@ def supabase_storage_enabled():
     return bool(supabase_config_valid() and SUPABASE_SERVICE_ROLE_KEY)
 
 
+def looks_like_placeholder(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    placeholder_tokens = [
+        "你的",
+        "your",
+        "project",
+        "placeholder",
+        "example",
+        "项目",
+        "<",
+        ">",
+        "{",
+        "}",
+    ]
+    return any(token in text for token in placeholder_tokens)
+
+
+def supabase_url_diagnostics():
+    raw_url = SUPABASE_URL or ""
+    parsed = urlparse(raw_url)
+    host = (parsed.hostname or "").strip().lower()
+    issue = ""
+    if raw_url and not parsed.scheme:
+        issue = "SUPABASE_URL 缺少 https:// 前缀。"
+    elif raw_url and parsed.scheme not in {"http", "https"}:
+        issue = "SUPABASE_URL 必须使用 http 或 https。"
+    elif raw_url and not host:
+        issue = "SUPABASE_URL 缺少有效域名。"
+    elif looks_like_placeholder(raw_url) or looks_like_placeholder(host):
+        issue = "SUPABASE_URL 看起来仍是占位符，请填写 Supabase Project URL。"
+    elif any(char.isspace() for char in raw_url):
+        issue = "SUPABASE_URL 包含空格或换行，请重新复制 Project URL。"
+
+    return {
+        "configured": bool(raw_url),
+        "scheme": parsed.scheme if parsed.scheme in {"http", "https"} else "",
+        "host": host,
+        "hostLooksSupabase": bool(host.endswith(".supabase.co")),
+        "hostLooksPlaceholder": bool(looks_like_placeholder(raw_url) or looks_like_placeholder(host)),
+        "hasServiceRoleKey": bool(SUPABASE_SERVICE_ROLE_KEY),
+        "issue": issue,
+    }
+
+
 def supabase_config_valid():
-    parsed = urlparse(SUPABASE_URL or "")
-    valid = bool(parsed.scheme in {"http", "https"} and parsed.netloc)
+    diagnostics = supabase_url_diagnostics()
+    valid = bool(diagnostics["scheme"] and diagnostics["host"] and not diagnostics["issue"])
     STATE_RUNTIME_META["supabase_config_valid"] = valid
+    STATE_RUNTIME_META["supabase_config_issue"] = diagnostics["issue"]
     return valid
 
 
@@ -1324,6 +1372,7 @@ def is_materially_richer_state(candidate_metrics, baseline_metrics):
 
 def storage_runtime_status(state=None):
     loaded_from = str(STATE_RUNTIME_META.get("loaded_from") or "uninitialized")
+    supabase_diagnostics = supabase_url_diagnostics()
     supabase_configured = supabase_storage_enabled()
     supabase_writable = bool(STATE_RUNTIME_META.get("supabase_writable", True))
     metrics = state_integrity_metrics(state)
@@ -1331,6 +1380,10 @@ def storage_runtime_status(state=None):
 
     if not supabase_configured:
         warnings.append("Supabase 未启用，当前只能使用本地 JSON；生产环境不建议这样运行。")
+    if supabase_diagnostics.get("issue"):
+        warnings.append(supabase_diagnostics["issue"])
+    if supabase_diagnostics.get("configured") and not supabase_diagnostics.get("hasServiceRoleKey"):
+        warnings.append("SUPABASE_SERVICE_ROLE_KEY 未配置，无法读写远端生产数据。")
     if loaded_from == "local-fallback":
         warnings.append("最近一次远端读取失败，服务正在使用本地 fallback，写入不会覆盖远端数据。")
     if supabase_configured and not supabase_writable:
@@ -1355,6 +1408,12 @@ def storage_runtime_status(state=None):
             "dataDir": str(DATA_DIR),
         },
         "supabase": {
+            "configured": supabase_diagnostics["configured"],
+            "host": supabase_diagnostics["host"],
+            "hostLooksSupabase": supabase_diagnostics["hostLooksSupabase"],
+            "hostLooksPlaceholder": supabase_diagnostics["hostLooksPlaceholder"],
+            "hasServiceRoleKey": supabase_diagnostics["hasServiceRoleKey"],
+            "configIssue": supabase_diagnostics["issue"],
             "table": SUPABASE_STATE_TABLE if supabase_configured else "",
             "rowId": SUPABASE_STATE_ROW_ID if supabase_configured else "",
             "timeoutSeconds": SUPABASE_TIMEOUT_SECONDS,

@@ -111,6 +111,47 @@ class PersistenceRecoveryTests(FitHubApiTestCase):
 
 
 class SupabaseRecoveryUnitTests(unittest.TestCase):
+    def test_supabase_url_diagnostics_rejects_placeholder_project_url(self):
+        original_url = server.SUPABASE_URL
+        original_key = server.SUPABASE_SERVICE_ROLE_KEY
+        original_meta = deepcopy(server.STATE_RUNTIME_META)
+
+        try:
+            server.SUPABASE_URL = "https://你的项目ref.supabase.co"
+            server.SUPABASE_SERVICE_ROLE_KEY = "service-role-secret"
+            diagnostics = server.supabase_url_diagnostics()
+
+            self.assertTrue(diagnostics["hostLooksPlaceholder"])
+            self.assertIn("占位符", diagnostics["issue"])
+            self.assertFalse(server.supabase_config_valid())
+        finally:
+            server.SUPABASE_URL = original_url
+            server.SUPABASE_SERVICE_ROLE_KEY = original_key
+            server.STATE_RUNTIME_META.clear()
+            server.STATE_RUNTIME_META.update(original_meta)
+
+    def test_supabase_url_diagnostics_exposes_safe_host_without_key(self):
+        original_url = server.SUPABASE_URL
+        original_key = server.SUPABASE_SERVICE_ROLE_KEY
+        original_meta = deepcopy(server.STATE_RUNTIME_META)
+
+        try:
+            server.SUPABASE_URL = "https://abcdefghijklmnopqrst.supabase.co"
+            server.SUPABASE_SERVICE_ROLE_KEY = "service-role-secret"
+            diagnostics = server.supabase_url_diagnostics()
+            serialized = json.dumps(server.storage_runtime_status(server.initial_state()), ensure_ascii=False)
+
+            self.assertEqual(diagnostics["host"], "abcdefghijklmnopqrst.supabase.co")
+            self.assertTrue(diagnostics["hostLooksSupabase"])
+            self.assertEqual(diagnostics["issue"], "")
+            self.assertNotIn("service-role-secret", serialized)
+            self.assertIn("abcdefghijklmnopqrst.supabase.co", serialized)
+        finally:
+            server.SUPABASE_URL = original_url
+            server.SUPABASE_SERVICE_ROLE_KEY = original_key
+            server.STATE_RUNTIME_META.clear()
+            server.STATE_RUNTIME_META.update(original_meta)
+
     def test_supabase_refresh_retry_is_rate_limited_after_fallback_failure(self):
         original_enabled = server.supabase_storage_enabled
         original_load = server.load_state_from_supabase
