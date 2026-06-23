@@ -55,6 +55,21 @@ def ensure(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
+def storage_diagnostic_suffix(storage_payload: dict) -> str:
+    supabase = storage_payload.get("supabase") or {}
+    remote_rows = storage_payload.get("remoteRows") or {}
+    details = []
+    if supabase.get("host"):
+        details.append(f"host={supabase.get('host')}")
+    if "hasServiceRoleKey" in supabase:
+        details.append(f"hasServiceRoleKey={bool(supabase.get('hasServiceRoleKey'))}")
+    if supabase.get("configIssue"):
+        details.append(f"configIssue={supabase.get('configIssue')}")
+    if remote_rows.get("error"):
+        details.append(f"remoteError={remote_rows.get('error')}")
+    return f" ({'; '.join(details)})" if details else ""
+
+
 def ensure_elapsed(label: str, elapsed: float, max_seconds: float) -> None:
     if max_seconds <= 0:
         return
@@ -78,32 +93,36 @@ def validate_storage_status(
     remote_rows = storage_payload.get("remoteRows") or {}
     status = str(storage_payload.get("status") or "").lower()
     loaded_from = storage.get("loadedFrom")
+    diagnostic_suffix = storage_diagnostic_suffix(storage_payload)
 
     if not allow_local_storage:
         ensure(
             storage.get("supabaseConfigured"),
-            "Production smoke requires persistent remote storage. Use --allow-local-storage only for dev.",
+            "Production smoke requires persistent remote storage. Use --allow-local-storage only for dev."
+            + diagnostic_suffix,
         )
         ensure(
             loaded_from != "local-fallback",
-            "Backend is serving from local fallback; persistent writes are protected but production is degraded.",
+            "Backend is serving from local fallback; persistent writes are protected but production is degraded."
+            + diagnostic_suffix,
         )
         ensure(
             status in {"ok", "healthy", ""},
-            f"Backend storage status is {status or 'unknown'}, expected ok.",
+            f"Backend storage status is {status or 'unknown'}, expected ok." + diagnostic_suffix,
         )
         ensure(
             not storage.get("remoteWriteProtected"),
-            "Backend writes are remote-protected; production data may not persist.",
+            "Backend writes are remote-protected; production data may not persist." + diagnostic_suffix,
         )
         ensure(
             storage.get("supabaseWritable"),
-            "Persistent storage is not writable; users may lose new registrations or interactions.",
+            "Persistent storage is not writable; users may lose new registrations or interactions." + diagnostic_suffix,
         )
         if "reachable" in remote_rows:
             ensure(
                 remote_rows.get("reachable"),
-                f"Remote storage diagnostics are unreachable: {remote_rows.get('error') or 'unknown error'}",
+                f"Remote storage diagnostics are unreachable: {remote_rows.get('error') or 'unknown error'}"
+                + diagnostic_suffix,
             )
 
     if min_real_profiles > 0:

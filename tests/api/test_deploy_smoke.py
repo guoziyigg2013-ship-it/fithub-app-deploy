@@ -50,9 +50,11 @@ class DeploySmokeGuardTests(unittest.TestCase):
                 "supabaseWritable": False,
                 "remoteWriteProtected": True,
             },
+            supabase={"host": "example.supabase.co", "hasServiceRoleKey": True},
+            remoteRows={"reachable": False, "error": "dns failed"},
         )
 
-        with self.assertRaisesRegex(RuntimeError, "local fallback"):
+        with self.assertRaisesRegex(RuntimeError, "local fallback.*example\\.supabase\\.co.*dns failed"):
             deploy_smoke.validate_storage_status(payload, min_real_profiles=1)
 
     def test_storage_status_rejects_unwritable_remote_storage(self):
