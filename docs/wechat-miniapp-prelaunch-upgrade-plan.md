@@ -43,6 +43,18 @@ python3 -m py_compile server.py
 node --check app.js
 ```
 
+正式提审前还必须通过生产配置检查：
+
+```bash
+python3 scripts/check_miniprogram.py --production
+```
+
+该检查会拦截：
+
+- `project.config.json` 仍使用 `touristappid`
+- `wechat-miniprogram/config.js` 仍指向 Render / Pages 测试域名
+- `apiBase` 不是 HTTPS 或没有指向 `/api`
+
 失败：
 
 ```bash

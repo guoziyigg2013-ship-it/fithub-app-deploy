@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -48,11 +50,50 @@ def check_js_files() -> int:
     return 0
 
 
+def read_config_api_base() -> str:
+    config_text = (MINIAPP_ROOT / "config.js").read_text(encoding="utf-8")
+    match = re.search(r"apiBase\s*:\s*[\"']([^\"']+)[\"']", config_text)
+    return match.group(1).strip() if match else ""
+
+
+def check_production_config() -> int:
+    project_config = json.loads((MINIAPP_ROOT / "project.config.json").read_text(encoding="utf-8"))
+    appid = str(project_config.get("appid") or "").strip()
+    if not appid or appid == "touristappid":
+        return fail("Production mini program must use a real AppID, not touristappid.")
+    if not appid.startswith("wx"):
+        return fail("Production mini program AppID should start with wx.")
+
+    api_base = read_config_api_base()
+    if not api_base:
+        return fail("wechat-miniprogram/config.js must define apiBase.")
+    if not api_base.startswith("https://"):
+        return fail("Production apiBase must use HTTPS.")
+    if "onrender.com" in api_base or "pages.dev" in api_base:
+        return fail("Production apiBase must use your approved custom backend domain, not Render or Pages.")
+    if not api_base.rstrip("/").endswith("/api"):
+        return fail("Production apiBase should point to the /api root.")
+
+    return 0
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Validate the FitHub WeChat Mini Program scaffold.")
+    parser.add_argument(
+        "--production",
+        action="store_true",
+        help="Also enforce pre-review production settings such as real AppID and approved HTTPS API domain.",
+    )
+    args = parser.parse_args()
+
     if not MINIAPP_ROOT.exists():
         return fail("wechat-miniprogram directory does not exist.")
     for check in [check_json_files, check_pages, check_js_files]:
         result = check()
+        if result:
+            return result
+    if args.production:
+        result = check_production_config()
         if result:
             return result
     print("WeChat Mini Program scaffold check passed.")
