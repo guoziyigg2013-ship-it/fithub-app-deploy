@@ -52,6 +52,38 @@ function post(path, data) {
   return request(path, { method: "POST", data });
 }
 
+function uploadFile(path, filePath, formData = {}) {
+  const sessionId = getSessionId();
+  return new Promise((resolve, reject) => {
+    wx.uploadFile({
+      url: `${config.apiBase}${path}`,
+      filePath,
+      name: "file",
+      formData: { sessionId, ...formData },
+      success(response) {
+        let body = {};
+        try {
+          body = JSON.parse(response.data || "{}");
+        } catch (error) {
+          reject(new Error("上传响应无法解析"));
+          return;
+        }
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          if (body.session && body.session.id) {
+            setSessionId(body.session.id);
+          }
+          resolve(body);
+          return;
+        }
+        reject(new Error(body.error || "上传失败，请稍后再试"));
+      },
+      fail(error) {
+        reject(new Error(error.errMsg || "上传失败，请检查网络"));
+      }
+    });
+  });
+}
+
 function toast(message) {
   wx.showToast({
     title: message,
@@ -84,6 +116,7 @@ module.exports = {
   bootstrap,
   post,
   request,
+  uploadFile,
   toast,
   currentProfile,
   listedProfiles,

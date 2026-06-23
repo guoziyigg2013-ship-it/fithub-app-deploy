@@ -74,6 +74,13 @@ def check_production_config() -> int:
     if not api_base.rstrip("/").endswith("/api"):
         return fail("Production apiBase should point to the /api root.")
 
+    publish_js = (MINIAPP_ROOT / "pages" / "publish" / "index.js").read_text(encoding="utf-8")
+    media_js = (MINIAPP_ROOT / "utils" / "media.js").read_text(encoding="utf-8")
+    if "/media/upload-file" not in publish_js or "wx.uploadFile" not in (MINIAPP_ROOT / "utils" / "api.js").read_text(encoding="utf-8"):
+        return fail("Production media publishing must use wx.uploadFile and /media/upload-file.")
+    if "fileToDataUrl" in publish_js or "encoding: \"base64\"" in media_js or "encoding: 'base64'" in media_js:
+        return fail("Production mini program must not publish media through base64 JSON uploads.")
+
     return 0
 
 

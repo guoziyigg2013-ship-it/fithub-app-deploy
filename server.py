@@ -80,6 +80,10 @@ SUPABASE_MEDIA_BUCKET = (os.getenv("FITHUB_MEDIA_BUCKET") or "fithub-media").str
 MEDIA_IMAGE_LIMIT_BYTES = int(os.getenv("FITHUB_IMAGE_UPLOAD_LIMIT_BYTES") or str(10 * 1024 * 1024))
 MEDIA_VIDEO_LIMIT_BYTES = int(os.getenv("FITHUB_VIDEO_UPLOAD_LIMIT_BYTES") or str(8 * 1024 * 1024))
 MEDIA_THUMB_LIMIT_BYTES = int(os.getenv("FITHUB_THUMB_UPLOAD_LIMIT_BYTES") or str(2 * 1024 * 1024))
+MEDIA_MULTIPART_LIMIT_BYTES = int(
+    os.getenv("FITHUB_MULTIPART_UPLOAD_LIMIT_BYTES")
+    or str(max(MEDIA_IMAGE_LIMIT_BYTES, MEDIA_VIDEO_LIMIT_BYTES) + MEDIA_THUMB_LIMIT_BYTES + 1024 * 1024)
+)
 MEDIA_MAINTENANCE_TOKEN = (os.getenv("FITHUB_MEDIA_MAINTENANCE_TOKEN") or "").strip()
 ADMIN_TOKEN = (os.getenv("FITHUB_ADMIN_TOKEN") or MEDIA_MAINTENANCE_TOKEN).strip()
 PUBLIC_API_ORIGIN = (os.getenv("FITHUB_PUBLIC_API_ORIGIN") or "").strip().rstrip("/")
@@ -962,6 +966,75 @@ def upload_media_asset(data_url, *, file_name, category, asset_type, force_inlin
         "storagePath": object_path,
         "sizeBytes": len(binary),
     }
+
+
+def bytes_to_data_url(binary, content_type):
+    safe_content_type = str(content_type or "application/octet-stream").split(";")[0].strip() or "application/octet-stream"
+    encoded = base64.b64encode(binary or b"").decode("ascii")
+    return f"data:{safe_content_type};base64,{encoded}"
+
+
+def store_uploaded_media_from_data_url(
+    session,
+    data_url,
+    *,
+    file_name,
+    category,
+    asset_type,
+    thumbnail_data_url="",
+    thumbnail_name="",
+):
+    try:
+        media = upload_media_asset(
+            data_url,
+            file_name=file_name or "upload",
+            category=category or "posts",
+            asset_type=asset_type or "image",
+        )
+        if thumbnail_data_url:
+            thumb_media = upload_media_asset(
+                thumbnail_data_url,
+                file_name=thumbnail_name or file_name or "thumb.jpg",
+                category=f"{category or 'posts'}-thumbs",
+                asset_type="image",
+                max_bytes_override=MEDIA_THUMB_LIMIT_BYTES,
+            )
+            media["thumbnailUrl"] = thumb_media.get("url", "")
+            media["thumbnailName"] = thumb_media.get("name", "")
+            media["thumbnailContentType"] = thumb_media.get("contentType", "")
+            media["thumbnailStorageProvider"] = thumb_media.get("storageProvider", "")
+            media["thumbnailStoragePath"] = thumb_media.get("storagePath", "")
+            media["thumbnailSizeBytes"] = thumb_media.get("sizeBytes", 0)
+        if session:
+            remember_session_draft_media(session, media)
+        return {"media": media, "config": runtime_config()}
+    except Exception as exc:  # noqa: BLE001
+        storage_log(f"Media upload failed, falling back to inline storage: {exc}")
+        fallback = upload_media_asset(
+            data_url,
+            file_name=file_name or "upload",
+            category=category or "posts",
+            asset_type=asset_type or "image",
+            force_inline=True,
+        )
+        if thumbnail_data_url:
+            thumb_fallback = upload_media_asset(
+                thumbnail_data_url,
+                file_name=thumbnail_name or file_name or "thumb.jpg",
+                category=f"{category or 'posts'}-thumbs",
+                asset_type="image",
+                force_inline=True,
+                max_bytes_override=MEDIA_THUMB_LIMIT_BYTES,
+            )
+            fallback["thumbnailUrl"] = thumb_fallback.get("url", "")
+            fallback["thumbnailName"] = thumb_fallback.get("name", "")
+            fallback["thumbnailContentType"] = thumb_fallback.get("contentType", "")
+            fallback["thumbnailStorageProvider"] = thumb_fallback.get("storageProvider", "")
+            fallback["thumbnailStoragePath"] = thumb_fallback.get("storagePath", "")
+            fallback["thumbnailSizeBytes"] = thumb_fallback.get("sizeBytes", 0)
+        if session:
+            remember_session_draft_media(session, fallback)
+        return {"media": fallback, "config": runtime_config()}
 
 
 def iter_media_storage_paths(media_item):
@@ -5424,10 +5497,61 @@ class FitHubHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
-    def _read_json(self):
+    def _read_raw_body(self, max_bytes=None):
         length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(length) if length else b"{}"
+        if max_bytes and length > max_bytes:
+            raise ValueError("上传内容过大，请压缩后再试。")
+        return self.rfile.read(length) if length else b""
+
+    def _read_json(self):
+        raw = self._read_raw_body()
         return json.loads(raw.decode("utf-8") or "{}")
+
+    def _read_multipart_form(self):
+        content_type = self.headers.get("Content-Type", "")
+        match = re.search(r"boundary=(?:\"([^\"]+)\"|([^;]+))", content_type)
+        if not match:
+            raise ValueError("上传请求缺少 multipart boundary。")
+        boundary = (match.group(1) or match.group(2) or "").strip()
+        if not boundary:
+            raise ValueError("上传请求 boundary 无效。")
+
+        raw = self._read_raw_body(MEDIA_MULTIPART_LIMIT_BYTES)
+        delimiter = f"--{boundary}".encode("utf-8")
+        fields = {}
+        files = {}
+        for part in raw.split(delimiter):
+            part = part.strip(b"\r\n")
+            if not part or part == b"--":
+                continue
+            if part.endswith(b"--"):
+                part = part[:-2].rstrip(b"\r\n")
+            if b"\r\n\r\n" not in part:
+                continue
+            raw_headers, body = part.split(b"\r\n\r\n", 1)
+            headers = {}
+            for line in raw_headers.decode("utf-8", errors="replace").split("\r\n"):
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                headers[key.strip().lower()] = value.strip()
+
+            disposition = headers.get("content-disposition", "")
+            name_match = re.search(r'name="([^"]+)"', disposition)
+            if not name_match:
+                continue
+            field_name = name_match.group(1)
+            filename_match = re.search(r'filename="([^"]*)"', disposition)
+            if filename_match:
+                files[field_name] = {
+                    "filename": filename_match.group(1) or "upload",
+                    "contentType": headers.get("content-type") or "application/octet-stream",
+                    "body": body,
+                }
+            else:
+                fields[field_name] = body.decode("utf-8", errors="replace")
+
+        return fields, files
 
     def _write_json(self, payload, status=HTTPStatus.OK):
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -5502,7 +5626,56 @@ class FitHubHandler(BaseHTTPRequestHandler):
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
+    def _handle_media_upload_file(self):
+        try:
+            fields, files = self._read_multipart_form()
+        except ValueError as exc:
+            self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        session_id = fields.get("sessionId")
+
+        def action(state):
+            session = ensure_session(state, session_id) if session_id else None
+            upload = files.get("file")
+            if not upload or not upload.get("body"):
+                raise ValueError("请选择要上传的图片或视频。")
+
+            content_type = str(upload.get("contentType") or "application/octet-stream").split(";")[0].strip()
+            guessed_asset_type = "video" if content_type.startswith("video/") else "image"
+            asset_type = str(fields.get("assetType") or guessed_asset_type).strip().lower()
+            file_name = fields.get("fileName") or upload.get("filename") or ("wechat-video.mp4" if asset_type == "video" else "wechat-image.jpg")
+            category = str(fields.get("category") or "posts").strip() or "posts"
+            thumbnail_file = files.get("thumbnail") or files.get("thumb")
+            thumbnail_data_url = ""
+            thumbnail_name = ""
+            if thumbnail_file and thumbnail_file.get("body"):
+                thumbnail_data_url = bytes_to_data_url(
+                    thumbnail_file.get("body") or b"",
+                    thumbnail_file.get("contentType") or "image/jpeg",
+                )
+                thumbnail_name = thumbnail_file.get("filename") or "thumb.jpg"
+
+            return store_uploaded_media_from_data_url(
+                session,
+                bytes_to_data_url(upload.get("body") or b"", content_type),
+                file_name=file_name,
+                category=category,
+                asset_type=asset_type,
+                thumbnail_data_url=thumbnail_data_url,
+                thumbnail_name=thumbnail_name,
+            )
+
+        try:
+            self._write_json(self._with_state(action))
+        except ValueError as exc:
+            self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+
     def _handle_api_post(self, parsed):
+        if parsed.path == f"{API_PREFIX}/media/upload-file":
+            self._handle_media_upload_file()
+            return
+
         payload = self._read_json()
         session_id = payload.get("sessionId")
 
@@ -6119,61 +6292,15 @@ class FitHubHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{API_PREFIX}/media/upload":
             def action(state):
                 session = ensure_session(state, session_id) if session_id else None
-                try:
-                    media = upload_media_asset(
-                        payload.get("dataUrl"),
-                        file_name=payload.get("fileName") or "upload",
-                        category=str(payload.get("category") or "posts"),
-                        asset_type=str(payload.get("assetType") or "image"),
-                    )
-                    thumbnail_data_url = payload.get("thumbnailDataUrl")
-                    if thumbnail_data_url:
-                        thumb_name = payload.get("thumbnailName") or payload.get("fileName") or "thumb.jpg"
-                        thumb_media = upload_media_asset(
-                            thumbnail_data_url,
-                            file_name=thumb_name,
-                            category=f"{str(payload.get('category') or 'posts')}-thumbs",
-                            asset_type="image",
-                            max_bytes_override=MEDIA_THUMB_LIMIT_BYTES,
-                        )
-                        media["thumbnailUrl"] = thumb_media.get("url", "")
-                        media["thumbnailName"] = thumb_media.get("name", "")
-                        media["thumbnailContentType"] = thumb_media.get("contentType", "")
-                        media["thumbnailStorageProvider"] = thumb_media.get("storageProvider", "")
-                        media["thumbnailStoragePath"] = thumb_media.get("storagePath", "")
-                        media["thumbnailSizeBytes"] = thumb_media.get("sizeBytes", 0)
-                    if session:
-                        remember_session_draft_media(session, media)
-                    return {"media": media, "config": runtime_config()}
-                except Exception as exc:  # noqa: BLE001
-                    storage_log(f"Media upload failed, falling back to inline storage: {exc}")
-                    fallback = upload_media_asset(
-                        payload.get("dataUrl"),
-                        file_name=payload.get("fileName") or "upload",
-                        category=str(payload.get("category") or "posts"),
-                        asset_type=str(payload.get("assetType") or "image"),
-                        force_inline=True,
-                    )
-                    thumbnail_data_url = payload.get("thumbnailDataUrl")
-                    if thumbnail_data_url:
-                        thumb_name = payload.get("thumbnailName") or payload.get("fileName") or "thumb.jpg"
-                        thumb_fallback = upload_media_asset(
-                            thumbnail_data_url,
-                            file_name=thumb_name,
-                            category=f"{str(payload.get('category') or 'posts')}-thumbs",
-                            asset_type="image",
-                            force_inline=True,
-                            max_bytes_override=MEDIA_THUMB_LIMIT_BYTES,
-                        )
-                        fallback["thumbnailUrl"] = thumb_fallback.get("url", "")
-                        fallback["thumbnailName"] = thumb_fallback.get("name", "")
-                        fallback["thumbnailContentType"] = thumb_fallback.get("contentType", "")
-                        fallback["thumbnailStorageProvider"] = thumb_fallback.get("storageProvider", "")
-                        fallback["thumbnailStoragePath"] = thumb_fallback.get("storagePath", "")
-                        fallback["thumbnailSizeBytes"] = thumb_fallback.get("sizeBytes", 0)
-                    if session:
-                        remember_session_draft_media(session, fallback)
-                    return {"media": fallback, "config": runtime_config()}
+                return store_uploaded_media_from_data_url(
+                    session,
+                    payload.get("dataUrl"),
+                    file_name=payload.get("fileName") or "upload",
+                    category=str(payload.get("category") or "posts"),
+                    asset_type=str(payload.get("assetType") or "image"),
+                    thumbnail_data_url=payload.get("thumbnailDataUrl") or "",
+                    thumbnail_name=payload.get("thumbnailName") or payload.get("fileName") or "thumb.jpg",
+                )
 
             try:
                 self._write_json(self._with_state(action))

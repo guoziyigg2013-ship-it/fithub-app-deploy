@@ -1,6 +1,12 @@
 const api = require("../../utils/api");
 const mediaUtil = require("../../utils/media");
 
+function fileNameFromPath(path, mediaType) {
+  const fallback = mediaType === "video" ? "wechat-video.mp4" : "wechat-image.jpg";
+  const name = String(path || "").split("/").pop();
+  return name || fallback;
+}
+
 Page({
   data: {
     content: "",
@@ -52,10 +58,8 @@ Page({
     try {
       const uploadedMedia = [];
       for (const file of this.data.media) {
-        const dataUrl = await mediaUtil.fileToDataUrl(file, file.type);
-        const uploaded = await api.post("/media/upload", {
-          dataUrl,
-          fileName: file.type === "video" ? "wechat-video.mp4" : "wechat-image.jpg",
+        const uploaded = await api.uploadFile("/media/upload-file", file.tempFilePath, {
+          fileName: fileNameFromPath(file.tempFilePath, file.type),
           assetType: file.type === "video" ? "video" : "image",
           category: "posts"
         });

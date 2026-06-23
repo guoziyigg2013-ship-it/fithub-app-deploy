@@ -9,6 +9,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 
@@ -191,6 +192,46 @@ class ApiClient:
                 "thumbnailName": thumbnail_name,
             },
         )
+
+    def upload_media_file(self, binary, file_name="demo.jpg", content_type="image/jpeg", asset_type="image", category="posts"):
+        boundary = f"----FitHubTest{uuid.uuid4().hex}"
+        fields = {
+            "sessionId": self.session_id or "",
+            "fileName": file_name,
+            "assetType": asset_type,
+            "category": category,
+        }
+        chunks = []
+        for name, value in fields.items():
+            chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+            chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+            chunks.append(str(value).encode("utf-8"))
+            chunks.append(b"\r\n")
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        chunks.append(
+            (
+                f'Content-Disposition: form-data; name="file"; filename="{file_name}"\r\n'
+                f"Content-Type: {content_type}\r\n\r\n"
+            ).encode("utf-8")
+        )
+        chunks.append(binary)
+        chunks.append(b"\r\n")
+        chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+
+        request = urllib.request.Request(
+            f"{self.base_url}/api/media/upload-file",
+            data=b"".join(chunks),
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Connection": "close",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8") or "{}")
+            if response.status != 200:
+                raise AssertionError(f"POST /api/media/upload-file expected 200, got {response.status}: {payload}")
+            return payload
 
     def delete_media(self, items):
         return self.post("/api/media/delete", {"items": items})

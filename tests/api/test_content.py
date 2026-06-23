@@ -1,8 +1,30 @@
+import base64
+
 from server import build_supabase_public_media_url, collect_referenced_media_paths, extract_storage_path_from_public_url, initial_state
 from tests.api.support import FitHubApiTestCase
 
 
 class ContentRegressionTests(FitHubApiTestCase):
+    def test_multipart_media_upload_returns_reusable_asset_payload(self):
+        client = self.make_client()
+        tiny_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn0n8kAAAAASUVORK5CYII="
+        )
+        payload = client.upload_media_file(
+            tiny_png,
+            file_name="tiny-upload.png",
+            content_type="image/png",
+            asset_type="image",
+            category="posts",
+        )
+        media = payload.get("media") or {}
+
+        self.assertEqual(media.get("type"), "image")
+        self.assertEqual(media.get("name"), "tiny-upload.png")
+        self.assertEqual(media.get("contentType"), "image/png")
+        self.assertIn(media.get("storageProvider"), {"inline", "supabase"})
+        self.assertTrue(str(media.get("url") or "").startswith(("data:image/png", "https://")))
+
     def test_media_upload_returns_reusable_asset_payload(self):
         client = self.make_client()
         tiny_png = (

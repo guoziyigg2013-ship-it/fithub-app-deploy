@@ -4,7 +4,10 @@
   <view class="card publish-card">
     <textarea class="content-input" value="{{content}}" maxlength="500" placeholder="分享今天的训练、课程体验或动作心得" bindinput="onContentInput"></textarea>
     <view class="media-preview" wx:if="{{media.length}}">
-      <image wx:for="{{media}}" wx:key="tempFilePath" src="{{item.tempFilePath}}" class="preview" mode="aspectFill"></image>
+      <block wx:for="{{media}}" wx:key="tempFilePath">
+        <video wx:if="{{item.type === 'video'}}" src="{{item.tempFilePath}}" class="preview" controls="{{false}}" muted object-fit="cover"></video>
+        <image wx:else src="{{item.tempFilePath}}" class="preview" mode="aspectFill"></image>
+      </block>
     </view>
     <view class="space-between">
       <button class="ghost-button" bindtap="chooseMedia">图片 / 视频</button>
