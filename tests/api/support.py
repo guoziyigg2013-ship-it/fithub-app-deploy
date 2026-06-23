@@ -294,6 +294,13 @@ class ApiClient:
             expected_status=expected_status,
         )
 
+    def admin_export(self, token="test-maintenance-token", expected_status=200):
+        return self.request(
+            "GET",
+            f"/api/admin/export?token={urllib.parse.quote(token)}",
+            expected_status=expected_status,
+        )
+
     def request_account_deletion(self, reason="测试注销申请"):
         return self.post("/api/account/delete-request", {"reason": reason})
 

@@ -1,9 +1,18 @@
 import json
+import importlib.util
 import unittest
 from copy import deepcopy
+from pathlib import Path
 
 import server
 from tests.api.support import FitHubApiTestCase
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SNAPSHOT_PATH = ROOT / "scripts" / "production_snapshot.py"
+SNAPSHOT_SPEC = importlib.util.spec_from_file_location("production_snapshot", SNAPSHOT_PATH)
+production_snapshot = importlib.util.module_from_spec(SNAPSHOT_SPEC)
+SNAPSHOT_SPEC.loader.exec_module(production_snapshot)
 
 
 class PersistenceRecoveryTests(FitHubApiTestCase):
@@ -108,6 +117,67 @@ class PersistenceRecoveryTests(FitHubApiTestCase):
                 for thread in degraded_state.get("threads", [])
             )
         )
+
+    def test_admin_export_requires_token_and_contains_full_snapshot_metrics(self):
+        client = self.make_client()
+        phone = self.make_phone(72)
+        code = client.send_code(phone, purpose="register")["debugCode"]
+        registered = client.register_enthusiast(phone, "生产快照用户", code)
+        profile = self.current_profile(registered)
+        client.create_post(profile["id"], "这条动态用于生产快照。")
+
+        forbidden = client.admin_export(token="wrong-token", expected_status=403)
+        self.assertIn("error", forbidden)
+
+        exported = client.admin_export()
+        self.assertTrue(exported["ok"])
+        self.assertIn("exportedAt", exported)
+        self.assertGreaterEqual(exported["metrics"]["real_profiles"], 1)
+        self.assertGreaterEqual(exported["metrics"]["real_posts"], 1)
+        self.assertIn("state", exported)
+        self.assertIn(profile["id"], exported["state"]["profiles"])
+        serialized = json.dumps(exported, ensure_ascii=False)
+        self.assertNotIn("test-maintenance-token", serialized)
+
+    def test_production_snapshot_metric_comparison_rejects_regressions(self):
+        baseline = {
+            "metrics": {
+                "real_profiles": 3,
+                "phone_profiles": 3,
+                "accounts": 3,
+                "real_follows": 4,
+                "real_posts": 2,
+                "real_bookings": 1,
+                "real_threads": 1,
+                "real_checkins": 2,
+            }
+        }
+        current = {
+            "metrics": {
+                "real_profiles": 3,
+                "phone_profiles": 3,
+                "accounts": 3,
+                "real_follows": 2,
+                "real_posts": 2,
+                "real_bookings": 1,
+                "real_threads": 0,
+                "real_checkins": 2,
+            }
+        }
+
+        failures = production_snapshot.compare_metrics(
+            production_snapshot.extract_metrics(current),
+            production_snapshot.extract_metrics(baseline),
+        )
+        self.assertTrue(any("real_follows" in item for item in failures))
+        self.assertTrue(any("real_threads" in item for item in failures))
+
+        allowed = production_snapshot.compare_metrics(
+            production_snapshot.extract_metrics(current),
+            production_snapshot.extract_metrics(baseline),
+            allowances={"real_follows": 2, "real_threads": 1},
+        )
+        self.assertEqual(allowed, [])
 
 
 class SupabaseRecoveryUnitTests(unittest.TestCase):

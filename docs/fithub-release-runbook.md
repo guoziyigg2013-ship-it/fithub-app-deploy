@@ -60,6 +60,16 @@ git commit -m "..."
 git push
 ```
 
+### 4. 大升级前做生产数据快照
+
+如果这次发布会影响账号、关注、动态、消息、预约、打卡、媒体或存储配置，先执行：
+
+```bash
+FITHUB_ADMIN_TOKEN=你的管理员token npm run snapshot:prod
+```
+
+生成的快照会写入本地 `backups/` 目录，该目录已被 `.gitignore` 忽略，不会被误提交。请记录快照文件路径，发布后用于对比。
+
 ## 二、发布中
 
 ### 1. 后端发布
@@ -95,6 +105,18 @@ npm run check:smoke
 - `healthz` 返回 `ok`
 - `storage/status` 显示后端仍在使用 Supabase 持久化，不是本地 JSON fallback
 - `bootstrap` 结构正常
+
+### 1.5 对比生产数据快照
+
+如果发布前已经生成快照，发布后执行：
+
+```bash
+FITHUB_ADMIN_TOKEN=你的管理员token \
+python3 scripts/production_snapshot.py \
+  --compare backups/fithub-production-snapshot-旧版本时间.json
+```
+
+这一步会拦截真实用户、关注、动态、私信、预约、打卡等关键计数异常下降。除非确认是人工删除，否则不要使用 `--allow-decrease` 绕过。
 
 ### 2. 手工确认最小 5 条
 
@@ -147,7 +169,8 @@ npm run check:smoke
 4. Render 发布
 5. Pages 发布
 6. `npm run check:smoke`
-7. 手工最小 5 条验收
+7. 生产快照对比
+8. 手工最小 5 条验收
 
 ## 五、当前第一阶段完成标准
 

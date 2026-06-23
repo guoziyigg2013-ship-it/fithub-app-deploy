@@ -30,6 +30,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the complete FitHub acceptance checklist.")
     parser.add_argument("--skip-smoke", action="store_true", help="Skip fixed-domain smoke test.")
     parser.add_argument("--skip-media-report", action="store_true", help="Skip read-only media storage report.")
+    parser.add_argument("--skip-production-snapshot", action="store_true", help="Skip admin-token production snapshot.")
+    parser.add_argument("--snapshot-baseline", default="", help="Compare production metrics with this previous snapshot file.")
     args = parser.parse_args()
 
     steps: list[tuple[str, list[str]]] = [
@@ -39,6 +41,11 @@ def main() -> int:
         steps.append(("Fixed-domain smoke gate", ["python3", "scripts/deploy_smoke.py"]))
     if not args.skip_media_report:
         steps.append(("Media storage read-only report", ["python3", "scripts/media_maintenance.py"]))
+    if not args.skip_production_snapshot:
+        snapshot_cmd = ["python3", "scripts/production_snapshot.py"]
+        if args.snapshot_baseline:
+            snapshot_cmd.extend(["--compare", args.snapshot_baseline])
+        steps.append(("Production data snapshot", snapshot_cmd))
 
     print("FitHub final acceptance")
     print(f"Workspace: {ROOT}")

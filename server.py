@@ -4840,6 +4840,17 @@ def build_moderation_dashboard(state):
     }
 
 
+def build_admin_export(state):
+    snapshot_state = sanitize_state(deepcopy(state))
+    return {
+        "ok": True,
+        "exportedAt": iso_at(),
+        "metrics": state_integrity_metrics(snapshot_state),
+        "storage": storage_runtime_status(snapshot_state),
+        "state": snapshot_state,
+    }
+
+
 def moderation_admin_authorized(headers, query=None, payload=None):
     expected_token = ADMIN_TOKEN
     if not expected_token:
@@ -5696,6 +5707,14 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 return
 
             self._write_json(self._read_state(build_moderation_dashboard))
+            return
+        if parsed.path == f"{API_PREFIX}/admin/export":
+            query = parse_qs(parsed.query)
+            if not moderation_admin_authorized(self.headers, query=query):
+                self._write_json({"error": "没有权限导出生产数据。"}, status=HTTPStatus.FORBIDDEN)
+                return
+
+            self._write_json(self._read_state(build_admin_export))
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 

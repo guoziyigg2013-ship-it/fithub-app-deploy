@@ -7,6 +7,7 @@
     "check:preflight": "python3 scripts/preflight_check.py",
     "check:smoke": "python3 scripts/deploy_smoke.py",
     "check:final": "python3 scripts/final_acceptance.py",
+    "snapshot:prod": "python3 scripts/production_snapshot.py",
     "media:report": "python3 scripts/media_maintenance.py",
     "media:clean": "python3 scripts/media_maintenance.py --delete",
     "test:api": "python3 -m unittest discover -s tests/api -p 'test_*.py' -v",
