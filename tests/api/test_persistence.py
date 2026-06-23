@@ -111,6 +111,46 @@ class PersistenceRecoveryTests(FitHubApiTestCase):
 
 
 class SupabaseRecoveryUnitTests(unittest.TestCase):
+    def test_supabase_refresh_retry_is_rate_limited_after_fallback_failure(self):
+        original_enabled = server.supabase_storage_enabled
+        original_load = server.load_state_from_supabase
+        original_cooldown = server.SUPABASE_REFRESH_COOLDOWN_SECONDS
+        original_meta = deepcopy(server.STATE_RUNTIME_META)
+        calls = []
+
+        def fake_load():
+            calls.append(server.iso_at())
+            raise RuntimeError("dns failed")
+
+        try:
+            server.supabase_storage_enabled = lambda: True
+            server.load_state_from_supabase = fake_load
+            server.SUPABASE_REFRESH_COOLDOWN_SECONDS = 60
+            server.STATE_RUNTIME_META.update(
+                {
+                    "loaded_from": "local-fallback",
+                    "last_supabase_refresh_attempt": 0.0,
+                    "last_supabase_refresh_attempt_at": "",
+                    "last_supabase_refresh_error": "",
+                }
+            )
+
+            self.assertFalse(server.refresh_state_cache_from_supabase())
+            self.assertEqual(len(calls), 1)
+            self.assertIn("dns failed", server.STATE_RUNTIME_META["last_supabase_refresh_error"])
+
+            self.assertFalse(server.refresh_state_cache_from_supabase())
+            self.assertEqual(len(calls), 1)
+
+            self.assertFalse(server.refresh_state_cache_from_supabase(force=True))
+            self.assertEqual(len(calls), 2)
+        finally:
+            server.supabase_storage_enabled = original_enabled
+            server.load_state_from_supabase = original_load
+            server.SUPABASE_REFRESH_COOLDOWN_SECONDS = original_cooldown
+            server.STATE_RUNTIME_META.clear()
+            server.STATE_RUNTIME_META.update(original_meta)
+
     def test_supabase_backup_pruning_keeps_latest_and_retention_window(self):
         original_enabled = server.supabase_storage_enabled
         original_request = server.supabase_request

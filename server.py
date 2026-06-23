@@ -34,6 +34,17 @@ def read_int_env(name, default, minimum=None):
     return value
 
 
+def read_float_env(name, default, minimum=None):
+    raw_value = os.getenv(name)
+    try:
+        value = float(str(raw_value if raw_value is not None else default).strip())
+    except (TypeError, ValueError):
+        value = float(default)
+    if minimum is not None:
+        value = max(float(minimum), value)
+    return value
+
+
 def normalize_url_prefix(raw_value):
     value = (raw_value or "").strip()
     if not value or value == "/":
@@ -56,6 +67,7 @@ SUPABASE_SERVICE_ROLE_KEY = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip
 SUPABASE_STATE_TABLE = (os.getenv("FITHUB_SUPABASE_TABLE") or "fithub_app_state").strip()
 SUPABASE_STATE_ROW_ID = (os.getenv("FITHUB_SUPABASE_ROW_ID") or "primary").strip()
 SUPABASE_TIMEOUT_SECONDS = float(os.getenv("FITHUB_SUPABASE_TIMEOUT") or "12")
+SUPABASE_REFRESH_COOLDOWN_SECONDS = read_float_env("FITHUB_SUPABASE_REFRESH_COOLDOWN_SECONDS", 30, minimum=0)
 SUPABASE_BACKUP_RETENTION = read_int_env("FITHUB_SUPABASE_BACKUP_RETENTION", 96, minimum=4)
 SUPABASE_BACKUP_PRUNE_INTERVAL_SECONDS = read_int_env("FITHUB_SUPABASE_PRUNE_INTERVAL_SECONDS", 3600, minimum=60)
 SUPABASE_BACKUP_PREFIX = f"{SUPABASE_STATE_ROW_ID}-backup"
@@ -162,6 +174,9 @@ STATE_RUNTIME_META = {
     "last_known_remote_signal_score": 0,
     "remote_repair_required": False,
     "supabase_config_valid": True,
+    "last_supabase_refresh_attempt": 0.0,
+    "last_supabase_refresh_attempt_at": "",
+    "last_supabase_refresh_error": "",
 }
 MAX_INLINE_AVATAR_CHARS = 120_000
 MAX_INLINE_MEDIA_CHARS = 12_000_000
@@ -1343,6 +1358,9 @@ def storage_runtime_status(state=None):
             "table": SUPABASE_STATE_TABLE if supabase_configured else "",
             "rowId": SUPABASE_STATE_ROW_ID if supabase_configured else "",
             "timeoutSeconds": SUPABASE_TIMEOUT_SECONDS,
+            "refreshCooldownSeconds": SUPABASE_REFRESH_COOLDOWN_SECONDS,
+            "lastRefreshAttemptAt": STATE_RUNTIME_META.get("last_supabase_refresh_attempt_at") or "",
+            "lastRefreshError": str(STATE_RUNTIME_META.get("last_supabase_refresh_error") or "")[:240],
             "backupRetention": SUPABASE_BACKUP_RETENTION,
             "backupPruneIntervalSeconds": SUPABASE_BACKUP_PRUNE_INTERVAL_SECONDS,
         },
@@ -3781,12 +3799,25 @@ def save_state(state):
         json.dump(state, handle, ensure_ascii=False, indent=2)
 
 
-def refresh_state_cache_from_supabase():
+def refresh_state_cache_from_supabase(force=False):
     global STATE_CACHE
     if not supabase_storage_enabled():
         return False
     if STATE_RUNTIME_META.get("loaded_from") != "local-fallback":
         return False
+
+    current_ts = time.monotonic()
+    last_attempt = float(STATE_RUNTIME_META.get("last_supabase_refresh_attempt") or 0)
+    if (
+        not force
+        and SUPABASE_REFRESH_COOLDOWN_SECONDS > 0
+        and last_attempt
+        and current_ts - last_attempt < SUPABASE_REFRESH_COOLDOWN_SECONDS
+    ):
+        return False
+
+    STATE_RUNTIME_META["last_supabase_refresh_attempt"] = current_ts
+    STATE_RUNTIME_META["last_supabase_refresh_attempt_at"] = iso_at()
 
     try:
         state = load_state_from_supabase()
@@ -3801,9 +3832,11 @@ def refresh_state_cache_from_supabase():
             save_state_to_supabase(state)
         STATE_CACHE = sanitize_state(state)
         set_runtime_storage_state("supabase", True, STATE_CACHE)
+        STATE_RUNTIME_META["last_supabase_refresh_error"] = ""
         storage_log("Recovered state cache from Supabase after earlier local fallback.")
         return True
     except Exception as exc:
+        STATE_RUNTIME_META["last_supabase_refresh_error"] = str(exc)
         storage_log(f"Supabase refresh retry failed: {exc}")
         return False
 
