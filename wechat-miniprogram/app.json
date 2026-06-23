@@ -4,7 +4,8 @@
     "pages/discover/index",
     "pages/publish/index",
     "pages/booking/index",
-    "pages/me/index"
+    "pages/me/index",
+    "pages/legal/index"
   ],
   "window": {
     "navigationBarTitleText": "FitHub 健身圈",

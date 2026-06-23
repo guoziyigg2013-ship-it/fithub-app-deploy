@@ -2,6 +2,31 @@ from tests.api.support import FitHubApiTestCase
 
 
 class AuthRegressionTests(FitHubApiTestCase):
+    def test_account_deletion_request_surfaces_in_admin_dashboard(self):
+        phone = self.make_phone(88)
+        client = self.make_client()
+        code = client.send_code(phone, purpose="register")["debugCode"]
+        client.register_enthusiast(phone, "注销申请用户", code)
+
+        payload = client.request_account_deletion("我想注销测试账号")
+        deletion_request = payload.get("deletionRequest") or {}
+
+        self.assertEqual(deletion_request.get("status"), "pending")
+        self.assertEqual(deletion_request.get("phoneMasked"), "132****0088")
+        self.assertTrue(deletion_request.get("profiles"))
+
+        dashboard = client.admin_moderation()
+        self.assertEqual(dashboard["summary"]["pendingDeletionRequests"], 1)
+        self.assertTrue(any(item.get("id") == deletion_request["id"] for item in dashboard.get("deletionRequests", [])))
+
+        resolved = client.resolve_moderation_item(
+            deletion_request["id"],
+            kind="deletion",
+            status="resolved",
+            note="测试已处理",
+        )
+        self.assertEqual(resolved["summary"]["pendingDeletionRequests"], 0)
+
     def test_register_and_login_roundtrip_for_enthusiast(self):
         phone = self.make_phone(1)
         register_client = self.make_client()

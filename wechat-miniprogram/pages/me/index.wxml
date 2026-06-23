@@ -15,6 +15,14 @@
     </view>
   </view>
 
+  <view class="card compliance-card">
+    <text class="section-title">协议与安全</text>
+    <button class="link-row" data-type="privacy" bindtap="openLegal">隐私政策</button>
+    <button class="link-row" data-type="agreement" bindtap="openLegal">用户协议</button>
+    <button class="link-row" data-type="deletion" bindtap="openLegal">账号注销说明</button>
+    <button wx:if="{{profile}}" class="danger-row" bindtap="requestDeletion">提交账号注销申请</button>
+  </view>
+
   <view wx:else class="card login-card">
     <text class="login-title">登录 / 注册</text>
     <text class="muted">小程序支持微信登录，也可以继续用手机号验证码登录。</text>

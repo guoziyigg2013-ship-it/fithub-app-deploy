@@ -81,6 +81,14 @@ def check_production_config() -> int:
     if "fileToDataUrl" in publish_js or "encoding: \"base64\"" in media_js or "encoding: 'base64'" in media_js:
         return fail("Production mini program must not publish media through base64 JSON uploads.")
 
+    app_json = json.loads((MINIAPP_ROOT / "app.json").read_text(encoding="utf-8"))
+    pages = set(app_json.get("pages") or [])
+    if "pages/legal/index" not in pages:
+        return fail("Production mini program must include in-app privacy, terms, and deletion guidance page.")
+    me_page = (MINIAPP_ROOT / "pages" / "me" / "index.js").read_text(encoding="utf-8")
+    if "/account/delete-request" not in me_page:
+        return fail("Production mini program must expose an account deletion request entry.")
+
     return 0
 
 

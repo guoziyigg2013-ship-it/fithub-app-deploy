@@ -72,3 +72,40 @@
 .full {
   width: 100%;
 }
+
+.compliance-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-top: 24rpx;
+}
+
+.section-title {
+  color: #171717;
+  font-size: 30rpx;
+  font-weight: 900;
+  margin-bottom: 6rpx;
+}
+
+.link-row,
+.danger-row {
+  min-height: 78rpx;
+  padding: 0 24rpx;
+  border: 0;
+  border-radius: 22rpx;
+  background: #faf5ee;
+  color: #7c5a34;
+  font-size: 28rpx;
+  line-height: 78rpx;
+  text-align: left;
+}
+
+.link-row::after,
+.danger-row::after {
+  border: 0;
+}
+
+.danger-row {
+  background: #fff4ec;
+  color: #d36b17;
+}

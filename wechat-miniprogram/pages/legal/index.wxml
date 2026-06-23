@@ -1,0 +1,7 @@
+<view class="page">
+  <text class="eyebrow">{{doc.eyebrow}}</text>
+  <view class="title">{{doc.title}}</view>
+  <view class="card legal-card">
+    <view wx:for="{{doc.body}}" wx:key="*this" class="paragraph">{{item}}</view>
+  </view>
+</view>

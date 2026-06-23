@@ -440,6 +440,7 @@ def sanitize_state(state):
     state.setdefault("reports", [])
     state.setdefault("moderationQueue", [])
     state.setdefault("adminActions", [])
+    state.setdefault("deletionRequests", [])
     state.setdefault("blocks", [])
     for profile in state.get("profiles", {}).values():
         profile["avatarImage"] = compact_avatar_image(profile.get("avatarImage"), profile.get("role", "enthusiast"))
@@ -3840,6 +3841,7 @@ def initial_state():
         "reports": [],
         "moderationQueue": [],
         "adminActions": [],
+        "deletionRequests": [],
     }
 
 
@@ -4748,21 +4750,92 @@ def serialize_moderation_item(state, item):
     }
 
 
+def serialize_deletion_request(state, item):
+    profile_ids = [str(profile_id or "").strip() for profile_id in item.get("profileIds", []) if str(profile_id or "").strip()]
+    profiles = []
+    for profile_id in profile_ids:
+        brief = serialize_profile_brief(state, profile_id)
+        if brief:
+            profiles.append(brief)
+    return {
+        **item,
+        "profiles": profiles,
+    }
+
+
+def create_account_deletion_request(state, session, reason=""):
+    normalize_session_profiles(state, session)
+    account_ids = [str(account_id or "").strip() for account_id in session.get("managedAccountIds", []) if str(account_id or "").strip()]
+    current_profile_id = str(session.get("currentActorProfileId") or "").strip()
+    current_profile = state.get("profiles", {}).get(current_profile_id) if current_profile_id else None
+    if current_profile and current_profile.get("accountId") and current_profile["accountId"] not in account_ids:
+        account_ids.insert(0, current_profile["accountId"])
+
+    account = None
+    for account_id in account_ids:
+        candidate = ensure_account_registry(state).get(account_id)
+        if candidate:
+            account = candidate
+            break
+    if not account:
+        raise ValueError("请先登录后再提交账号注销申请。")
+
+    account_id = account["id"]
+    profile_ids = [
+        profile_id
+        for profile_id in (account.get("profilesByRole") or {}).values()
+        if profile_id and profile_id in state.get("profiles", {})
+    ]
+    request_reason = str(reason or "").strip()[:500]
+    existing = next(
+        (
+            item
+            for item in state.setdefault("deletionRequests", [])
+            if item.get("accountId") == account_id and item.get("status", "pending") == "pending"
+        ),
+        None,
+    )
+    if existing:
+        existing["reason"] = request_reason or existing.get("reason", "")
+        existing["updatedAt"] = iso_at()
+        existing["profileIds"] = profile_ids
+        return existing
+
+    item = {
+        "id": f"delete-request-{uuid.uuid4().hex[:10]}",
+        "accountId": account_id,
+        "phoneMasked": mask_phone(account.get("phone", "")),
+        "profileIds": profile_ids,
+        "reason": request_reason,
+        "status": "pending",
+        "createdAt": iso_at(),
+        "updatedAt": iso_at(),
+    }
+    state.setdefault("deletionRequests", []).insert(0, item)
+    del state["deletionRequests"][200:]
+    return item
+
+
 def build_moderation_dashboard(state):
     reports = state.setdefault("reports", [])
     queue = state.setdefault("moderationQueue", [])
+    deletion_requests = state.setdefault("deletionRequests", [])
     open_reports = [item for item in reports if item.get("status", "open") == "open"]
     pending_queue = [item for item in queue if item.get("status", "pending") == "pending"]
+    pending_deletions = [item for item in deletion_requests if item.get("status", "pending") == "pending"]
     return {
         "ok": True,
         "summary": {
             "openReports": len(open_reports),
             "pendingReview": len(pending_queue),
+            "pendingDeletionRequests": len(pending_deletions),
             "totalReports": len(reports),
             "totalQueued": len(queue),
+            "totalDeletionRequests": len(deletion_requests),
         },
         "reports": [serialize_moderation_item(state, item) for item in reports[:100]],
         "moderationQueue": [serialize_moderation_item(state, item) for item in queue[:100]],
+        "deletionRequests": [serialize_deletion_request(state, item) for item in deletion_requests[:100]],
         "adminActions": state.setdefault("adminActions", [])[:50],
     }
 
@@ -6432,7 +6505,10 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 status = str(payload.get("status") or "resolved").strip()
                 if status not in {"resolved", "dismissed"}:
                     status = "resolved"
-                collection_name = "moderationQueue" if target_kind == "queue" else "reports"
+                if target_kind in {"deletion", "deletionRequest", "accountDeletion"}:
+                    collection_name = "deletionRequests"
+                else:
+                    collection_name = "moderationQueue" if target_kind == "queue" else "reports"
                 collection = state.setdefault(collection_name, [])
                 target = next((item for item in collection if item.get("id") == target_id), None)
                 if not target:
@@ -6452,6 +6528,20 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 )
                 del state["adminActions"][100:]
                 return build_moderation_dashboard(state)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/account/delete-request":
+            def action(state):
+                session = ensure_session(state, session_id)
+                deletion_request = create_account_deletion_request(state, session, payload.get("reason") or "")
+                response = bootstrap_response(state, session)
+                response["deletionRequest"] = serialize_deletion_request(state, deletion_request)
+                return response
 
             try:
                 self._write_json(self._with_state(action))

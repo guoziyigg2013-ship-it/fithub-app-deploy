@@ -105,5 +105,40 @@ Page({
     } catch (error) {
       api.toast(error.message);
     }
+  },
+
+  openLegal(event) {
+    const type = event.currentTarget.dataset.type || "privacy";
+    wx.navigateTo({ url: `/pages/legal/index?type=${type}` });
+  },
+
+  async requestDeletion() {
+    if (!this.data.profile) {
+      api.toast("请先登录后再提交注销申请");
+      return;
+    }
+    try {
+      await new Promise((resolve, reject) => {
+        wx.showModal({
+          title: "提交注销申请",
+          content: "提交后会进入人工处理队列，处理前账号仍可正常使用。确认提交吗？",
+          confirmText: "提交",
+          confirmColor: "#f28c28",
+          success(result) {
+            if (result.confirm) resolve();
+            else reject(new Error("cancel"));
+          },
+          fail: reject
+        });
+      });
+      await api.post("/account/delete-request", {
+        reason: "用户在小程序端主动提交注销申请"
+      });
+      api.toast("注销申请已提交");
+    } catch (error) {
+      if (!String(error.message || "").includes("cancel")) {
+        api.toast(error.message || "提交失败");
+      }
+    }
   }
 });

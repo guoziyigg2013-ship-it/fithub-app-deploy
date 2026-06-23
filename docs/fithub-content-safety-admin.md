@@ -37,8 +37,10 @@
 
 - `summary.openReports`
 - `summary.pendingReview`
+- `summary.pendingDeletionRequests`
 - `reports`
 - `moderationQueue`
+- `deletionRequests`
 - `adminActions`
 
 `POST /api/admin/moderation/resolve` 请求示例：
@@ -59,3 +61,24 @@
 - 举报对象扩展到评论、私信和个人主页入口。
 - 增加拉黑、隐藏内容、删除内容、封禁账号动作。
 - 做一个真正的运营后台页面，而不是只靠 API。
+
+## 账号注销申请
+
+用户侧接口：
+
+- `POST /api/account/delete-request`
+
+请求示例：
+
+```json
+{
+  "sessionId": "当前会话",
+  "reason": "用户主动提交注销申请"
+}
+```
+
+处理方式：
+
+- 请求会进入 `deletionRequests` 队列。
+- 管理员可在 `GET /api/admin/moderation?token=...` 里查看。
+- 管理员可通过 `POST /api/admin/moderation/resolve` 处理，`kind` 传 `deletion`。
