@@ -24,5 +24,9 @@ services:
         value: fithub_app_state
       - key: FITHUB_SUPABASE_ROW_ID
         value: primary
+      - key: FITHUB_SUPABASE_TIMEOUT
+        value: 8
+      - key: FITHUB_SUPABASE_REFRESH_COOLDOWN_SECONDS
+        value: 30
       - key: FITHUB_SUPABASE_BACKUP_RETENTION
         value: 96

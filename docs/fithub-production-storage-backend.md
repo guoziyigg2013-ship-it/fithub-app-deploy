@@ -56,7 +56,8 @@ FITHUB_PUBLIC_API_ORIGIN=https://fithub-app-1btg.onrender.com
 建议配置：
 
 ```text
-FITHUB_SUPABASE_TIMEOUT=12
+FITHUB_SUPABASE_TIMEOUT=8
+FITHUB_SUPABASE_REFRESH_COOLDOWN_SECONDS=30
 FITHUB_SUPABASE_BACKUP_RETENTION=96
 FITHUB_SUPABASE_PRUNE_INTERVAL_SECONDS=3600
 FITHUB_IMAGE_UPLOAD_LIMIT_BYTES=10485760
@@ -84,6 +85,7 @@ https://fithub-app-1btg.onrender.com/api/storage/status
 - `storage.loadedFrom` 不应是 `local-fallback`
 - `storage.remoteWriteProtected` 不应是 `true`
 - `metrics.real_profiles` 不应异常归零
+- `supabase.lastRefreshError` 不应长期存在同一个网络或 DNS 错误
 
 ## 国内云迁移建议
 
