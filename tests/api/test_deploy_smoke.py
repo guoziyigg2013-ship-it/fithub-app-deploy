@@ -1,0 +1,85 @@
+import importlib.util
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SMOKE_PATH = ROOT / "scripts" / "deploy_smoke.py"
+SPEC = importlib.util.spec_from_file_location("deploy_smoke", SMOKE_PATH)
+deploy_smoke = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(deploy_smoke)
+
+
+def healthy_storage_payload(**overrides):
+    payload = {
+        "status": "ok",
+        "storage": {
+            "loadedFrom": "supabase",
+            "supabaseConfigured": True,
+            "supabaseWritable": True,
+            "remoteWriteProtected": False,
+        },
+        "metrics": {
+            "real_profiles": 90,
+            "real_follows": 125,
+            "real_posts": 29,
+            "real_threads": 4,
+        },
+        "remoteRows": {
+            "reachable": True,
+            "primaryRowPresent": True,
+        },
+    }
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(payload.get(key), dict):
+            payload[key].update(value)
+        else:
+            payload[key] = value
+    return payload
+
+
+class DeploySmokeGuardTests(unittest.TestCase):
+    def test_storage_status_accepts_healthy_remote_state(self):
+        deploy_smoke.validate_storage_status(healthy_storage_payload(), min_real_profiles=1)
+
+    def test_storage_status_rejects_local_fallback(self):
+        payload = healthy_storage_payload(
+            status="degraded",
+            storage={
+                "loadedFrom": "local-fallback",
+                "supabaseWritable": False,
+                "remoteWriteProtected": True,
+            },
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "local fallback"):
+            deploy_smoke.validate_storage_status(payload, min_real_profiles=1)
+
+    def test_storage_status_rejects_unwritable_remote_storage(self):
+        payload = healthy_storage_payload(storage={"supabaseWritable": False})
+
+        with self.assertRaisesRegex(RuntimeError, "not writable"):
+            deploy_smoke.validate_storage_status(payload, min_real_profiles=1)
+
+    def test_storage_status_rejects_collapsed_profile_metrics(self):
+        payload = healthy_storage_payload(metrics={"real_profiles": 0})
+
+        with self.assertRaisesRegex(RuntimeError, "real_profiles"):
+            deploy_smoke.validate_storage_status(payload, min_real_profiles=1)
+
+    def test_storage_status_rejects_unreachable_remote_rows(self):
+        payload = healthy_storage_payload(remoteRows={"reachable": False, "error": "dns failed"})
+
+        with self.assertRaisesRegex(RuntimeError, "unreachable"):
+            deploy_smoke.validate_storage_status(payload, min_real_profiles=1)
+
+    def test_elapsed_guard_rejects_slow_production_response(self):
+        with self.assertRaisesRegex(RuntimeError, "exceeding"):
+            deploy_smoke.ensure_elapsed("Backend health", 21.6, 3.0)
+
+    def test_elapsed_guard_can_be_disabled_for_local_runs(self):
+        deploy_smoke.ensure_elapsed("Local dev", 99.0, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
