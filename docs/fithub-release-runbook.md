@@ -179,6 +179,14 @@ python3 ../../scripts/tencent_cloud_preflight.py
 
 如果这一步失败，说明域名、数据库、token 或 Docker 配置还没达到生产要求，不要启动或对外开放。
 
+`deploy/tencent-cloud/deploy.sh` 会在真正重建容器前自动备份 Docker 数据卷：
+
+```text
+deploy/tencent-cloud/backups/fithub-data-predeploy-YYYYMMDD-HHMMSSZ.tar.gz
+```
+
+如果服务器上存在旧的 `*_fithub-data` 数据卷，脚本会先复制迁移到固定卷名 `fithub-data`，旧卷保留不删。正式用户环境不要设置 `FITHUB_SKIP_VOLUME_BACKUP=1`，除非你明确是在一台空服务器做演练。
+
 ### 4. 大升级前做生产数据快照
 
 如果这次发布会影响账号、关注、动态、消息、预约、打卡、媒体或存储配置，先执行：

@@ -263,8 +263,29 @@ chmod +x deploy.sh
 
 - `tencent_server_doctor.py`：检查服务器依赖、磁盘、端口、env、Docker Compose 配置。
 - `tencent_cloud_preflight.py`：检查占位域名、假 key、短 token 和生产配置。
+- 数据卷备份：部署前先备份 `fithub-data`，避免升级后用户、关注、消息、预约、头像等数据无法回滚。
 
 如果发现明显问题，会直接停止，不会带病启动。
+
+数据备份默认写入：
+
+```text
+deploy/tencent-cloud/backups/fithub-data-predeploy-YYYYMMDD-HHMMSSZ.tar.gz
+```
+
+服务健康后还会写一份 post-deploy 存储状态或管理员导出快照。默认保留最近 20 份部署前备份，需要调整时使用：
+
+```bash
+FITHUB_DEPLOY_BACKUP_RETENTION=50 ./deploy.sh
+```
+
+如果服务器上已有旧的 `*_fithub-data` Compose 数据卷，脚本会先复制迁移到固定卷名 `fithub-data`，旧卷不删除，作为额外保险。只有在明确做空环境测试时，才允许跳过备份：
+
+```bash
+FITHUB_SKIP_VOLUME_BACKUP=1 ./deploy.sh
+```
+
+正式用户环境不要跳过备份。
 
 如果域名、HTTPS 和 Nginx 已经全部配置好，可以强制在部署后检查公网 API 和远程存储：
 

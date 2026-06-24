@@ -26,3 +26,4 @@ services:
 
 volumes:
   fithub-data:
+    name: fithub-data
