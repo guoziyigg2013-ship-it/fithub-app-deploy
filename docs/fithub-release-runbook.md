@@ -60,6 +60,7 @@ npm run check:production
 ```bash
 npm run cutover:tencent -- \
   --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
   --miniapp-appid wx你的真实小程序AppID \
   --supabase-url https://你的项目ref.supabase.co \
   --supabase-service-role-key 你的真实service_role_key \
@@ -77,6 +78,7 @@ npm run cutover:tencent -- \
 ```bash
 npm run cutover:tencent -- \
   --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
   --miniapp-appid wx你的真实小程序AppID \
   --supabase-url https://你的项目ref.supabase.co \
   --supabase-service-role-key 你的真实service_role_key \
@@ -186,6 +188,7 @@ cd fithub-app-deploy/deploy/tencent-cloud
 cd ../..
 python3 scripts/init_tencent_env.py \
   --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
   --supabase-url https://你的真实项目ref.supabase.co \
   --supabase-service-role-key '你的真实service_role_key' \
   --media-storage-provider cos \
@@ -244,7 +247,7 @@ python3 scripts/tencent_server_doctor.py \
   --allow-running-service
 
 python3 scripts/deploy_smoke.py \
-  --frontend-url https://fithub-cn.pages.dev/ \
+  --frontend-url https://app.yourdomain.com/ \
   --backend-url https://api.yourdomain.com
 
 python3 scripts/production_readiness.py \

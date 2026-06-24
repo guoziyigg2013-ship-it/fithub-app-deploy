@@ -1,9 +1,10 @@
-# Replace api.yourdomain.com with your ICP-filed API domain.
+# Replace server_name placeholders with ICP-filed domains.
 # This example assumes the FitHub API container listens on 127.0.0.1:10000.
+# The Python service serves both the Web app and /api from the same container.
 
 server {
     listen 80;
-    server_name api.yourdomain.com;
+    server_name api.yourdomain.com app.yourdomain.com;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -16,7 +17,7 @@ server {
 
 server {
     listen 443 ssl http2;
-    server_name api.yourdomain.com;
+    server_name api.yourdomain.com app.yourdomain.com;
 
     ssl_certificate /etc/letsencrypt/live/api.yourdomain.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/api.yourdomain.com/privkey.pem;

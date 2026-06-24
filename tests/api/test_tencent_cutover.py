@@ -54,6 +54,7 @@ class TencentCutoverTests(unittest.TestCase):
             result = tencent_cutover.run_cutover(
                 root=root,
                 api_origin="https://api.fithub.example.cn",
+                web_origin="https://app.fithub.example.cn",
                 miniapp_appid="wx1234567890abcdef",
                 supabase_url="https://abcdefghijklmnopqrst.supabase.co",
                 supabase_service_role_key="s" * 80,
@@ -76,6 +77,7 @@ class TencentCutoverTests(unittest.TestCase):
             result = tencent_cutover.run_cutover(
                 root=root,
                 api_origin="https://api.fithub.example.cn",
+                web_origin="https://app.fithub.example.cn",
                 miniapp_appid="wx1234567890abcdef",
                 supabase_url="https://abcdefghijklmnopqrst.supabase.co",
                 supabase_service_role_key="s" * 80,
@@ -93,7 +95,7 @@ class TencentCutoverTests(unittest.TestCase):
             project = json.loads((root / "wechat-miniprogram" / "project.config.json").read_text())
             self.assertEqual(project["appid"], "wx1234567890abcdef")
             self.assertIn("FITHUB_PUBLIC_API_ORIGIN=https://api.fithub.example.cn", env_output.read_text())
-            self.assertIn("server_name api.fithub.example.cn;", nginx_output.read_text())
+            self.assertIn("server_name api.fithub.example.cn app.fithub.example.cn;", nginx_output.read_text())
             self.assertEqual(result.archive_path, None)
 
 

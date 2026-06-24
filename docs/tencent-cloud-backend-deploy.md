@@ -10,6 +10,14 @@
 https://api.yourdomain.com
 ```
 
+正式试运行建议同时准备一个用户访问入口：
+
+```text
+https://app.yourdomain.com
+```
+
+当前 Python 服务会同时提供 Web 页面和 `/api`，所以 `api.yourdomain.com` 与 `app.yourdomain.com` 可以先反向代理到同一个腾讯云容器。小程序只需要把 `https://api.yourdomain.com` 加到合法域名；普通用户可以打开 `https://app.yourdomain.com`。
+
 这样做的目的：
 
 - 避免 Render 冷启动和黑屏等待。
@@ -38,6 +46,7 @@ apiBase: "https://api.yourdomain.com/api"
 ```bash
 npm run cutover:tencent -- \
   --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
   --miniapp-appid wx你的真实小程序AppID \
   --supabase-url https://你的项目ref.supabase.co \
   --supabase-service-role-key 你的真实service_role_key \
@@ -55,6 +64,7 @@ npm run cutover:tencent -- \
 ```bash
 npm run cutover:tencent -- \
   --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
   --miniapp-appid wx你的真实小程序AppID \
   --supabase-url https://你的项目ref.supabase.co \
   --supabase-service-role-key 你的真实service_role_key \
@@ -179,6 +189,7 @@ cp .env.production.example .env.production
 cd ../..
 python3 scripts/init_tencent_env.py \
   --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
   --supabase-url https://你的真实项目ref.supabase.co \
   --supabase-service-role-key '你的真实service_role_key' \
   --media-storage-provider cos \
@@ -233,9 +244,16 @@ deploy/tencent-cloud/nginx-fithub.conf.example
 deploy/tencent-cloud/nginx-fithub.conf
 ```
 
+如果传入了 `--web-origin https://app.yourdomain.com`，生成的 Nginx 会同时包含：
+
+```nginx
+server_name api.yourdomain.com app.yourdomain.com;
+```
+
 绑定域名后，确认：
 
 ```bash
+curl https://app.yourdomain.com/
 curl https://api.yourdomain.com/healthz
 curl https://api.yourdomain.com/api/storage/status?remote=1
 ```
@@ -256,6 +274,7 @@ python3 ../../scripts/tencent_cloud_preflight.py \
 ```bash
 npm run cutover:tencent -- \
   --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
   --miniapp-appid wx你的真实小程序AppID \
   --supabase-url https://你的项目ref.supabase.co \
   --supabase-service-role-key 你的真实service_role_key \
@@ -308,7 +327,7 @@ FITHUB_MEDIA_MAINTENANCE_TOKEN=请生成强随机字符串
 
 ```bash
 python3 scripts/deploy_smoke.py \
-  --frontend-url https://fithub-cn.pages.dev/ \
+  --frontend-url https://app.yourdomain.com/ \
   --backend-url https://api.yourdomain.com
 ```
 
@@ -325,7 +344,7 @@ python3 scripts/tencent_server_doctor.py \
   --allow-running-service
 python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com
 python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com --require-cos-media
-python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
+python3 scripts/deploy_smoke.py --frontend-url https://app.yourdomain.com/ --backend-url https://api.yourdomain.com
 ```
 
 最后跑一次写入链路验收，确认不是“页面能打开但用户数据不稳”：

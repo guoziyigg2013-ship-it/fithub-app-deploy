@@ -77,6 +77,7 @@ def run_cutover(
     miniapp_appid: str,
     supabase_url: str,
     supabase_service_role_key: str,
+    web_origin: str = "",
     admin_token: str = "",
     media_maintenance_token: str = "",
     media_bucket: str = "fithub-media",
@@ -138,7 +139,7 @@ def run_cutover(
         if not skip_nginx:
             init_tencent_env.write_text_securely(
                 nginx_output,
-                init_tencent_env.render_nginx_config(api_origin),
+                init_tencent_env.render_nginx_config(api_origin, web_origin),
                 force=force,
             )
 
@@ -193,6 +194,7 @@ def run_cutover(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Dry-run or apply FitHub Tencent Cloud production cutover.")
     parser.add_argument("--api-origin", required=True, help="Production API origin, for example https://api.example.cn")
+    parser.add_argument("--web-origin", default="", help="Optional public Web origin, for example https://app.example.cn.")
     parser.add_argument("--miniapp-appid", required=True, help="Real WeChat Mini Program AppID.")
     parser.add_argument("--supabase-url", required=True, help="Real Supabase Project URL.")
     parser.add_argument("--supabase-service-role-key", required=True, help="Real Supabase service_role key.")
@@ -221,6 +223,7 @@ def main() -> int:
         run_cutover(
             root=ROOT,
             api_origin=args.api_origin,
+            web_origin=args.web_origin,
             miniapp_appid=args.miniapp_appid,
             supabase_url=args.supabase_url,
             supabase_service_role_key=args.supabase_service_role_key,

@@ -92,6 +92,15 @@ class InitTencentEnvTests(unittest.TestCase):
         self.assertIn("server_name api.fithub.example.cn;", rendered)
         self.assertNotIn("api.yourdomain.com", rendered)
 
+    def test_render_nginx_config_can_include_web_domain(self):
+        rendered = init_tencent_env.render_nginx_config(
+            "https://api.fithub.example.cn",
+            "https://app.fithub.example.cn",
+        )
+
+        self.assertIn("server_name api.fithub.example.cn app.fithub.example.cn;", rendered)
+        self.assertNotIn("app.yourdomain.com", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

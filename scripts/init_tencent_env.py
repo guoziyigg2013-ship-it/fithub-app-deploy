@@ -141,16 +141,28 @@ def write_text_securely(path: Path, content: str, *, force: bool = False) -> Non
         pass
 
 
-def render_nginx_config(api_origin: str) -> str:
+def render_nginx_config(api_origin: str, web_origin: str = "") -> str:
     parsed = urllib.parse.urlparse(normalize_origin(api_origin))
-    host = parsed.hostname or ""
+    api_host = parsed.hostname or ""
+    server_hosts = [api_host]
+    if web_origin:
+        web_parsed = urllib.parse.urlparse(normalize_origin(web_origin))
+        web_host = web_parsed.hostname or ""
+        if web_host and web_host not in server_hosts:
+            server_hosts.append(web_host)
+    server_names = " ".join(server_hosts)
     template = NGINX_TEMPLATE.read_text(encoding="utf-8")
-    return template.replace("api.yourdomain.com", host)
+    return (
+        template
+        .replace("api.yourdomain.com app.yourdomain.com", server_names)
+        .replace("api.yourdomain.com", api_host)
+    )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate FitHub Tencent Cloud .env.production.")
     parser.add_argument("--api-origin", required=True, help="Production API origin, for example https://api.example.cn")
+    parser.add_argument("--web-origin", default="", help="Optional public Web origin, for example https://app.example.cn")
     parser.add_argument("--supabase-url", required=True, help="Real Supabase Project URL.")
     parser.add_argument("--supabase-service-role-key", required=True, help="Real Supabase service_role key.")
     parser.add_argument("--admin-token", default="", help="Optional fixed admin token. Defaults to a generated token.")
@@ -191,7 +203,7 @@ def main() -> int:
         write_text_securely(output, render_env(values), force=args.force)
         if args.nginx_output:
             nginx_output = Path(args.nginx_output)
-            write_text_securely(nginx_output, render_nginx_config(args.api_origin), force=args.force)
+            write_text_securely(nginx_output, render_nginx_config(args.api_origin, args.web_origin), force=args.force)
     except (OSError, ValueError, FileExistsError) as exc:
         print(f"Tencent env init failed: {exc}", file=sys.stderr)
         return 1
