@@ -168,6 +168,17 @@ npm run bootstrap:tencent-remote -- \
 确认 `api.yourdomain.com` 和 `app.yourdomain.com` 的 DNS 已经指向这台服务器后，先申请 HTTPS 证书：
 
 ```bash
+npm run check:tencent-domains -- \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --media-origin https://media.yourdomain.com \
+  --expected-ip 你的服务器公网IP \
+  --check-acme
+```
+
+这一步会确认 DNS 已经解析到腾讯云服务器，并且 `80` 端口可用于 Let’s Encrypt 验证。失败时先修 DNS、安全组或 Nginx，不要继续签证书。
+
+```bash
 npm run cert:tencent-remote -- \
   --host 你的服务器公网IP \
   --user root \
@@ -178,6 +189,18 @@ npm run cert:tencent-remote -- \
 ```
 
 确认 dry-run 没问题后，可以先加 `--staging --apply` 做测试签发，再去掉 `--staging` 正式签发。
+
+证书签好后，再确认 `443` 和证书有效性：
+
+```bash
+npm run check:tencent-domains -- \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --media-origin https://media.yourdomain.com \
+  --expected-ip 你的服务器公网IP \
+  --check-acme \
+  --check-tls
+```
 
 推荐先用远程部署脚本预演：
 

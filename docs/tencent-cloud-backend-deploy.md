@@ -213,6 +213,24 @@ npm run bootstrap:tencent-remote -- \
 
 微信小程序合法域名必须是 HTTPS。确认 `api.yourdomain.com` 和 `app.yourdomain.com` 的 DNS 都已经指向这台腾讯云服务器后，先用 dry-run 查看证书签发步骤：
 
+证书签发前，先用域名就绪门禁确认 DNS 已经解析到腾讯云公网 IP，并且 80 端口可以被 Let’s Encrypt 访问：
+
+```bash
+npm run check:tencent-domains -- \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --media-origin https://media.yourdomain.com \
+  --expected-ip 你的服务器公网IP \
+  --check-acme
+```
+
+如果这里失败，先不要继续签证书。通常需要检查：
+
+- 域名 DNS A 记录是否已经指向腾讯云服务器公网 IP。
+- 腾讯云安全组是否放行 `80` 和 `443`。
+- 服务器 Nginx 是否已由 `bootstrap:tencent-remote` 安装。
+- 域名是否仍在解析到 Render、Cloudflare Pages 或旧服务器。
+
 ```bash
 npm run cert:tencent-remote -- \
   --host 你的服务器公网IP \
@@ -251,6 +269,20 @@ npm run cert:tencent-remote -- \
 ```
 
 这个脚本会先安装临时 HTTP-only Nginx 配置用于 `/.well-known/acme-challenge/` 验证，签发成功后，下一步 `deploy:tencent-remote --restart-nginx` 会安装正式 443 反代配置。
+
+正式签发后，再跑一次 TLS 门禁，确认 443 可访问、证书能被系统信任，并且证书剩余时间足够：
+
+```bash
+npm run check:tencent-domains -- \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --media-origin https://media.yourdomain.com \
+  --expected-ip 你的服务器公网IP \
+  --check-acme \
+  --check-tls
+```
+
+这条命令通过后，才继续上传发布包和切换小程序合法域名。
 
 ### 1.7 一键远程上传部署
 
