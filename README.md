@@ -7,11 +7,12 @@
 - 绑定固定域名
 - 保留多人互动数据
 
-当前已经有一个中国试运行静态入口：
+当前有两个中国试运行入口：
 
 - `https://fithub-cn.pages.dev/`
+- `https://zhangxin-zhinan-d4fwtsmr9a834d58-1401297280.tcloudbaseapp.com/fithub/`
 
-这个入口由 `Cloudflare Pages` 提供静态页面，避免用户首次打开先撞到 `Render` 黑色唤醒页；数据仍然走当前的 `Render + Supabase` 后端。
+其中 `fithub-cn.pages.dev` 适合临时测试；腾讯云 `/fithub/` 入口更适合中国大陆试运行。当前生产 API 与共享数据已经迁到腾讯云 CloudBase。
 
 ## 本地运行
 
@@ -35,7 +36,19 @@ python3 server.py --port 8010
 
 ## 中国试运行入口更新
 
-如果你修改了前端并且要重新发布中国站静态入口，在这个目录执行：
+如果你修改了前端并且要重新发布腾讯云试运行入口，在这个目录执行：
+
+```bash
+npm run deploy:tencent-static
+```
+
+部署目标默认是：
+
+- CloudBase 环境：`zhangxin-zhinan-d4fwtsmr9a834d58`
+- 云端路径：`fithub/`
+- 访问入口：`https://zhangxin-zhinan-d4fwtsmr9a834d58-1401297280.tcloudbaseapp.com/fithub/`
+
+如果仍要更新旧的 Cloudflare Pages 临时入口：
 
 ```bash
 ./deploy-cn-pages.sh
@@ -47,7 +60,7 @@ python3 server.py --port 8010
 ./deploy-cn-pages.sh your-project-name
 ```
 
-## 部署
+## 旧 Render 部署
 
 1. 在这个目录执行 `git add .`
 2. 创建 GitHub 仓库并推送 `main`
@@ -61,11 +74,20 @@ python3 server.py --port 8010
 
 - `data/shared_state.json`
 
-正式环境数据保存在：
+旧 Render Disk 模式数据保存在：
 
 - `/var/data/fithub/shared_state.json`
 
-如果没有挂载 Render Persistent Disk，数据会写进实例本地文件系统，服务重启或重建后可能丢失。
+当前中国试运行生产数据优先保存在腾讯云 CloudBase。发布后应使用：
+
+```bash
+python3 scripts/deploy_smoke.py \
+  --frontend-url https://zhangxin-zhinan-d4fwtsmr9a834d58-1401297280.tcloudbaseapp.com/fithub/ \
+  --backend-url https://fithub-api-274271-9-1401297280.sh.run.tcloudbase.com \
+  --expect-frontend-api-origin https://fithub-api-274271-9-1401297280.sh.run.tcloudbase.com
+```
+
+确认没有回退到本地 JSON。
 
 ## Supabase 模式
 

@@ -20,6 +20,7 @@
     "bootstrap:tencent-remote": "python3 scripts/tencent_remote_bootstrap.py",
     "cert:tencent-remote": "python3 scripts/tencent_remote_certbot.py",
     "deploy:tencent-remote": "python3 scripts/tencent_remote_deploy.py",
+    "deploy:tencent-static": "python3 scripts/deploy_tencent_static.py",
     "evidence:tencent-launch": "python3 scripts/tencent_launch_evidence.py",
     "evidence:prelaunch": "python3 scripts/prelaunch_gate.py --output-dir reports --soft-fail",
     "check:tencent": "python3 scripts/tencent_cloud_preflight.py",
