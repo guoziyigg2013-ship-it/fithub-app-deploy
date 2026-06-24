@@ -1,4 +1,4 @@
-const CACHE_NAME = "fithub-shell-v34-distance-safe";
+const CACHE_NAME = "fithub-shell-v35-no-store-shell";
 
 function coreUrls() {
   const scope = self.registration.scope;
@@ -33,7 +33,7 @@ self.addEventListener("activate", (event) => {
 async function networkFirst(request) {
   const cache = await caches.open(CACHE_NAME);
   try {
-    const response = await fetch(request);
+    const response = await fetch(request, { cache: "no-store" });
     if (response && response.ok) {
       cache.put(request, response.clone());
     }
@@ -64,7 +64,7 @@ async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request, { ignoreSearch: true });
   if (cached) return cached;
-  const response = await fetch(request);
+  const response = await fetch(request, { cache: "force-cache" });
   if (isCacheableResponse(response)) {
     cache.put(request, response.clone());
   }

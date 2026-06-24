@@ -11814,11 +11814,23 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260428-2`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260625-sw-refresh`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
-      .then((registration) => registration.update().catch(() => {}))
+      .then((registration) => {
+        registration.update().catch(() => {});
+        registration.addEventListener("updatefound", () => {
+          const worker = registration.installing;
+          if (!worker) return;
+          worker.addEventListener("statechange", () => {
+            if (worker.state !== "activated" || !navigator.serviceWorker.controller) return;
+            if (sessionStorage.getItem("fithub_sw_reloaded") === "1") return;
+            sessionStorage.setItem("fithub_sw_reloaded", "1");
+            window.location.reload();
+          });
+        });
+      })
       .catch(() => {});
   });
 }

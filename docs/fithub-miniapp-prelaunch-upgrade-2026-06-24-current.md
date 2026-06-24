@@ -39,11 +39,17 @@
 
 ```bash
 npm run deploy:tencent-static
+npm run check:trial
 python3 scripts/deploy_smoke.py \
   --frontend-url https://zhangxin-zhinan-d4fwtsmr9a834d58-1401297280.tcloudbaseapp.com/fithub/ \
   --backend-url https://fithub-api-274271-9-1401297280.sh.run.tcloudbase.com \
   --expect-frontend-api-origin https://fithub-api-274271-9-1401297280.sh.run.tcloudbase.com
 ```
+
+说明：
+
+- `npm run check:trial` 用来证明当前腾讯云固定试运行入口、CloudBase API、持久化和核心功能库存可继续给测试用户使用。
+- `npm run check:prelaunch` 仍用于正式提审门禁，会继续阻止 `touristappid`、未配置 COS/CDN 或未备案正式域名进入审核包。
 
 ### P0-2. 后端和数据稳定门禁
 
@@ -166,6 +172,7 @@ python3 scripts/production_write_acceptance.py \
 - 腾讯云 `/fithub/` 入口可用。
 - 腾讯云 API smoke 通过。
 - CloudBase 生产写入验收通过。
+- `npm run check:trial` 通过。
 - 小程序开发检查通过。
 - 新清单和部署脚本已提交到 GitHub。
 

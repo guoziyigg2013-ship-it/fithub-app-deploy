@@ -187,5 +187,6 @@ npm run check:prelaunch
 - 把当前 `https://fithub-cn.pages.dev/` 的 API 从 Render 切到国内正式 API。
 - 完成腾讯云后端、HTTPS、健康检查、数据快照、发布证据报告。
 - 确认升级后老用户、新用户、关注、消息、头像、动态都不会丢。
+- 每次升级后先运行 `npm run check:trial` 证明当前腾讯云试运行固定入口可继续给测试用户使用；正式提审前再运行 `npm run check:prelaunch`。
 
 原因很简单：UI 可以慢慢精修，但账号和数据如果不稳，后面所有功能都会被反复打断。
