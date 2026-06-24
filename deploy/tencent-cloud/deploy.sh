@@ -26,18 +26,40 @@ else
 fi
 
 cd "$SCRIPT_DIR"
+python3 "$REPO_ROOT/scripts/tencent_server_doctor.py" \
+  --env-file "$ENV_FILE" \
+  --compose-file "$SCRIPT_DIR/docker-compose.yml" \
+  --allow-running-service
 python3 "$REPO_ROOT/scripts/tencent_cloud_preflight.py" --env-file "$ENV_FILE" --compose-file "$SCRIPT_DIR/docker-compose.yml"
 "${COMPOSE[@]}" up -d --build
 
 echo "Waiting for FitHub API health ..."
+HEALTHY=0
 for attempt in $(seq 1 30); do
   if curl -fsS --max-time 3 http://127.0.0.1:10000/healthz >/dev/null; then
     echo "FitHub API is healthy on localhost:10000"
-    exit 0
+    HEALTHY=1
+    break
   fi
   sleep 2
 done
 
-echo "FitHub API did not become healthy in time. Recent logs:"
-"${COMPOSE[@]}" logs --tail=80 fithub-api || true
-exit 1
+if [ "$HEALTHY" != "1" ]; then
+  echo "FitHub API did not become healthy in time. Recent logs:"
+  "${COMPOSE[@]}" logs --tail=80 fithub-api || true
+  exit 1
+fi
+
+if [ "${FITHUB_DEPLOY_CHECK_PUBLIC:-0}" = "1" ]; then
+  PUBLIC_ORIGIN="$(grep -E '^FITHUB_PUBLIC_API_ORIGIN=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
+  python3 "$REPO_ROOT/scripts/tencent_server_doctor.py" \
+    --env-file "$ENV_FILE" \
+    --compose-file "$SCRIPT_DIR/docker-compose.yml" \
+    --skip-docker \
+    --skip-compose \
+    --skip-port \
+    --check-public \
+    --backend-url "$PUBLIC_ORIGIN"
+fi
+
+echo "FitHub Tencent Cloud deployment completed."

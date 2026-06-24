@@ -184,7 +184,18 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-`deploy.sh` 会在启动前自动执行 `tencent_cloud_preflight.py`，如果发现占位域名、假 key、短 token 或 Docker 配置问题，会直接停止。
+`deploy.sh` 会在启动前自动执行：
+
+- `tencent_server_doctor.py`：检查服务器依赖、磁盘、端口、env、Docker Compose 配置。
+- `tencent_cloud_preflight.py`：检查占位域名、假 key、短 token 和生产配置。
+
+如果发现明显问题，会直接停止，不会带病启动。
+
+如果域名、HTTPS 和 Nginx 已经全部配置好，可以强制在部署后检查公网 API 和远程存储：
+
+```bash
+FITHUB_DEPLOY_CHECK_PUBLIC=1 ./deploy.sh
+```
 
 如果你用 Nginx 或腾讯云负载均衡做 HTTPS，反向代理到：
 
@@ -214,16 +225,25 @@ curl https://api.yourdomain.com/api/storage/status?remote=1
 再跑一次带线上域名的预检：
 
 ```bash
+python3 ../../scripts/tencent_server_doctor.py \
+  --check-public \
+  --allow-running-service
+
 python3 ../../scripts/tencent_cloud_preflight.py \
   --backend-url https://api.yourdomain.com
 ```
 
-确认国内 API 正常后，再回到本地仓库执行正式配置切换：
+确认国内 API 正常后，再回到本地仓库执行正式配置切换。推荐使用总控命令，避免漏改小程序 AppID 或 API 地址：
 
 ```bash
-npm run config:production -- \
+npm run cutover:tencent -- \
   --api-origin https://api.yourdomain.com \
-  --miniapp-appid wx你的真实小程序AppID
+  --miniapp-appid wx你的真实小程序AppID \
+  --supabase-url https://你的项目ref.supabase.co \
+  --supabase-service-role-key 你的真实service_role_key \
+  --apply \
+  --write-env \
+  --force
 ```
 
 然后提交、发布前端和小程序代码。
@@ -275,6 +295,10 @@ python3 scripts/check_miniprogram.py --production
 python3 scripts/tencent_cloud_preflight.py \
   --env-file deploy/tencent-cloud/.env.production \
   --backend-url https://api.yourdomain.com
+python3 scripts/tencent_server_doctor.py \
+  --env-file deploy/tencent-cloud/.env.production \
+  --check-public \
+  --allow-running-service
 python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com
 python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
 ```

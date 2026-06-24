@@ -142,6 +142,7 @@ npm run release:tencent
 服务器上填好 `deploy/tencent-cloud/.env.production` 后，先跑：
 
 ```bash
+python3 ../../scripts/tencent_server_doctor.py
 python3 ../../scripts/tencent_cloud_preflight.py
 ```
 
@@ -182,6 +183,12 @@ cd deploy/tencent-cloud
 ./deploy.sh
 ```
 
+如果 Nginx、HTTPS 和 DNS 都已经准备好，正式启动时可以启用公网验收：
+
+```bash
+FITHUB_DEPLOY_CHECK_PUBLIC=1 ./deploy.sh
+```
+
 ### 2. 中国固定域发布
 
 如果这次改动包含前端页面或样式，执行：
@@ -209,6 +216,19 @@ npm run check:smoke
 - `healthz` 返回 `ok`
 - `storage/status` 显示后端仍在使用 Supabase 持久化，不是本地 JSON fallback
 - `bootstrap` 结构正常
+
+腾讯云正式域名上线后，改用真实后端域名跑：
+
+```bash
+python3 scripts/tencent_server_doctor.py \
+  --backend-url https://api.yourdomain.com \
+  --check-public \
+  --allow-running-service
+
+python3 scripts/deploy_smoke.py \
+  --frontend-url https://fithub-cn.pages.dev/ \
+  --backend-url https://api.yourdomain.com
+```
 
 ### 1.5 对比生产数据快照
 

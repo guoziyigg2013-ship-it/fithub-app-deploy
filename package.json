@@ -12,6 +12,7 @@
     "cutover:tencent": "python3 scripts/tencent_cutover.py",
     "release:tencent": "python3 scripts/build_tencent_release.py",
     "check:tencent": "python3 scripts/tencent_cloud_preflight.py",
+    "check:tencent-server": "python3 scripts/tencent_server_doctor.py",
     "check:smoke": "python3 scripts/deploy_smoke.py",
     "check:final": "python3 scripts/final_acceptance.py",
     "snapshot:prod": "python3 scripts/production_snapshot.py",
