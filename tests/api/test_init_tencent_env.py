@@ -21,6 +21,7 @@ class InitTencentEnvTests(unittest.TestCase):
     def test_build_env_values_generates_valid_tokens_and_passes_preflight(self):
         values = init_tencent_env.build_env_values(
             api_origin="https://api.fithub.example.cn",
+            state_provider="supabase",
             supabase_url="https://abcdefghijklmnopqrst.supabase.co",
             supabase_service_role_key="s" * 80,
         )
@@ -36,13 +37,29 @@ class InitTencentEnvTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "placeholder|FITHUB_PUBLIC_API_ORIGIN"):
             init_tencent_env.build_env_values(
                 api_origin="https://api.yourdomain.com",
+                state_provider="supabase",
                 supabase_url="https://abcdefghijklmnopqrst.supabase.co",
                 supabase_service_role_key="s" * 80,
             )
 
+    def test_build_env_values_accepts_cloudbase_state_storage(self):
+        values = init_tencent_env.build_env_values(
+            api_origin="https://api.fithub.example.cn",
+            cloudbase_env_id="zhangxin-zhinan-d4fwtsmr9a834d58",
+            cloudbase_api_key="cloudbase-api-key-example",
+        )
+        failures = []
+
+        tencent_cloud_preflight.validate_env(values, failures)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(values["FITHUB_STATE_STORAGE_PROVIDER"], "cloudbase")
+        self.assertEqual(values["FITHUB_CLOUDBASE_COLLECTION"], "fithub_app_state")
+
     def test_build_env_values_accepts_tencent_cos_media_storage(self):
         values = init_tencent_env.build_env_values(
             api_origin="https://api.fithub.example.cn",
+            state_provider="supabase",
             supabase_url="https://abcdefghijklmnopqrst.supabase.co",
             supabase_service_role_key="s" * 80,
             media_storage_provider="cos",
@@ -64,6 +81,7 @@ class InitTencentEnvTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "FITHUB_TENCENT_COS_SECRET_ID"):
             init_tencent_env.build_env_values(
                 api_origin="https://api.fithub.example.cn",
+                state_provider="supabase",
                 supabase_url="https://abcdefghijklmnopqrst.supabase.co",
                 supabase_service_role_key="s" * 80,
                 media_storage_provider="cos",
@@ -72,6 +90,7 @@ class InitTencentEnvTests(unittest.TestCase):
     def test_render_env_roundtrips_through_preflight_parser(self):
         values = init_tencent_env.build_env_values(
             api_origin="https://api.fithub.example.cn",
+            state_provider="supabase",
             supabase_url="https://abcdefghijklmnopqrst.supabase.co",
             supabase_service_role_key="s" * 80,
             admin_token="a" * 32,

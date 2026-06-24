@@ -36,6 +36,7 @@ def write_cos_env(path: Path) -> None:
                 "FITHUB_URL_PREFIX=/",
                 "FITHUB_DATA_DIR=/data/fithub",
                 "FITHUB_PUBLIC_API_ORIGIN=https://api.fithub.example.cn",
+                "FITHUB_STATE_STORAGE_PROVIDER=supabase",
                 "SUPABASE_URL=https://abcdefghijklmnopqrst.supabase.co",
                 "SUPABASE_SERVICE_ROLE_KEY=" + "s" * 80,
                 "FITHUB_SUPABASE_TABLE=fithub_app_state",

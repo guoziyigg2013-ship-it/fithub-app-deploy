@@ -44,6 +44,11 @@ def redact_env(values: dict[str, str]) -> list[str]:
     lines: list[str] = []
     for key in (
         "FITHUB_PUBLIC_API_ORIGIN",
+        "FITHUB_STATE_STORAGE_PROVIDER",
+        "FITHUB_CLOUDBASE_ENV_ID",
+        "FITHUB_CLOUDBASE_API_KEY",
+        "FITHUB_CLOUDBASE_COLLECTION",
+        "FITHUB_CLOUDBASE_DOC_ID",
         "SUPABASE_URL",
         "SUPABASE_SERVICE_ROLE_KEY",
         "FITHUB_MEDIA_STORAGE_PROVIDER",
@@ -75,8 +80,13 @@ def run_cutover(
     root: Path,
     api_origin: str,
     miniapp_appid: str,
-    supabase_url: str,
-    supabase_service_role_key: str,
+    supabase_url: str = "",
+    supabase_service_role_key: str = "",
+    state_provider: str = "cloudbase",
+    cloudbase_env_id: str = "",
+    cloudbase_api_key: str = "",
+    cloudbase_collection: str = "fithub_app_state",
+    cloudbase_doc_id: str = "primary",
     web_origin: str = "",
     admin_token: str = "",
     media_maintenance_token: str = "",
@@ -107,6 +117,11 @@ def run_cutover(
 
     env_values = init_tencent_env.build_env_values(
         api_origin=api_origin,
+        state_provider=state_provider,
+        cloudbase_env_id=cloudbase_env_id,
+        cloudbase_api_key=cloudbase_api_key,
+        cloudbase_collection=cloudbase_collection,
+        cloudbase_doc_id=cloudbase_doc_id,
         supabase_url=supabase_url,
         supabase_service_role_key=supabase_service_role_key,
         admin_token=admin_token,
@@ -196,8 +211,13 @@ def main() -> int:
     parser.add_argument("--api-origin", required=True, help="Production API origin, for example https://api.example.cn")
     parser.add_argument("--web-origin", default="", help="Optional public Web origin, for example https://app.example.cn.")
     parser.add_argument("--miniapp-appid", required=True, help="Real WeChat Mini Program AppID.")
-    parser.add_argument("--supabase-url", required=True, help="Real Supabase Project URL.")
-    parser.add_argument("--supabase-service-role-key", required=True, help="Real Supabase service_role key.")
+    parser.add_argument("--state-provider", default="cloudbase", choices=["cloudbase", "supabase"], help="Persistent state backend.")
+    parser.add_argument("--cloudbase-env-id", default="", help="CloudBase environment ID.")
+    parser.add_argument("--cloudbase-api-key", default="", help="CloudBase API Key.")
+    parser.add_argument("--cloudbase-collection", default="fithub_app_state")
+    parser.add_argument("--cloudbase-doc-id", default="primary")
+    parser.add_argument("--supabase-url", default="", help="Legacy Supabase Project URL.")
+    parser.add_argument("--supabase-service-role-key", default="", help="Legacy Supabase service_role key.")
     parser.add_argument("--admin-token", default="", help="Optional fixed admin token. Defaults to generated.")
     parser.add_argument("--media-maintenance-token", default="", help="Optional fixed media maintenance token.")
     parser.add_argument("--media-bucket", default="fithub-media")
@@ -225,6 +245,11 @@ def main() -> int:
             api_origin=args.api_origin,
             web_origin=args.web_origin,
             miniapp_appid=args.miniapp_appid,
+            state_provider=args.state_provider,
+            cloudbase_env_id=args.cloudbase_env_id,
+            cloudbase_api_key=args.cloudbase_api_key,
+            cloudbase_collection=args.cloudbase_collection,
+            cloudbase_doc_id=args.cloudbase_doc_id,
             supabase_url=args.supabase_url,
             supabase_service_role_key=args.supabase_service_role_key,
             admin_token=args.admin_token,

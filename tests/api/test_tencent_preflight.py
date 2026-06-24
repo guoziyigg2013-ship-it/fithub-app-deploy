@@ -16,6 +16,7 @@ VALID_ENV = {
     "FITHUB_URL_PREFIX": "/",
     "FITHUB_DATA_DIR": "/data/fithub",
     "FITHUB_PUBLIC_API_ORIGIN": "https://api.fithub.example.cn",
+    "FITHUB_STATE_STORAGE_PROVIDER": "supabase",
     "SUPABASE_URL": "https://abcdefghijklmnopqrst.supabase.co",
     "SUPABASE_SERVICE_ROLE_KEY": "x" * 80,
     "FITHUB_SUPABASE_TABLE": "fithub_app_state",
@@ -59,6 +60,25 @@ class TencentCloudPreflightTests(unittest.TestCase):
         failures = []
 
         tencent_cloud_preflight.validate_env(dict(VALID_ENV), failures)
+
+        self.assertEqual(failures, [])
+
+    def test_validate_env_accepts_cloudbase_state_storage(self):
+        values = dict(VALID_ENV)
+        values.update(
+            {
+                "FITHUB_STATE_STORAGE_PROVIDER": "cloudbase",
+                "FITHUB_CLOUDBASE_ENV_ID": "zhangxin-zhinan-d4fwtsmr9a834d58",
+                "FITHUB_CLOUDBASE_API_KEY": "cloudbase-api-key-example",
+                "FITHUB_CLOUDBASE_COLLECTION": "fithub_app_state",
+                "FITHUB_CLOUDBASE_DOC_ID": "primary",
+                "SUPABASE_URL": "",
+                "SUPABASE_SERVICE_ROLE_KEY": "",
+            }
+        )
+        failures = []
+
+        tencent_cloud_preflight.validate_env(values, failures)
 
         self.assertEqual(failures, [])
 

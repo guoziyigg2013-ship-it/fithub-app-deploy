@@ -380,3 +380,132 @@ class SupabaseRecoveryUnitTests(unittest.TestCase):
         self.assertIsNotNone(account)
         self.assertEqual(account["profilesByRole"]["enthusiast"], "enthusiast-recovery")
         self.assertIn("coach-demo-a", server.get_follow_set(state, "enthusiast-recovery"))
+
+
+class CloudBasePersistenceUnitTests(unittest.TestCase):
+    def setUp(self):
+        self.original_values = {
+            "STATE_STORAGE_PROVIDER": server.STATE_STORAGE_PROVIDER,
+            "CLOUDBASE_ENV_ID": server.CLOUDBASE_ENV_ID,
+            "CLOUDBASE_API_KEY": server.CLOUDBASE_API_KEY,
+            "CLOUDBASE_STATE_COLLECTION": server.CLOUDBASE_STATE_COLLECTION,
+            "CLOUDBASE_STATE_DOC_ID": server.CLOUDBASE_STATE_DOC_ID,
+            "CLOUDBASE_BACKUP_PREFIX": server.CLOUDBASE_BACKUP_PREFIX,
+            "CLOUDBASE_PHONE_RECOVERY_PREFIX": server.CLOUDBASE_PHONE_RECOVERY_PREFIX,
+            "CLOUDBASE_COLLECTION_READY": server.CLOUDBASE_COLLECTION_READY,
+        }
+        self.original_meta = deepcopy(server.STATE_RUNTIME_META)
+
+    def tearDown(self):
+        for key, value in self.original_values.items():
+            setattr(server, key, value)
+        server.STATE_RUNTIME_META.clear()
+        server.STATE_RUNTIME_META.update(self.original_meta)
+
+    def configure_cloudbase(self):
+        server.STATE_STORAGE_PROVIDER = "cloudbase"
+        server.CLOUDBASE_ENV_ID = "zhangxin-zhinan-d4fwtsmr9a834d58"
+        server.CLOUDBASE_API_KEY = "cloudbase-api-key-for-tests"
+        server.CLOUDBASE_STATE_COLLECTION = "fithub_app_state"
+        server.CLOUDBASE_STATE_DOC_ID = "primary"
+        server.CLOUDBASE_BACKUP_PREFIX = "primary-backup"
+        server.CLOUDBASE_PHONE_RECOVERY_PREFIX = "primary-phone"
+        server.CLOUDBASE_COLLECTION_READY = False
+
+    def test_storage_status_supports_cloudbase_without_leaking_api_key(self):
+        self.configure_cloudbase()
+
+        status = server.storage_runtime_status(server.initial_state())
+
+        self.assertEqual(status["storage"]["stateProvider"], "cloudbase")
+        self.assertTrue(status["storage"]["cloudbaseConfigured"])
+        self.assertTrue(status["storage"]["remoteWritable"])
+        self.assertEqual(status["cloudbase"]["envId"], "zhangxin-zhinan-d4fwtsmr9a834d58")
+        serialized = json.dumps(status, ensure_ascii=False)
+        self.assertNotIn("cloudbase-api-key-for-tests", serialized)
+
+    def test_save_state_to_cloudbase_upserts_primary_backups_and_phone_recovery(self):
+        self.configure_cloudbase()
+        original_request = server.cloudbase_request
+        calls = []
+
+        def fake_request(method, path, payload=None, allow_statuses=None):
+            calls.append((method, path, payload))
+            return {"updated": 1, "matched": 1}
+
+        state = server.initial_state()
+        profile = server.make_profile(
+            id="enthusiast-cloudbase",
+            role="enthusiast",
+            accountId="acct-cloudbase",
+            name="CloudBase 用户",
+            handle="@cloudbase.user",
+            phone="13215990001",
+        )
+        state["profiles"][profile["id"]] = profile
+        state["accounts"]["acct-cloudbase"] = {
+            "id": "acct-cloudbase",
+            "phone": "13215990001",
+            "profilesByRole": {"enthusiast": profile["id"]},
+            "createdAt": server.iso_at(),
+        }
+
+        try:
+            server.cloudbase_request = fake_request
+            server.save_state_to_cloudbase(state)
+        finally:
+            server.cloudbase_request = original_request
+
+        paths = [path for _, path, _ in calls]
+        self.assertIn("collections", paths)
+        self.assertTrue(any("documents/primary" in path for path in paths))
+        self.assertTrue(any("documents/primary-backup-latest" in path for path in paths))
+        self.assertTrue(any("documents/primary-phone-13215990001" in path for path in paths))
+
+    def test_restore_phone_identity_from_cloudbase_uses_recovery_rows(self):
+        self.configure_cloudbase()
+        original_get = server.cloudbase_get_document
+        original_query = server.cloudbase_query_documents
+        phone = "13215990002"
+        recovery_payload = {
+            "phone": phone,
+            "accountId": "acct-cloudbase-recovery",
+            "profiles": {
+                "enthusiast-cloudbase-recovery": server.make_profile(
+                    id="enthusiast-cloudbase-recovery",
+                    accountId="acct-cloudbase-recovery",
+                    role="enthusiast",
+                    name="CloudBase 恢复用户",
+                    handle="@cloudbase.recovery",
+                    phone=phone,
+                )
+            },
+            "accounts": {
+                "acct-cloudbase-recovery": {
+                    "id": "acct-cloudbase-recovery",
+                    "phone": phone,
+                    "profilesByRole": {"enthusiast": "enthusiast-cloudbase-recovery"},
+                    "createdAt": server.iso_at(),
+                }
+            },
+            "follows": [{"sourceProfileId": "enthusiast-cloudbase-recovery", "targetProfileId": "coach-demo-a", "createdAt": server.iso_at()}],
+            "posts": {},
+            "bookings": [],
+            "threads": [],
+            "postFavorites": [],
+            "profileAliases": {},
+        }
+
+        try:
+            server.cloudbase_get_document = lambda doc_id: {"payload": recovery_payload} if doc_id == f"primary-phone-{phone}" else {"__http_status": 404}
+            server.cloudbase_query_documents = lambda limit=500: []
+            state = server.initial_state()
+            self.assertTrue(server.restore_phone_identity_from_remote(state, phone))
+        finally:
+            server.cloudbase_get_document = original_get
+            server.cloudbase_query_documents = original_query
+
+        account = server.resolve_account_by_phone(state, phone)
+        self.assertIsNotNone(account)
+        self.assertEqual(account["profilesByRole"]["enthusiast"], "enthusiast-cloudbase-recovery")
+        self.assertIn("coach-demo-a", server.get_follow_set(state, "enthusiast-cloudbase-recovery"))

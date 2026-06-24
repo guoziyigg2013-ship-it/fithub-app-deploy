@@ -26,10 +26,7 @@ REQUIRED_KEYS = (
     "FITHUB_URL_PREFIX",
     "FITHUB_DATA_DIR",
     "FITHUB_PUBLIC_API_ORIGIN",
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "FITHUB_SUPABASE_TABLE",
-    "FITHUB_SUPABASE_ROW_ID",
+    "FITHUB_STATE_STORAGE_PROVIDER",
     "FITHUB_ADMIN_TOKEN",
     "FITHUB_MEDIA_MAINTENANCE_TOKEN",
 )
@@ -43,6 +40,7 @@ NUMERIC_LIMIT_KEYS = (
     "FITHUB_THUMB_UPLOAD_LIMIT_BYTES",
 )
 MEDIA_STORAGE_PROVIDERS = {"", "supabase", "cos", "tencent-cos", "tencent_cos", "inline"}
+STATE_STORAGE_PROVIDERS = {"cloudbase", "supabase"}
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -92,15 +90,39 @@ def validate_env(values: dict[str, str], failures: list[str]) -> None:
     if not ok:
         failures.append(f"FITHUB_PUBLIC_API_ORIGIN {detail}: {public_origin}")
 
-    supabase_url = values.get("SUPABASE_URL", "")
-    parsed_supabase = urllib.parse.urlparse(supabase_url)
-    supabase_host = (parsed_supabase.hostname or "").lower()
-    if parsed_supabase.scheme != "https" or not supabase_host.endswith(".supabase.co") or looks_placeholder(supabase_url):
-        failures.append("SUPABASE_URL must be the real Supabase Project URL, not a placeholder.")
+    state_provider = str(values.get("FITHUB_STATE_STORAGE_PROVIDER") or "").strip().lower().replace("_", "-")
+    if state_provider not in STATE_STORAGE_PROVIDERS:
+        failures.append("FITHUB_STATE_STORAGE_PROVIDER must be cloudbase or supabase for production.")
 
-    service_role_key = values.get("SUPABASE_SERVICE_ROLE_KEY", "")
-    if looks_placeholder(service_role_key) or len(service_role_key) < 40:
-        failures.append("SUPABASE_SERVICE_ROLE_KEY must be the real service_role key.")
+    if state_provider == "cloudbase":
+        env_id = values.get("FITHUB_CLOUDBASE_ENV_ID", "")
+        if looks_placeholder(env_id) or not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,80}$", env_id or ""):
+            failures.append("FITHUB_CLOUDBASE_ENV_ID must be the real CloudBase environment ID.")
+        api_key = (
+            values.get("FITHUB_CLOUDBASE_API_KEY")
+            or values.get("TCB_API_KEY")
+            or values.get("TCB_APIKEY")
+            or values.get("CLOUDBASE_API_KEY")
+            or values.get("CLOUDBASE_APIKEY")
+            or ""
+        )
+        if looks_placeholder(api_key) or len(api_key) < 16:
+            failures.append("CloudBase API Key must be configured via FITHUB_CLOUDBASE_API_KEY or CloudBase API key injection.")
+        for key in ("FITHUB_CLOUDBASE_COLLECTION", "FITHUB_CLOUDBASE_DOC_ID"):
+            value = values.get(key, "")
+            if looks_placeholder(value):
+                failures.append(f"{key} must be configured for CloudBase state storage.")
+
+    if state_provider == "supabase":
+        supabase_url = values.get("SUPABASE_URL", "")
+        parsed_supabase = urllib.parse.urlparse(supabase_url)
+        supabase_host = (parsed_supabase.hostname or "").lower()
+        if parsed_supabase.scheme != "https" or not supabase_host.endswith(".supabase.co") or looks_placeholder(supabase_url):
+            failures.append("SUPABASE_URL must be the real Supabase Project URL, not a placeholder.")
+
+        service_role_key = values.get("SUPABASE_SERVICE_ROLE_KEY", "")
+        if looks_placeholder(service_role_key) or len(service_role_key) < 40:
+            failures.append("SUPABASE_SERVICE_ROLE_KEY must be the real service_role key.")
 
     for key in ("FITHUB_ADMIN_TOKEN", "FITHUB_MEDIA_MAINTENANCE_TOKEN"):
         value = values.get(key, "")
@@ -180,7 +202,10 @@ def validate_live_backend(backend_url: str, failures: list[str]) -> None:
         failures.append("Backend must not serve from local-fallback.")
     if storage_info.get("remoteWriteProtected"):
         failures.append("Backend remote writes are protected.")
-    if not storage_info.get("supabaseWritable"):
+    remote_writable = storage_info.get("remoteWritable")
+    if remote_writable is None:
+        remote_writable = storage_info.get("supabaseWritable")
+    if not remote_writable:
         failures.append("Backend persistent storage is not writable.")
 
 

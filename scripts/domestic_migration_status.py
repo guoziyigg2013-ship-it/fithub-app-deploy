@@ -143,7 +143,7 @@ def build_next_steps(items: list[dict[str, object]]) -> list[str]:
     if "tencent_env" in blocked_keys:
         steps.append(
             "执行 npm run init:tencent-env -- --api-origin https://api.yourdomain.com "
-            "--supabase-url https://你的项目ref.supabase.co --supabase-service-role-key 你的service_role --write"
+            "--state-provider cloudbase --cloudbase-env-id 你的CloudBase环境ID --cloudbase-api-key 你的CloudBaseAPIKey --write"
         )
     if {"web_api_origin", "miniapp_api_base", "tencent_env"} & blocked_keys:
         steps.append(

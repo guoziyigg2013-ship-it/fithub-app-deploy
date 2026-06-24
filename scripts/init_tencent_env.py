@@ -40,8 +40,13 @@ def normalize_origin(value: str) -> str:
 def build_env_values(
     *,
     api_origin: str,
-    supabase_url: str,
-    supabase_service_role_key: str,
+    supabase_url: str = "",
+    supabase_service_role_key: str = "",
+    state_provider: str = "cloudbase",
+    cloudbase_env_id: str = "",
+    cloudbase_api_key: str = "",
+    cloudbase_collection: str = "fithub_app_state",
+    cloudbase_doc_id: str = "primary",
     admin_token: str = "",
     media_maintenance_token: str = "",
     media_bucket: str = "fithub-media",
@@ -53,11 +58,21 @@ def build_env_values(
     cos_public_base_url: str = "",
 ) -> dict[str, str]:
     provider = str(media_storage_provider or "supabase").strip().lower()
+    state_provider = str(state_provider or "cloudbase").strip().lower().replace("_", "-")
     values = {
         "PORT": "10000",
         "FITHUB_URL_PREFIX": "/",
         "FITHUB_DATA_DIR": "/data/fithub",
         "FITHUB_PUBLIC_API_ORIGIN": normalize_origin(api_origin),
+        "FITHUB_STATE_STORAGE_PROVIDER": state_provider,
+        "FITHUB_CLOUDBASE_ENV_ID": str(cloudbase_env_id or "").strip(),
+        "FITHUB_CLOUDBASE_API_KEY": str(cloudbase_api_key or "").strip(),
+        "FITHUB_CLOUDBASE_INSTANCE": "(default)",
+        "FITHUB_CLOUDBASE_DATABASE": "(default)",
+        "FITHUB_CLOUDBASE_COLLECTION": str(cloudbase_collection or "fithub_app_state").strip(),
+        "FITHUB_CLOUDBASE_DOC_ID": str(cloudbase_doc_id or "primary").strip(),
+        "FITHUB_CLOUDBASE_TIMEOUT": "8",
+        "FITHUB_CLOUDBASE_BACKUP_RETENTION": "96",
         "SUPABASE_URL": str(supabase_url or "").strip().rstrip("/"),
         "SUPABASE_SERVICE_ROLE_KEY": str(supabase_service_role_key or "").strip(),
         "FITHUB_SUPABASE_TABLE": "fithub_app_state",
@@ -97,6 +112,15 @@ def render_env(values: dict[str, str]) -> str:
         "FITHUB_URL_PREFIX",
         "FITHUB_DATA_DIR",
         "FITHUB_PUBLIC_API_ORIGIN",
+        "FITHUB_STATE_STORAGE_PROVIDER",
+        "FITHUB_CLOUDBASE_ENV_ID",
+        "FITHUB_CLOUDBASE_API_KEY",
+        "FITHUB_CLOUDBASE_INSTANCE",
+        "FITHUB_CLOUDBASE_DATABASE",
+        "FITHUB_CLOUDBASE_COLLECTION",
+        "FITHUB_CLOUDBASE_DOC_ID",
+        "FITHUB_CLOUDBASE_TIMEOUT",
+        "FITHUB_CLOUDBASE_BACKUP_RETENTION",
         "SUPABASE_URL",
         "SUPABASE_SERVICE_ROLE_KEY",
         "FITHUB_SUPABASE_TABLE",
@@ -125,7 +149,13 @@ def render_env(values: dict[str, str]) -> str:
 def redact_value(key: str, value: str) -> str:
     if not value:
         return ""
-    if key in {"SUPABASE_SERVICE_ROLE_KEY", "FITHUB_ADMIN_TOKEN", "FITHUB_MEDIA_MAINTENANCE_TOKEN", "FITHUB_TENCENT_COS_SECRET_KEY"}:
+    if key in {
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "FITHUB_CLOUDBASE_API_KEY",
+        "FITHUB_ADMIN_TOKEN",
+        "FITHUB_MEDIA_MAINTENANCE_TOKEN",
+        "FITHUB_TENCENT_COS_SECRET_KEY",
+    }:
         return value[:6] + "..." + value[-4:]
     return value
 
@@ -163,8 +193,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate FitHub Tencent Cloud .env.production.")
     parser.add_argument("--api-origin", required=True, help="Production API origin, for example https://api.example.cn")
     parser.add_argument("--web-origin", default="", help="Optional public Web origin, for example https://app.example.cn")
-    parser.add_argument("--supabase-url", required=True, help="Real Supabase Project URL.")
-    parser.add_argument("--supabase-service-role-key", required=True, help="Real Supabase service_role key.")
+    parser.add_argument("--state-provider", default="cloudbase", choices=["cloudbase", "supabase"], help="Persistent state backend.")
+    parser.add_argument("--cloudbase-env-id", default="", help="CloudBase environment ID for mainland China production.")
+    parser.add_argument("--cloudbase-api-key", default="", help="CloudBase API Key. Prefer cloud console secret/env injection.")
+    parser.add_argument("--cloudbase-collection", default="fithub_app_state")
+    parser.add_argument("--cloudbase-doc-id", default="primary")
+    parser.add_argument("--supabase-url", default="", help="Legacy Supabase Project URL.")
+    parser.add_argument("--supabase-service-role-key", default="", help="Legacy Supabase service_role key.")
     parser.add_argument("--admin-token", default="", help="Optional fixed admin token. Defaults to a generated token.")
     parser.add_argument(
         "--media-maintenance-token",
@@ -187,6 +222,11 @@ def main() -> int:
     try:
         values = build_env_values(
             api_origin=args.api_origin,
+            state_provider=args.state_provider,
+            cloudbase_env_id=args.cloudbase_env_id,
+            cloudbase_api_key=args.cloudbase_api_key,
+            cloudbase_collection=args.cloudbase_collection,
+            cloudbase_doc_id=args.cloudbase_doc_id,
             supabase_url=args.supabase_url,
             supabase_service_role_key=args.supabase_service_role_key,
             admin_token=args.admin_token,

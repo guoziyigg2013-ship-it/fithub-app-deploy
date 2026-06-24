@@ -170,7 +170,7 @@ def validate_storage_status(
 
     if not allow_local_storage:
         ensure(
-            storage.get("supabaseConfigured"),
+            storage.get("remoteConfigured", storage.get("supabaseConfigured")),
             "Production smoke requires persistent remote storage. Use --allow-local-storage only for dev."
             + diagnostic_suffix,
         )
@@ -187,8 +187,11 @@ def validate_storage_status(
             not storage.get("remoteWriteProtected"),
             "Backend writes are remote-protected; production data may not persist." + diagnostic_suffix,
         )
+        remote_writable = storage.get("remoteWritable")
+        if remote_writable is None:
+            remote_writable = storage.get("supabaseWritable")
         ensure(
-            storage.get("supabaseWritable"),
+            remote_writable,
             "Persistent storage is not writable; users may lose new registrations or interactions." + diagnostic_suffix,
         )
         if "reachable" in remote_rows:

@@ -150,7 +150,10 @@ def validate_live_backend(backend_url: str, failures: list[str], *, require_cos_
         fail_list_add(failures, "Backend is serving from local-fallback.")
     if storage_info.get("remoteWriteProtected"):
         fail_list_add(failures, "Backend remote writes are protected; production data may not persist.")
-    if not storage_info.get("supabaseWritable"):
+    remote_writable = storage_info.get("remoteWritable")
+    if remote_writable is None:
+        remote_writable = storage_info.get("supabaseWritable")
+    if not remote_writable:
         fail_list_add(failures, "Backend persistent storage is not writable.")
     if remote_rows and not remote_rows.get("reachable"):
         fail_list_add(failures, f"Backend remote rows are unreachable: {remote_rows.get('error') or 'unknown error'}")

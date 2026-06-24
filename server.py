@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
@@ -74,6 +75,30 @@ SUPABASE_BACKUP_RETENTION = read_int_env("FITHUB_SUPABASE_BACKUP_RETENTION", 96,
 SUPABASE_BACKUP_PRUNE_INTERVAL_SECONDS = read_int_env("FITHUB_SUPABASE_PRUNE_INTERVAL_SECONDS", 3600, minimum=60)
 SUPABASE_BACKUP_PREFIX = f"{SUPABASE_STATE_ROW_ID}-backup"
 SUPABASE_PHONE_RECOVERY_PREFIX = f"{SUPABASE_STATE_ROW_ID}-phone"
+STATE_STORAGE_PROVIDER = (os.getenv("FITHUB_STATE_STORAGE_PROVIDER") or "").strip().lower()
+CLOUDBASE_ENV_ID = (
+    os.getenv("FITHUB_CLOUDBASE_ENV_ID")
+    or os.getenv("TCB_ENV_ID")
+    or os.getenv("TCB_ENV")
+    or os.getenv("CLOUDBASE_ENV_ID")
+    or ""
+).strip()
+CLOUDBASE_API_KEY = (
+    os.getenv("FITHUB_CLOUDBASE_API_KEY")
+    or os.getenv("TCB_API_KEY")
+    or os.getenv("TCB_APIKEY")
+    or os.getenv("CLOUDBASE_API_KEY")
+    or os.getenv("CLOUDBASE_APIKEY")
+    or ""
+).strip()
+CLOUDBASE_INSTANCE = (os.getenv("FITHUB_CLOUDBASE_INSTANCE") or "(default)").strip()
+CLOUDBASE_DATABASE = (os.getenv("FITHUB_CLOUDBASE_DATABASE") or "(default)").strip()
+CLOUDBASE_STATE_COLLECTION = (os.getenv("FITHUB_CLOUDBASE_COLLECTION") or "fithub_app_state").strip()
+CLOUDBASE_STATE_DOC_ID = (os.getenv("FITHUB_CLOUDBASE_DOC_ID") or "primary").strip()
+CLOUDBASE_TIMEOUT_SECONDS = read_float_env("FITHUB_CLOUDBASE_TIMEOUT", 12, minimum=1)
+CLOUDBASE_BACKUP_RETENTION = read_int_env("FITHUB_CLOUDBASE_BACKUP_RETENTION", SUPABASE_BACKUP_RETENTION, minimum=4)
+CLOUDBASE_BACKUP_PREFIX = f"{CLOUDBASE_STATE_DOC_ID}-backup"
+CLOUDBASE_PHONE_RECOVERY_PREFIX = f"{CLOUDBASE_STATE_DOC_ID}-phone"
 MAP_PROVIDER = (os.getenv("FITHUB_MAP_PROVIDER") or "").strip().lower()
 AMAP_WEB_KEY = (os.getenv("FITHUB_AMAP_WEB_KEY") or "").strip()
 AMAP_SECURITY_CODE = (os.getenv("FITHUB_AMAP_SECURITY_CODE") or "").strip()
@@ -178,18 +203,26 @@ DEFAULT_LOCATION_STATUS = "默认城市为厦门，你可以点击顶部城市�
 STORE_LOCK = threading.Lock()
 STATE_CACHE = None
 SUPABASE_MEDIA_BUCKET_READY = False
+CLOUDBASE_COLLECTION_READY = False
 SUPABASE_LAST_BACKUP_PRUNE_TS = 0.0
 STATE_RUNTIME_META = {
     "loaded_from": "uninitialized",
+    "remote_provider": "",
     "supabase_writable": True,
+    "cloudbase_writable": True,
     "last_known_remote_real_profiles": 0,
     "last_known_remote_signal_score": 0,
     "remote_repair_required": False,
     "supabase_config_valid": True,
     "supabase_config_issue": "",
+    "cloudbase_config_valid": True,
+    "cloudbase_config_issue": "",
     "last_supabase_refresh_attempt": 0.0,
     "last_supabase_refresh_attempt_at": "",
     "last_supabase_refresh_error": "",
+    "last_remote_refresh_attempt": 0.0,
+    "last_remote_refresh_attempt_at": "",
+    "last_remote_refresh_error": "",
 }
 MAX_INLINE_AVATAR_CHARS = 120_000
 MAX_INLINE_MEDIA_CHARS = 12_000_000
@@ -775,17 +808,91 @@ def verify_sms_code(state, session, phone, code):
     return phone_key
 
 
-def set_runtime_storage_state(loaded_from, supabase_writable, state=None):
+def set_runtime_storage_state(loaded_from, supabase_writable, state=None, provider=""):
     STATE_RUNTIME_META["loaded_from"] = loaded_from
     STATE_RUNTIME_META["supabase_writable"] = bool(supabase_writable)
+    if provider:
+        STATE_RUNTIME_META["remote_provider"] = provider
+    if provider == "cloudbase":
+        STATE_RUNTIME_META["cloudbase_writable"] = bool(supabase_writable)
     if isinstance(state, dict):
         metrics = state_integrity_metrics(state)
         STATE_RUNTIME_META["last_known_remote_real_profiles"] = metrics["real_profiles"]
         STATE_RUNTIME_META["last_known_remote_signal_score"] = metrics["score"]
 
 
+def requested_state_storage_provider():
+    provider = STATE_STORAGE_PROVIDER.replace("_", "-")
+    if provider in {"cloudbase", "tcb", "tencent-cloudbase"}:
+        return "cloudbase"
+    if provider in {"supabase", "postgres"}:
+        return "supabase"
+    if provider in {"local", "inline", "json"}:
+        return "local"
+    return ""
+
+
+def cloudbase_url_diagnostics():
+    env_id = CLOUDBASE_ENV_ID
+    issue = ""
+    if env_id and (env_id.startswith("http://") or env_id.startswith("https://")):
+        issue = "FITHUB_CLOUDBASE_ENV_ID 只需要填写环境 ID，不需要填写 URL。"
+    elif looks_like_placeholder(env_id):
+        issue = "FITHUB_CLOUDBASE_ENV_ID 看起来仍是占位符。"
+    elif env_id and not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,80}$", env_id):
+        issue = "FITHUB_CLOUDBASE_ENV_ID 格式看起来不正确。"
+    elif looks_like_placeholder(CLOUDBASE_API_KEY):
+        issue = "FITHUB_CLOUDBASE_API_KEY 看起来仍是占位符。"
+    elif looks_like_placeholder(CLOUDBASE_STATE_COLLECTION):
+        issue = "FITHUB_CLOUDBASE_COLLECTION 看起来仍是占位符。"
+
+    host = f"{env_id}.api.tcloudbasegateway.com" if env_id and not issue.startswith("FITHUB_CLOUDBASE_ENV_ID 只需要") else ""
+    return {
+        "configured": bool(env_id or CLOUDBASE_API_KEY),
+        "envId": env_id,
+        "host": host,
+        "hasApiKey": bool(CLOUDBASE_API_KEY),
+        "collection": CLOUDBASE_STATE_COLLECTION,
+        "docId": CLOUDBASE_STATE_DOC_ID,
+        "issue": issue,
+    }
+
+
+def cloudbase_config_valid():
+    diagnostics = cloudbase_url_diagnostics()
+    valid = bool(
+        diagnostics["envId"]
+        and diagnostics["hasApiKey"]
+        and diagnostics["collection"]
+        and diagnostics["docId"]
+        and not diagnostics["issue"]
+    )
+    STATE_RUNTIME_META["cloudbase_config_valid"] = valid
+    STATE_RUNTIME_META["cloudbase_config_issue"] = diagnostics["issue"]
+    return valid
+
+
+def cloudbase_storage_enabled():
+    return bool(cloudbase_config_valid())
+
+
 def supabase_storage_enabled():
     return bool(supabase_config_valid() and SUPABASE_SERVICE_ROLE_KEY)
+
+
+def active_state_storage_provider():
+    requested = requested_state_storage_provider()
+    if requested == "cloudbase":
+        return "cloudbase" if cloudbase_storage_enabled() else ""
+    if requested == "supabase":
+        return "supabase" if supabase_storage_enabled() else ""
+    if requested == "local":
+        return ""
+    if cloudbase_storage_enabled():
+        return "cloudbase"
+    if supabase_storage_enabled():
+        return "supabase"
+    return ""
 
 
 def looks_like_placeholder(value):
@@ -1644,28 +1751,43 @@ def is_materially_richer_state(candidate_metrics, baseline_metrics):
 
 def storage_runtime_status(state=None):
     loaded_from = str(STATE_RUNTIME_META.get("loaded_from") or "uninitialized")
+    state_provider = active_state_storage_provider()
     supabase_diagnostics = supabase_url_diagnostics()
+    cloudbase_diagnostics = cloudbase_url_diagnostics()
     supabase_configured = supabase_storage_enabled()
+    cloudbase_configured = cloudbase_storage_enabled()
     supabase_writable = bool(STATE_RUNTIME_META.get("supabase_writable", True))
+    cloudbase_writable = bool(STATE_RUNTIME_META.get("cloudbase_writable", True))
+    remote_writable = cloudbase_writable if state_provider == "cloudbase" else supabase_writable
     metrics = state_integrity_metrics(state)
     warnings = []
 
-    if not supabase_configured:
-        warnings.append("Supabase 未启用，当前只能使用本地 JSON；生产环境不建议这样运行。")
-    if supabase_diagnostics.get("issue"):
+    if not state_provider:
+        warnings.append("远端持久化未启用，当前只能使用本地 JSON；生产环境不建议这样运行。")
+    if requested_state_storage_provider() == "cloudbase" and not cloudbase_configured:
+        warnings.append(cloudbase_diagnostics.get("issue") or "CloudBase 状态存储未完整配置。")
+    if requested_state_storage_provider() == "supabase" and not supabase_configured:
+        warnings.append(supabase_diagnostics.get("issue") or "Supabase 状态存储未完整配置。")
+    if supabase_diagnostics.get("issue") and (state_provider == "supabase" or requested_state_storage_provider() == "supabase"):
         warnings.append(supabase_diagnostics["issue"])
+    if cloudbase_diagnostics.get("issue") and (state_provider == "cloudbase" or requested_state_storage_provider() == "cloudbase"):
+        warnings.append(cloudbase_diagnostics["issue"])
     if supabase_diagnostics.get("configured") and not supabase_diagnostics.get("hasServiceRoleKey"):
         warnings.append("SUPABASE_SERVICE_ROLE_KEY 未配置，无法读写远端生产数据。")
+    if cloudbase_diagnostics.get("configured") and not cloudbase_diagnostics.get("hasApiKey"):
+        warnings.append("CloudBase API Key 未配置，无法读写国内生产数据。")
     if loaded_from == "local-fallback":
         warnings.append("最近一次远端读取失败，服务正在使用本地 fallback，写入不会覆盖远端数据。")
-    if supabase_configured and not supabase_writable:
+    if state_provider == "supabase" and supabase_configured and not supabase_writable:
         warnings.append("Supabase 当前不可写，用户新数据可能暂存在本地 fallback。")
-    if metrics["real_profiles"] > 0 and loaded_from in {"local-file", "supabase-empty"} and supabase_configured:
-        warnings.append("检测到真实用户数据，但当前加载源不是常规 Supabase 主状态，请关注部署环境。")
+    if state_provider == "cloudbase" and cloudbase_configured and not cloudbase_writable:
+        warnings.append("CloudBase 当前不可写，用户新数据可能暂存在本地 fallback。")
+    if metrics["real_profiles"] > 0 and loaded_from in {"local-file", "supabase-empty", "cloudbase-empty"} and state_provider:
+        warnings.append("检测到真实用户数据，但当前加载源不是常规远端主状态，请关注部署环境。")
 
     status = "ok"
     if warnings:
-        status = "degraded" if supabase_configured else "local-only"
+        status = "degraded" if state_provider else "local-only"
 
     return {
         "ok": status == "ok",
@@ -1673,10 +1795,16 @@ def storage_runtime_status(state=None):
         "checkedAt": iso_at(),
         "storage": {
             "loadedFrom": loaded_from,
+            "stateProvider": state_provider or "local",
+            "remoteConfigured": bool(state_provider),
+            "remoteWritable": bool(remote_writable),
             "supabaseConfigured": bool(supabase_configured),
             "supabaseConfigValid": bool(STATE_RUNTIME_META.get("supabase_config_valid", True)),
-            "supabaseWritable": supabase_writable,
-            "remoteWriteProtected": loaded_from == "local-fallback" or not supabase_writable,
+            "supabaseWritable": bool(remote_writable if state_provider == "cloudbase" else supabase_writable),
+            "cloudbaseConfigured": bool(cloudbase_configured),
+            "cloudbaseConfigValid": bool(STATE_RUNTIME_META.get("cloudbase_config_valid", True)),
+            "cloudbaseWritable": cloudbase_writable,
+            "remoteWriteProtected": loaded_from == "local-fallback" or not remote_writable,
             "dataDir": str(DATA_DIR),
         },
         "supabase": {
@@ -1694,6 +1822,21 @@ def storage_runtime_status(state=None):
             "lastRefreshError": str(STATE_RUNTIME_META.get("last_supabase_refresh_error") or "")[:240],
             "backupRetention": SUPABASE_BACKUP_RETENTION,
             "backupPruneIntervalSeconds": SUPABASE_BACKUP_PRUNE_INTERVAL_SECONDS,
+        },
+        "cloudbase": {
+            "configured": cloudbase_diagnostics["configured"],
+            "envId": cloudbase_diagnostics["envId"],
+            "host": cloudbase_diagnostics["host"],
+            "hasApiKey": cloudbase_diagnostics["hasApiKey"],
+            "configIssue": cloudbase_diagnostics["issue"],
+            "instance": CLOUDBASE_INSTANCE if cloudbase_configured else "",
+            "database": CLOUDBASE_DATABASE if cloudbase_configured else "",
+            "collection": CLOUDBASE_STATE_COLLECTION if cloudbase_configured else "",
+            "docId": CLOUDBASE_STATE_DOC_ID if cloudbase_configured else "",
+            "timeoutSeconds": CLOUDBASE_TIMEOUT_SECONDS,
+            "lastRefreshAttemptAt": STATE_RUNTIME_META.get("last_remote_refresh_attempt_at") or "",
+            "lastRefreshError": str(STATE_RUNTIME_META.get("last_remote_refresh_error") or "")[:240],
+            "backupRetention": CLOUDBASE_BACKUP_RETENTION,
         },
         "media": {
             "storageProvider": active_media_storage_provider() or "inline",
@@ -1730,6 +1873,49 @@ def supabase_state_rows_report(limit=160):
         "latestBackupPresent": any(str(row.get("id") or "") == f"{SUPABASE_BACKUP_PREFIX}-latest" for row in rows),
         "phoneRecoveryRows": sum(1 for row in rows if str(row.get("id") or "").startswith(phone_prefix)),
         "latestUpdatedAt": str((rows[0] or {}).get("updated_at") or "") if rows else "",
+    }
+
+
+def cloudbase_state_rows_report(limit=160):
+    if not cloudbase_storage_enabled():
+        return {
+            "reachable": False,
+            "primaryRowPresent": False,
+            "backupRows": 0,
+            "phoneRecoveryRows": 0,
+            "latestUpdatedAt": "",
+        }
+
+    rows = cloudbase_query_documents(limit=max(1, int(limit)))
+    backup_prefix = f"{CLOUDBASE_BACKUP_PREFIX}-20"
+    phone_prefix = f"{CLOUDBASE_PHONE_RECOVERY_PREFIX}-"
+    return {
+        "reachable": True,
+        "primaryRowPresent": any(str(row.get("_id") or row.get("id") or "") == CLOUDBASE_STATE_DOC_ID for row in rows),
+        "backupRows": sum(1 for row in rows if str(row.get("_id") or row.get("id") or "").startswith(backup_prefix)),
+        "latestBackupPresent": any(str(row.get("_id") or row.get("id") or "") == f"{CLOUDBASE_BACKUP_PREFIX}-latest" for row in rows),
+        "phoneRecoveryRows": sum(1 for row in rows if str(row.get("_id") or row.get("id") or "").startswith(phone_prefix)),
+        "latestUpdatedAt": str((rows[0] or {}).get("updated_at") or "") if rows else "",
+    }
+
+
+def remote_state_rows_report(limit=160):
+    provider = active_state_storage_provider()
+    if provider == "cloudbase":
+        report = cloudbase_state_rows_report(limit=limit)
+        report["provider"] = "cloudbase"
+        return report
+    if provider == "supabase":
+        report = supabase_state_rows_report(limit=limit)
+        report["provider"] = "supabase"
+        return report
+    return {
+        "provider": "local",
+        "reachable": False,
+        "primaryRowPresent": False,
+        "backupRows": 0,
+        "phoneRecoveryRows": 0,
+        "latestUpdatedAt": "",
     }
 
 
@@ -1775,6 +1961,121 @@ def supabase_rest_url(path):
 
 def supabase_storage_url(path):
     return f"{SUPABASE_URL}/storage/v1/{path.lstrip('/')}"
+
+
+def cloudbase_database_url(path):
+    instance = quote(CLOUDBASE_INSTANCE or "(default)", safe="()")
+    database = quote(CLOUDBASE_DATABASE or "(default)", safe="()")
+    clean_path = str(path or "").lstrip("/")
+    return (
+        f"https://{CLOUDBASE_ENV_ID}.api.tcloudbasegateway.com"
+        f"/v1/database/instances/{instance}/databases/{database}/{clean_path}"
+    )
+
+
+def cloudbase_collection_path(suffix=""):
+    collection = quote(CLOUDBASE_STATE_COLLECTION, safe="")
+    clean_suffix = str(suffix or "").lstrip("/")
+    if clean_suffix:
+        return f"collections/{collection}/{clean_suffix}"
+    return f"collections/{collection}"
+
+
+def cloudbase_request(method, path, payload=None, allow_statuses=None):
+    headers = {
+        "Authorization": f"Bearer {CLOUDBASE_API_KEY}",
+        "Accept": "application/json",
+    }
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+
+    data = None
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    request = Request(
+        cloudbase_database_url(path),
+        data=data,
+        headers=headers,
+        method=method.upper(),
+    )
+    try:
+        with urlopen(request, timeout=CLOUDBASE_TIMEOUT_SECONDS) as response:
+            raw = response.read()
+            if not raw:
+                return None
+            return json.loads(raw.decode("utf-8"))
+    except HTTPError as exc:
+        status = getattr(exc, "code", None)
+        if allow_statuses and status in allow_statuses:
+            raw = exc.read() if hasattr(exc, "read") else b""
+            if not raw:
+                return {"__http_status": status}
+            try:
+                parsed = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                parsed = {"raw": raw.decode("utf-8", errors="ignore")}
+            if isinstance(parsed, dict):
+                parsed["__http_status"] = status
+            return parsed
+        raise
+
+
+def cloudbase_ensure_collection():
+    global CLOUDBASE_COLLECTION_READY
+    if CLOUDBASE_COLLECTION_READY:
+        return
+    result = cloudbase_request(
+        "POST",
+        "collections",
+        {"collectionName": CLOUDBASE_STATE_COLLECTION},
+        allow_statuses={409},
+    )
+    status = (result or {}).get("__http_status") if isinstance(result, dict) else None
+    if status in {None, 409}:
+        CLOUDBASE_COLLECTION_READY = True
+
+
+def cloudbase_get_document(doc_id):
+    doc_id = quote(str(doc_id or ""), safe="")
+    return cloudbase_request(
+        "GET",
+        cloudbase_collection_path(f"documents/{doc_id}"),
+        allow_statuses={404},
+    )
+
+
+def cloudbase_upsert_document(doc_id, payload):
+    doc_id = quote(str(doc_id or ""), safe="")
+    return cloudbase_request(
+        "PATCH",
+        cloudbase_collection_path(f"documents/{doc_id}"),
+        {
+            "data": {"$set": payload},
+            "upsert": True,
+            "returnDoc": False,
+        },
+        allow_statuses={404},
+    )
+
+
+def cloudbase_query_documents(limit=160):
+    params = urlencode(
+        {
+            "limit": max(1, int(limit)),
+            "order": json.dumps([{"field": "updated_at", "direction": "desc"}], ensure_ascii=False),
+        }
+    )
+    result = cloudbase_request(
+        "GET",
+        f"{cloudbase_collection_path('documents')}?{params}",
+        allow_statuses={404},
+    )
+    if isinstance(result, dict) and result.get("__http_status") == 404:
+        return []
+    if isinstance(result, dict) and isinstance(result.get("list"), list):
+        return result.get("list") or []
+    return []
 
 
 def supabase_request(method, path, payload=None, prefer=None):
@@ -1939,6 +2240,114 @@ def save_state_to_supabase(state):
     except Exception as exc:
         storage_log(f"Supabase backup prune skipped: {exc}")
     set_runtime_storage_state("supabase", True, payload)
+
+
+def cloudbase_extract_payload(row):
+    if not isinstance(row, dict) or row.get("__http_status") == 404:
+        return None
+    payload = row.get("payload")
+    return payload if isinstance(payload, dict) else None
+
+
+def load_state_from_cloudbase():
+    STATE_RUNTIME_META["remote_repair_required"] = False
+    primary_row = cloudbase_get_document(CLOUDBASE_STATE_DOC_ID)
+    primary_state = None
+    primary_metrics = state_integrity_metrics(None)
+    primary_payload = cloudbase_extract_payload(primary_row)
+    if primary_payload:
+        primary_state = sanitize_state(primary_payload)
+        primary_metrics = state_integrity_metrics(primary_state)
+
+    best_backup_state = None
+    best_backup_metrics = state_integrity_metrics(None)
+    best_backup_row_id = ""
+    for row in cloudbase_query_documents(limit=24):
+        row_id = str(row.get("_id") or row.get("id") or "")
+        payload = cloudbase_extract_payload(row)
+        if not row_id.startswith(CLOUDBASE_BACKUP_PREFIX) or not payload:
+            continue
+        candidate_state = sanitize_state(payload)
+        candidate_metrics = state_integrity_metrics(candidate_state)
+        if is_materially_richer_state(candidate_metrics, best_backup_metrics):
+            best_backup_state = candidate_state
+            best_backup_metrics = candidate_metrics
+            best_backup_row_id = row_id
+
+    if primary_state is None and best_backup_state is not None:
+        storage_log(f"CloudBase primary row missing, restored from backup row: {best_backup_row_id}")
+        STATE_RUNTIME_META["remote_repair_required"] = True
+        return best_backup_state
+
+    if primary_state is not None and best_backup_state is not None and is_materially_richer_state(best_backup_metrics, primary_metrics):
+        storage_log(
+            "CloudBase primary row looked less complete than backup; "
+            f"using backup row {best_backup_row_id} instead."
+        )
+        STATE_RUNTIME_META["remote_repair_required"] = True
+        return best_backup_state
+
+    return primary_state
+
+
+def save_state_to_cloudbase(state):
+    payload = sanitize_state(deepcopy(state))
+    saved_at = now_utc()
+    cloudbase_ensure_collection()
+    rows_to_save = [
+        (
+            CLOUDBASE_STATE_DOC_ID,
+            {
+                "id": CLOUDBASE_STATE_DOC_ID,
+                "payload": payload,
+                "kind": "primary",
+                "updated_at": saved_at.isoformat(),
+            },
+        ),
+        (
+            f"{CLOUDBASE_BACKUP_PREFIX}-latest",
+            {
+                "id": f"{CLOUDBASE_BACKUP_PREFIX}-latest",
+                "payload": payload,
+                "kind": "backup-latest",
+                "updated_at": saved_at.isoformat(),
+            },
+        ),
+        (
+            f"{CLOUDBASE_BACKUP_PREFIX}-{saved_at.strftime('%Y%m%d%H')}",
+            {
+                "id": f"{CLOUDBASE_BACKUP_PREFIX}-{saved_at.strftime('%Y%m%d%H')}",
+                "payload": payload,
+                "kind": "backup-hourly",
+                "updated_at": saved_at.isoformat(),
+            },
+        ),
+    ]
+    for row in build_phone_recovery_rows(payload, saved_at):
+        row_id = str(row.get("id") or "")
+        if row_id.startswith(SUPABASE_PHONE_RECOVERY_PREFIX):
+            row_id = row_id.replace(SUPABASE_PHONE_RECOVERY_PREFIX, CLOUDBASE_PHONE_RECOVERY_PREFIX, 1)
+        if not row_id:
+            continue
+        rows_to_save.append(
+            (
+                row_id,
+                {
+                    "id": row_id,
+                    "payload": row.get("payload") or {},
+                    "kind": "phone-recovery",
+                    "updated_at": row.get("updated_at") or saved_at.isoformat(),
+                },
+            )
+        )
+
+    for row_id, row_payload in rows_to_save:
+        result = cloudbase_upsert_document(row_id, row_payload)
+        if isinstance(result, dict) and result.get("__http_status") == 404:
+            cloudbase_ensure_collection()
+            cloudbase_upsert_document(row_id, row_payload)
+
+    set_runtime_storage_state("cloudbase", True, payload, provider="cloudbase")
 
 
 def find_profile_by_role_phone(state, role, phone):
@@ -2475,8 +2884,100 @@ def merge_phone_recovery_rows_from_supabase(state):
     return changed
 
 
+def load_phone_recovery_from_cloudbase(phone):
+    if not cloudbase_storage_enabled():
+        return None
+    phone_key = normalize_phone(phone)
+    if len(phone_key) != 11:
+        return None
+
+    best_payload = None
+    best_metrics = recovery_slice_metrics(None)
+
+    direct_row_id = f"{CLOUDBASE_PHONE_RECOVERY_PREFIX}-{phone_key}"
+    direct_payload = cloudbase_extract_payload(cloudbase_get_document(direct_row_id))
+    if direct_payload:
+        candidate_metrics = recovery_slice_metrics(direct_payload)
+        if is_materially_richer_state(candidate_metrics, best_metrics):
+            best_payload = direct_payload
+            best_metrics = candidate_metrics
+
+    for row in cloudbase_query_documents(limit=24):
+        row_id = str(row.get("_id") or row.get("id") or "")
+        payload = cloudbase_extract_payload(row)
+        if not row_id.startswith(CLOUDBASE_BACKUP_PREFIX) or not payload:
+            continue
+        candidate_payload = build_phone_recovery_slice(payload, phone_key)
+        candidate_metrics = recovery_slice_metrics(candidate_payload)
+        if is_materially_richer_state(candidate_metrics, best_metrics):
+            best_payload = candidate_payload
+            best_metrics = candidate_metrics
+
+    return best_payload
+
+
+def load_phone_recovery_rows_from_cloudbase(limit=500):
+    if not cloudbase_storage_enabled():
+        return []
+    latest_by_phone = {}
+    prefix = f"{CLOUDBASE_PHONE_RECOVERY_PREFIX}-"
+    for row in cloudbase_query_documents(limit=limit):
+        row_id = str(row.get("_id") or row.get("id") or "")
+        payload = cloudbase_extract_payload(row)
+        if not row_id.startswith(prefix) or not payload:
+            continue
+        phone_key = normalize_phone(payload.get("phone") or row_id[len(prefix):])
+        if len(phone_key) != 11 or phone_key in latest_by_phone:
+            continue
+        latest_by_phone[phone_key] = payload
+    return list(latest_by_phone.values())
+
+
+def merge_phone_recovery_rows_from_cloudbase(state):
+    if not cloudbase_storage_enabled():
+        return False
+    try:
+        payloads = load_phone_recovery_rows_from_cloudbase()
+    except Exception as exc:
+        storage_log(f"CloudBase phone recovery row scan skipped: {exc}")
+        return False
+
+    changed = False
+    merged_count = 0
+    for payload in payloads:
+        if merge_phone_recovery_slice(state, payload):
+            changed = True
+            merged_count += 1
+    if changed:
+        storage_log(f"Merged {merged_count} CloudBase phone recovery row(s) into primary state.")
+    return changed
+
+
+def merge_phone_recovery_rows_from_remote(state):
+    provider = active_state_storage_provider()
+    if provider == "cloudbase":
+        return merge_phone_recovery_rows_from_cloudbase(state)
+    if provider == "supabase":
+        return merge_phone_recovery_rows_from_supabase(state)
+    return False
+
+
 def restore_phone_identity_from_supabase(state, phone):
     payload = load_phone_recovery_from_supabase(phone)
+    if not payload:
+        return False
+    changed = merge_phone_recovery_slice(state, payload)
+    return bool(resolve_account_by_phone(state, phone)) or changed
+
+
+def restore_phone_identity_from_remote(state, phone):
+    provider = active_state_storage_provider()
+    if provider == "cloudbase":
+        payload = load_phone_recovery_from_cloudbase(phone)
+    elif provider == "supabase":
+        payload = load_phone_recovery_from_supabase(phone)
+    else:
+        payload = None
     if not payload:
         return False
     changed = merge_phone_recovery_slice(state, payload)
@@ -2529,7 +3030,7 @@ def ensure_session_identity(state, session, preferred_role="", requested_profile
     for phone in session_phone_candidates(state, session):
         account = resolve_account_by_phone(state, phone)
         if not account:
-            restore_phone_identity_from_supabase(state, phone)
+            restore_phone_identity_from_remote(state, phone)
             account = resolve_account_by_phone(state, phone)
         if not account:
             continue
@@ -4049,29 +4550,59 @@ def ensure_data_file():
         STATE_FILE.write_text(json.dumps(initial_state(), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def load_state_from_remote_provider(provider):
+    if provider == "cloudbase":
+        return load_state_from_cloudbase()
+    if provider == "supabase":
+        return load_state_from_supabase()
+    return None
+
+
+def save_state_to_remote_provider(provider, state):
+    if provider == "cloudbase":
+        return save_state_to_cloudbase(state)
+    if provider == "supabase":
+        return save_state_to_supabase(state)
+    return None
+
+
+def remote_writable_flag(provider):
+    if provider == "cloudbase":
+        return bool(STATE_RUNTIME_META.get("cloudbase_writable", True))
+    return bool(STATE_RUNTIME_META.get("supabase_writable", True))
+
+
+def mark_remote_unwritable(provider):
+    if provider == "cloudbase":
+        STATE_RUNTIME_META["cloudbase_writable"] = False
+    else:
+        STATE_RUNTIME_META["supabase_writable"] = False
+
+
 def load_state():
-    if supabase_storage_enabled():
+    provider = active_state_storage_provider()
+    if provider:
         try:
-            state = load_state_from_supabase()
+            state = load_state_from_remote_provider(provider)
             if state is None:
-                storage_log("Supabase state row missing, initializing a fresh remote state.")
+                storage_log(f"{provider} state row missing, initializing a fresh remote state.")
                 state = load_state_from_local(create_if_missing=False) or initial_state()
-                set_runtime_storage_state("supabase-empty", True, state)
-                save_state_to_supabase(state)
+                set_runtime_storage_state(f"{provider}-empty", True, state, provider=provider)
+                save_state_to_remote_provider(provider, state)
             else:
-                set_runtime_storage_state("supabase", True, state)
+                set_runtime_storage_state(provider, True, state, provider=provider)
             changed = bool(STATE_RUNTIME_META.pop("remote_repair_required", False))
-            changed = merge_phone_recovery_rows_from_supabase(state) or changed
+            changed = merge_phone_recovery_rows_from_remote(state) or changed
             changed = merge_demo_state(state) or changed
             if reconcile_account_registry(state):
                 changed = True
             if changed:
-                save_state_to_supabase(state)
+                save_state_to_remote_provider(provider, state)
             return sanitize_state(state)
         except Exception as exc:
-            storage_log(f"Supabase load failed, fallback to local file: {exc}")
+            storage_log(f"{provider} load failed, fallback to local file: {exc}")
             state = load_state_from_local(create_if_missing=False) or initial_state()
-            set_runtime_storage_state("local-fallback", False)
+            set_runtime_storage_state("local-fallback", False, provider=provider)
             changed = merge_demo_state(state)
             if reconcile_account_registry(state):
                 changed = True
@@ -4088,9 +4619,10 @@ def load_state():
 
 
 def save_state(state):
-    if supabase_storage_enabled():
-        if not STATE_RUNTIME_META.get("supabase_writable", True):
-            storage_log("Supabase writes skipped because the current state was loaded from local fallback after a remote read failure.")
+    provider = active_state_storage_provider()
+    if provider:
+        if not remote_writable_flag(provider):
+            storage_log(f"{provider} writes skipped because the current state was loaded from local fallback after a remote read failure.")
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             with STATE_FILE.open("w", encoding="utf-8") as handle:
                 json.dump(state, handle, ensure_ascii=False, indent=2)
@@ -4099,7 +4631,7 @@ def save_state(state):
         current_metrics = state_integrity_metrics(state)
 
         if STATE_RUNTIME_META.get("last_known_remote_real_profiles", 0) > 0 and current_metrics["real_profiles"] == 0:
-            storage_log("Refusing to overwrite Supabase with demo-only state because the last known remote state contained registered users.")
+            storage_log(f"Refusing to overwrite {provider} with demo-only state because the last known remote state contained registered users.")
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             with STATE_FILE.open("w", encoding="utf-8") as handle:
                 json.dump(state, handle, ensure_ascii=False, indent=2)
@@ -4111,7 +4643,7 @@ def save_state(state):
         }
         if is_materially_richer_state(previous_metrics, current_metrics):
             storage_log(
-                "Refusing to overwrite Supabase with a materially less complete state; "
+                f"Refusing to overwrite {provider} with a materially less complete state; "
                 "keeping the current payload in local fallback storage only."
             )
             DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -4120,26 +4652,27 @@ def save_state(state):
             return
 
         try:
-            save_state_to_supabase(state)
+            save_state_to_remote_provider(provider, state)
             return
         except Exception as exc:
-            storage_log(f"Supabase save failed, fallback to local file: {exc}")
-            STATE_RUNTIME_META["supabase_writable"] = False
+            storage_log(f"{provider} save failed, fallback to local file: {exc}")
+            mark_remote_unwritable(provider)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with STATE_FILE.open("w", encoding="utf-8") as handle:
         json.dump(state, handle, ensure_ascii=False, indent=2)
 
 
-def refresh_state_cache_from_supabase(force=False):
+def refresh_state_cache_from_remote(force=False):
     global STATE_CACHE
-    if not supabase_storage_enabled():
+    provider = active_state_storage_provider()
+    if not provider:
         return False
     if STATE_RUNTIME_META.get("loaded_from") != "local-fallback":
         return False
 
     current_ts = time.monotonic()
-    last_attempt = float(STATE_RUNTIME_META.get("last_supabase_refresh_attempt") or 0)
+    last_attempt = float(STATE_RUNTIME_META.get("last_remote_refresh_attempt") or 0)
     if (
         not force
         and SUPABASE_REFRESH_COOLDOWN_SECONDS > 0
@@ -4148,29 +4681,35 @@ def refresh_state_cache_from_supabase(force=False):
     ):
         return False
 
-    STATE_RUNTIME_META["last_supabase_refresh_attempt"] = current_ts
-    STATE_RUNTIME_META["last_supabase_refresh_attempt_at"] = iso_at()
+    STATE_RUNTIME_META["last_remote_refresh_attempt"] = current_ts
+    STATE_RUNTIME_META["last_remote_refresh_attempt_at"] = iso_at()
 
     try:
-        state = load_state_from_supabase()
+        state = load_state_from_remote_provider(provider)
         if not state:
             return False
         changed = bool(STATE_RUNTIME_META.pop("remote_repair_required", False))
-        changed = merge_phone_recovery_rows_from_supabase(state) or changed
+        changed = merge_phone_recovery_rows_from_remote(state) or changed
         changed = merge_demo_state(state) or changed
         if reconcile_account_registry(state):
             changed = True
         if changed:
-            save_state_to_supabase(state)
+            save_state_to_remote_provider(provider, state)
         STATE_CACHE = sanitize_state(state)
-        set_runtime_storage_state("supabase", True, STATE_CACHE)
+        set_runtime_storage_state(provider, True, STATE_CACHE, provider=provider)
+        STATE_RUNTIME_META["last_remote_refresh_error"] = ""
         STATE_RUNTIME_META["last_supabase_refresh_error"] = ""
-        storage_log("Recovered state cache from Supabase after earlier local fallback.")
+        storage_log(f"Recovered state cache from {provider} after earlier local fallback.")
         return True
     except Exception as exc:
+        STATE_RUNTIME_META["last_remote_refresh_error"] = str(exc)
         STATE_RUNTIME_META["last_supabase_refresh_error"] = str(exc)
-        storage_log(f"Supabase refresh retry failed: {exc}")
+        storage_log(f"{provider} refresh retry failed: {exc}")
         return False
+
+
+def refresh_state_cache_from_supabase(force=False):
+    return refresh_state_cache_from_remote(force=force)
 
 
 def create_session_record():
@@ -5849,7 +6388,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
             if STATE_CACHE is None:
                 STATE_CACHE = load_state()
             elif STATE_RUNTIME_META.get("loaded_from") == "local-fallback":
-                refresh_state_cache_from_supabase()
+                refresh_state_cache_from_remote()
             state = STATE_CACHE
             result = mutator(state)
             save_state(state)
@@ -5861,7 +6400,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
             if STATE_CACHE is None:
                 STATE_CACHE = load_state()
             elif STATE_RUNTIME_META.get("loaded_from") == "local-fallback":
-                refresh_state_cache_from_supabase()
+                refresh_state_cache_from_remote()
             return reader(STATE_CACHE)
 
     def _handle_api_get(self, parsed):
@@ -5884,10 +6423,15 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 response = storage_runtime_status(state)
                 if include_remote:
-                    supabase_host = (response.get("supabase") or {}).get("host")
-                    response["supabaseDns"] = host_dns_diagnostics(supabase_host)
+                    state_provider = ((response.get("storage") or {}).get("stateProvider") or "").strip()
+                    if state_provider == "cloudbase":
+                        cloudbase_host = (response.get("cloudbase") or {}).get("host")
+                        response["cloudbaseDns"] = host_dns_diagnostics(cloudbase_host)
+                    else:
+                        supabase_host = (response.get("supabase") or {}).get("host")
+                        response["supabaseDns"] = host_dns_diagnostics(supabase_host)
                     try:
-                        response["remoteRows"] = supabase_state_rows_report()
+                        response["remoteRows"] = remote_state_rows_report()
                     except Exception as exc:
                         response["remoteRows"] = {
                             "reachable": False,
@@ -5895,7 +6439,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         }
                         response["status"] = "degraded"
                         response["ok"] = False
-                        response.setdefault("warnings", []).append("Supabase 远端行诊断失败，请检查数据库或网络。")
+                        response.setdefault("warnings", []).append("远端状态行诊断失败，请检查数据库或网络。")
                 return response
 
             self._write_json(self._read_state(action))
@@ -5979,7 +6523,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 if not phone:
                     raise ValueError("请输入注册时填写的手机号。")
                 matches = serialize_phone_matches(state, phone)
-                if not matches and restore_phone_identity_from_supabase(state, phone):
+                if not matches and restore_phone_identity_from_remote(state, phone):
                     matches = serialize_phone_matches(state, phone)
                 return {
                     "phone": phone,
@@ -6025,7 +6569,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     verify_sms_code(state, session, phone, payload.get("verificationCode"))
 
                 account = resolve_account_by_phone(state, phone)
-                if not account and restore_phone_identity_from_supabase(state, phone):
+                if not account and restore_phone_identity_from_remote(state, phone):
                     account = resolve_account_by_phone(state, phone)
                 if account:
                     preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
@@ -6100,7 +6644,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     role = str(item.get("role") or "").strip()
                     phone = item.get("phone")
                     matched_account = resolve_account_by_phone(state, phone)
-                    if not matched_account and restore_phone_identity_from_supabase(state, phone):
+                    if not matched_account and restore_phone_identity_from_remote(state, phone):
                         matched_account = resolve_account_by_phone(state, phone)
                     if matched_account:
                         preferred_role = role if role in {"enthusiast", "gym", "coach"} else ""
