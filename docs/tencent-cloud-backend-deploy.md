@@ -209,7 +209,50 @@ npm run bootstrap:tencent-remote -- \
 
 如果用非 root 用户执行，脚本会尝试用 `sudo` 安装依赖，并把当前用户加入 `docker` 组。加入后需要重新连接 SSH，再继续部署。为了减少权限问题，第一版生产部署更推荐直接用腾讯云 root 用户。
 
-### 1.6 一键远程上传部署
+### 1.6 申请 HTTPS 证书
+
+微信小程序合法域名必须是 HTTPS。确认 `api.yourdomain.com` 和 `app.yourdomain.com` 的 DNS 都已经指向这台腾讯云服务器后，先用 dry-run 查看证书签发步骤：
+
+```bash
+npm run cert:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --email 你的证书通知邮箱
+```
+
+第一次建议先加 `--staging` 做 Let’s Encrypt 测试签发，确认 80 端口、安全组、DNS 和 Nginx 都正常：
+
+```bash
+npm run cert:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --email 你的证书通知邮箱 \
+  --staging \
+  --apply
+```
+
+测试通过后，再去掉 `--staging` 正式签发：
+
+```bash
+npm run cert:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --email 你的证书通知邮箱 \
+  --apply
+```
+
+这个脚本会先安装临时 HTTP-only Nginx 配置用于 `/.well-known/acme-challenge/` 验证，签发成功后，下一步 `deploy:tencent-remote --restart-nginx` 会安装正式 443 反代配置。
+
+### 1.7 一键远程上传部署
 
 拿到腾讯云轻量服务器 / CVM 的公网 IP、SSH 用户和密钥后，推荐先做 dry-run：
 

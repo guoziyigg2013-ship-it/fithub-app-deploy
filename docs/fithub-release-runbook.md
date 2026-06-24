@@ -165,6 +165,20 @@ npm run bootstrap:tencent-remote -- \
 
 确认 dry-run 没问题后加 `--apply`。初始化会安装/确认 Python、Docker、Docker Compose、Nginx，并创建 `/opt/fithub/releases`。
 
+确认 `api.yourdomain.com` 和 `app.yourdomain.com` 的 DNS 已经指向这台服务器后，先申请 HTTPS 证书：
+
+```bash
+npm run cert:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --email 你的证书通知邮箱
+```
+
+确认 dry-run 没问题后，可以先加 `--staging --apply` 做测试签发，再去掉 `--staging` 正式签发。
+
 推荐先用远程部署脚本预演：
 
 ```bash

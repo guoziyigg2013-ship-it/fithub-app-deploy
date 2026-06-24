@@ -14,6 +14,7 @@
     "cutover:tencent": "python3 scripts/tencent_cutover.py",
     "release:tencent": "python3 scripts/build_tencent_release.py",
     "bootstrap:tencent-remote": "python3 scripts/tencent_remote_bootstrap.py",
+    "cert:tencent-remote": "python3 scripts/tencent_remote_certbot.py",
     "deploy:tencent-remote": "python3 scripts/tencent_remote_deploy.py",
     "evidence:tencent-launch": "python3 scripts/tencent_launch_evidence.py",
     "check:tencent": "python3 scripts/tencent_cloud_preflight.py",

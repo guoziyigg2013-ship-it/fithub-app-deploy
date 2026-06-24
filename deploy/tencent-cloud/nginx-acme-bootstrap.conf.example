@@ -1,0 +1,16 @@
+# Temporary HTTP-only config for Let's Encrypt webroot validation.
+# Replace server_name placeholders with ICP-filed domains before installing.
+
+server {
+    listen 80;
+    server_name api.yourdomain.com app.yourdomain.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        add_header Content-Type text/plain;
+        return 200 "FitHub ACME bootstrap is ready.\n";
+    }
+}

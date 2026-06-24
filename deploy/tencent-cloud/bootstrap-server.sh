@@ -45,14 +45,14 @@ start_service_if_available() {
 
 install_with_apt() {
   run_root "apt-get update"
-  run_root "DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg tar gzip python3 nginx docker.io"
+  run_root "DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg tar gzip python3 nginx docker.io certbot"
   if ! compose_ready; then
     run_root "DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin || DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose"
   fi
 }
 
 install_with_yum() {
-  run_root "yum install -y ca-certificates curl tar gzip python3 nginx docker"
+  run_root "yum install -y ca-certificates curl tar gzip python3 nginx docker certbot"
   if ! compose_ready; then
     echo "Docker Compose was not installed by yum. Install docker compose plugin manually, then rerun this script." >&2
     exit 1
@@ -85,6 +85,7 @@ else
   exit 1
 fi
 nginx -v
+certbot --version
 
 if [ -n "$SUDO" ]; then
   current_user="$(id -un)"
