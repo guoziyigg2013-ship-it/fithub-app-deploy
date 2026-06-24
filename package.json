@@ -21,6 +21,7 @@
     "cert:tencent-remote": "python3 scripts/tencent_remote_certbot.py",
     "deploy:tencent-remote": "python3 scripts/tencent_remote_deploy.py",
     "evidence:tencent-launch": "python3 scripts/tencent_launch_evidence.py",
+    "evidence:prelaunch": "python3 scripts/prelaunch_gate.py --output-dir reports --soft-fail",
     "check:tencent": "python3 scripts/tencent_cloud_preflight.py",
     "check:tencent-server": "python3 scripts/tencent_server_doctor.py",
     "check:smoke": "python3 scripts/deploy_smoke.py",

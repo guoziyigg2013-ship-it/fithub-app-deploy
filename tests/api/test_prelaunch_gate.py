@@ -150,6 +150,35 @@ class PrelaunchGateTests(unittest.TestCase):
         self.assertFalse(media_phase["ready"])
         self.assertIn("wx.uploadFile", media_phase["detail"])
 
+    def test_write_outputs_creates_markdown_and_json_evidence(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "reports"
+            report = {
+                "generatedAt": "2026-06-24T09:40:00Z",
+                "status": "blocked",
+                "ready": False,
+                "blockerCount": 1,
+                "phases": [
+                    {
+                        "name": "p0-domestic-production",
+                        "label": "P0 国内生产链路",
+                        "ready": False,
+                        "detail": "API 仍是 Render",
+                    }
+                ],
+                "nextSteps": ["切换到腾讯云 API"],
+            }
+
+            paths = prelaunch_gate.write_outputs(report, output_dir)
+
+            markdown = Path(paths["markdown"]).read_text(encoding="utf-8")
+            payload = Path(paths["json"]).read_text(encoding="utf-8")
+
+        self.assertIn("FitHub 上架前大升级总门禁", markdown)
+        self.assertIn("[BLOCKED] P0 国内生产链路", markdown)
+        self.assertIn("切换到腾讯云 API", markdown)
+        self.assertIn('"status": "blocked"', payload)
+
 
 if __name__ == "__main__":
     unittest.main()

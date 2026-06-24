@@ -259,25 +259,50 @@ def build_report(
     }
 
 
-def print_markdown(report: dict[str, Any]) -> None:
-    print("# FitHub 上架前大升级总门禁")
-    print("")
-    print(f"- 生成时间：{report['generatedAt']}")
-    print("")
+def render_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# FitHub 上架前大升级总门禁",
+        "",
+        f"- 生成时间：{report['generatedAt']}",
+        f"- 状态：{report['status']}",
+        f"- 阻断阶段数：{report['blockerCount']}",
+        "",
+    ]
     for item in report["phases"]:
         mark = "OK" if item["ready"] else "BLOCKED"
-        print(f"- [{mark}] {item['label']}：{item['detail']}")
-    print("")
+        lines.append(f"- [{mark}] {item['label']}：{item['detail']}")
+    lines.append("")
     if report["ready"]:
-        print("结论：上架前总门禁通过，可以进入真机全量验收和提审准备。")
+        lines.append("结论：上架前总门禁通过，可以进入真机全量验收和提审准备。")
     else:
-        print(f"结论：还有 {report['blockerCount']} 个阶段未通过，不要提交小程序审核或面向正式用户发布。")
+        lines.append(f"结论：还有 {report['blockerCount']} 个阶段未通过，不要提交小程序审核或面向正式用户发布。")
         next_steps = list(report.get("nextSteps") or [])
         if next_steps:
-            print("")
-            print("下一步建议：")
+            lines.extend(["", "下一步建议："])
             for index, step in enumerate(next_steps, start=1):
-                print(f"{index}. {step}")
+                lines.append(f"{index}. {step}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def print_markdown(report: dict[str, Any]) -> None:
+    print(render_markdown(report), end="")
+
+
+def report_stem(report: dict[str, Any]) -> str:
+    timestamp = str(report.get("generatedAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    safe_timestamp = timestamp.replace("-", "").replace(":", "").replace("T", "-").replace("Z", "Z")
+    return f"fithub-prelaunch-gate-{safe_timestamp}"
+
+
+def write_outputs(report: dict[str, Any], output_dir: Path) -> dict[str, str]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = report_stem(report)
+    markdown_path = output_dir / f"{stem}.md"
+    json_path = output_dir / f"{stem}.json"
+    markdown_path.write_text(render_markdown(report), encoding="utf-8")
+    json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {"markdown": str(markdown_path), "json": str(json_path)}
 
 
 def main() -> int:
@@ -293,6 +318,8 @@ def main() -> int:
     parser.add_argument("--check-tls", action="store_true")
     parser.add_argument("--check-live", action="store_true")
     parser.add_argument("--allow-non-cos-media", action="store_true")
+    parser.add_argument("--output-dir", default="", help="Write markdown and JSON reports to this directory.")
+    parser.add_argument("--soft-fail", action="store_true", help="Always exit 0 after writing/printing the report.")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -318,6 +345,12 @@ def main() -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         print_markdown(report)
+    if args.output_dir:
+        paths = write_outputs(report, Path(args.output_dir))
+        print(f"\n报告已写入：{paths['markdown']}")
+        print(f"JSON 已写入：{paths['json']}")
+    if args.soft_fail:
+        return 0
     return 0 if report["ready"] else 1
 
 
