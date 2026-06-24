@@ -175,7 +175,41 @@ dist/fithub-tencent-release-20260624-120000.tar.gz.manifest.json
 - `node_modules/`
 - Playwright 产物和临时文件
 
-### 1.5 一键远程上传部署
+### 1.5 初始化腾讯云服务器
+
+拿到腾讯云轻量服务器 / CVM 的公网 IP、SSH 用户和密钥后，先初始化服务器运行环境。初始化会安装或确认：
+
+- `python3`
+- `tar` / `gzip`
+- Docker
+- Docker Compose
+- Nginx
+- `/opt/fithub/releases` 发布目录
+
+先做 dry-run：
+
+```bash
+npm run bootstrap:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --remote-dir /opt/fithub
+```
+
+确认输出的 SSH/SCP 步骤无误后，再加 `--apply` 执行：
+
+```bash
+npm run bootstrap:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --remote-dir /opt/fithub \
+  --apply
+```
+
+如果用非 root 用户执行，脚本会尝试用 `sudo` 安装依赖，并把当前用户加入 `docker` 组。加入后需要重新连接 SSH，再继续部署。为了减少权限问题，第一版生产部署更推荐直接用腾讯云 root 用户。
+
+### 1.6 一键远程上传部署
 
 拿到腾讯云轻量服务器 / CVM 的公网 IP、SSH 用户和密钥后，推荐先做 dry-run：
 

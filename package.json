@@ -12,6 +12,7 @@
     "init:tencent-env": "python3 scripts/init_tencent_env.py",
     "cutover:tencent": "python3 scripts/tencent_cutover.py",
     "release:tencent": "python3 scripts/build_tencent_release.py",
+    "bootstrap:tencent-remote": "python3 scripts/tencent_remote_bootstrap.py",
     "deploy:tencent-remote": "python3 scripts/tencent_remote_deploy.py",
     "check:tencent": "python3 scripts/tencent_cloud_preflight.py",
     "check:tencent-server": "python3 scripts/tencent_server_doctor.py",

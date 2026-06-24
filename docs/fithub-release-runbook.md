@@ -153,6 +153,18 @@ npm run release:tencent
 
 把生成的 `dist/fithub-tencent-release-*.tar.gz` 上传到腾讯云服务器。不要上传本地整个工作区，避免误带测试数据、备份和密钥。
 
+如果是一台新腾讯云服务器，先初始化运行环境：
+
+```bash
+npm run bootstrap:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --remote-dir /opt/fithub
+```
+
+确认 dry-run 没问题后加 `--apply`。初始化会安装/确认 Python、Docker、Docker Compose、Nginx，并创建 `/opt/fithub/releases`。
+
 推荐先用远程部署脚本预演：
 
 ```bash
