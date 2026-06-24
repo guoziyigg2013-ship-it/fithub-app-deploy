@@ -175,6 +175,52 @@ dist/fithub-tencent-release-20260624-120000.tar.gz.manifest.json
 - `node_modules/`
 - Playwright 产物和临时文件
 
+### 1.5 一键远程上传部署
+
+拿到腾讯云轻量服务器 / CVM 的公网 IP、SSH 用户和密钥后，推荐先做 dry-run：
+
+```bash
+npm run deploy:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --archive dist/fithub-tencent-release-smoke-require-cos.tar.gz \
+  --env-file deploy/tencent-cloud/.env.production \
+  --nginx-file deploy/tencent-cloud/nginx-fithub.conf \
+  --remote-dir /opt/fithub \
+  --check-public \
+  --restart-nginx
+```
+
+确认输出的 SSH/SCP 步骤无误后，再加 `--apply` 执行：
+
+```bash
+npm run deploy:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --archive dist/fithub-tencent-release-smoke-require-cos.tar.gz \
+  --env-file deploy/tencent-cloud/.env.production \
+  --nginx-file deploy/tencent-cloud/nginx-fithub.conf \
+  --remote-dir /opt/fithub \
+  --check-public \
+  --restart-nginx \
+  --apply
+```
+
+这个脚本会执行：
+
+- 在服务器创建 `/opt/fithub/releases`
+- 上传发布包
+- 解压为 `/opt/fithub/fithub-app-deploy`
+- 上传真实 `.env.production`
+- 上传 `nginx-fithub.conf`
+- 可选安装并 reload Nginx
+- 执行 `deploy/tencent-cloud/deploy.sh`
+- 可选做公网后端检查
+
+如果你暂时想手工配置 Nginx，可以去掉 `--restart-nginx`；如果服务器还没配置 HTTPS，可以先不要加 `--check-public`。
+
 部署时在服务器上执行：
 
 ```bash

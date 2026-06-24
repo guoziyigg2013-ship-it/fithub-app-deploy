@@ -153,6 +153,23 @@ npm run release:tencent
 
 把生成的 `dist/fithub-tencent-release-*.tar.gz` 上传到腾讯云服务器。不要上传本地整个工作区，避免误带测试数据、备份和密钥。
 
+推荐先用远程部署脚本预演：
+
+```bash
+npm run deploy:tencent-remote -- \
+  --host 你的服务器公网IP \
+  --user root \
+  --identity-file ~/.ssh/你的腾讯云密钥 \
+  --archive dist/fithub-tencent-release-smoke-require-cos.tar.gz \
+  --env-file deploy/tencent-cloud/.env.production \
+  --nginx-file deploy/tencent-cloud/nginx-fithub.conf \
+  --remote-dir /opt/fithub \
+  --check-public \
+  --restart-nginx
+```
+
+确认命令计划无误后加 `--apply`。默认 dry-run 的好处是：真实 `.env.production` 会上传但不会打印内容，避免把密钥暴露到终端记录里。
+
 服务器上填好 `deploy/tencent-cloud/.env.production` 后，先跑：
 
 ```bash
