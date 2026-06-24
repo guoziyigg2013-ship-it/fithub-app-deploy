@@ -42,6 +42,53 @@ def first_blocker_details(items: list[dict[str, Any]]) -> str:
     return "; ".join(str(item.get("detail") or item.get("label") or "blocked") for item in blockers[:3])
 
 
+def unique_steps(steps: list[str]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for step in steps:
+        step = str(step or "").strip()
+        if not step or step in seen:
+            continue
+        seen.add(step)
+        output.append(step)
+    return output
+
+
+def blocked_phase_details(phases: list[dict[str, Any]]) -> list[str]:
+    details: list[str] = []
+    for item in phases:
+        if item.get("ready"):
+            continue
+        details.append(f"{item.get('label')}: {item.get('detail')}")
+    return details
+
+
+def build_next_steps(
+    domestic_report: dict[str, Any],
+    wechat_report: dict[str, Any],
+    url_items: list[dict[str, Any]],
+) -> list[str]:
+    steps: list[str] = list(domestic_report.get("nextSteps") or [])
+
+    wechat_items = {item.get("key"): item for item in wechat_report.get("items") or []}
+    if not (wechat_items.get("miniapp_appid") or {}).get("ok", True):
+        steps.append("在微信公众平台获取真实小程序 AppID，并运行 cutover:tencent 写入 wechat-miniprogram/project.config.json。")
+    if not (wechat_items.get("wechat_domains") or {}).get("ok", True):
+        steps.append("在微信公众平台配置 request/uploadFile/downloadFile 合法域名，确保小程序真机不再依赖“忽略合法域名”。")
+    if not (wechat_items.get("cos_download_domain") or {}).get("ok", True):
+        steps.append("配置腾讯 COS/CDN 媒体下载域名，并把 FITHUB_MEDIA_STORAGE_PROVIDER 切到 cos。")
+
+    url_by_key = {item.get("key"): item for item in url_items}
+    if not (url_by_key.get("web_origin") or {}).get("ok", True):
+        steps.append("准备备案后的 Web 固定域名，例如 https://app.yourdomain.com，并传给 --web-origin。")
+    if not (url_by_key.get("media_origin") or {}).get("ok", True):
+        steps.append("准备媒体固定域名，例如 https://media.yourdomain.com，并传给 --media-origin。")
+    if not (url_by_key.get("api_origin") or {}).get("ok", True):
+        steps.append("准备备案后的 API 固定域名，例如 https://api.yourdomain.com，并传给 --api-origin。")
+
+    return unique_steps(steps)
+
+
 def configured_api_origin(root: Path) -> str:
     try:
         return domestic_migration_status.read_configs(root)["webApiOrigin"]
@@ -155,6 +202,7 @@ def build_gate(
         )
 
     blockers = [item for item in phases if not item["ready"]]
+    next_steps = build_next_steps(domestic_report, wechat_report, url_items)
     return {
         "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": "ready" if not blockers else "blocked",
@@ -168,7 +216,8 @@ def build_gate(
             "miniappAppId": configs.get("miniappAppId", ""),
         },
         "phases": phases,
-        "nextSteps": domestic_report.get("nextSteps") or [],
+        "blockedDetails": blocked_phase_details(phases),
+        "nextSteps": next_steps,
     }
 
 
@@ -189,6 +238,12 @@ def print_markdown(report: dict[str, Any]) -> None:
         print("结论：总控门禁通过，可以进入最终发布验收。")
     else:
         print(f"结论：还有 {report['blockerCount']} 个阶段未通过，不要提交小程序审核或切给正式用户。")
+        blocked_details = list(report.get("blockedDetails") or [])
+        if blocked_details:
+            print("")
+            print("具体阻断：")
+            for index, detail in enumerate(blocked_details, start=1):
+                print(f"{index}. {detail}")
         next_steps = list(report.get("nextSteps") or [])
         if next_steps:
             print("")

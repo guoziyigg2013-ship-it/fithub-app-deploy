@@ -125,6 +125,7 @@ class PrelaunchGateTests(unittest.TestCase):
         self.assertGreaterEqual(report["blockerCount"], 1)
         self.assertEqual(report["phases"][0]["name"], "p0-domestic-production")
         self.assertFalse(report["phases"][0]["ready"])
+        self.assertIn("国内生产配置", report["phases"][0]["detail"])
 
     def test_ready_launch_and_feature_inventory_passes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -178,6 +179,42 @@ class PrelaunchGateTests(unittest.TestCase):
         self.assertIn("[BLOCKED] P0 国内生产链路", markdown)
         self.assertIn("切换到腾讯云 API", markdown)
         self.assertIn('"status": "blocked"', payload)
+
+    def test_markdown_includes_nested_launch_blockers(self):
+        report = {
+            "generatedAt": "2026-06-24T09:40:00Z",
+            "status": "blocked",
+            "ready": False,
+            "blockerCount": 1,
+            "phases": [
+                {
+                    "name": "p0-domestic-production",
+                    "label": "P0 国内生产链路",
+                    "ready": False,
+                    "detail": "国内生产配置: 当前 AppID=touristappid",
+                    "payload": {
+                        "phases": [
+                            {
+                                "label": "国内生产配置",
+                                "ready": False,
+                                "detail": "当前 AppID=touristappid",
+                            },
+                            {
+                                "label": "固定域名输入",
+                                "ready": True,
+                                "detail": "已通过",
+                            },
+                        ]
+                    },
+                }
+            ],
+            "nextSteps": ["替换真实 AppID"],
+        }
+
+        markdown = prelaunch_gate.render_markdown(report)
+
+        self.assertIn("国内生产配置：当前 AppID=touristappid", markdown)
+        self.assertNotIn("固定域名输入：已通过", markdown)
 
 
 if __name__ == "__main__":

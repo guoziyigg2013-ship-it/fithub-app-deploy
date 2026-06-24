@@ -12,6 +12,13 @@
 - 腾讯云 API：`https://fithub-api-274271-9-1401297280.sh.run.tcloudbase.com`
 - 当前数据存储：CloudBase 数据库，`/api/storage/status?remote=1` 已显示 `loadedFrom=cloudbase` 且 `remoteWritable=true`
 
+当前门禁状态（2026-06-24）：
+
+- `npm run check:trial` 已通过：腾讯云固定试运行入口、CloudBase API、持久化与核心功能库存可继续给测试用户使用。
+- `python3 scripts/deploy_smoke.py --frontend-url 腾讯云/fithub/ --backend-url 腾讯云API` 已通过：前端壳、运行时 API 配置、后端健康、远端存储和 bootstrap 均可用。
+- `npm run check:prelaunch` 仍然阻止正式提审：当前小程序仍是 `touristappid`，尚未配置微信合法域名、COS/CDN 媒体下载域名和备案后的 Web/API/Media 自定义域名。
+- 当前判断：可以继续用腾讯云试运行入口做真实测试；不要提交微信小程序审核，也不要作为正式公开运营入口。
+
 长期上架目标：
 
 - 自定义备案域名：例如 `https://app.你的域名/` 和 `https://api.你的域名/`

@@ -78,6 +78,8 @@ class TencentLaunchGateTests(unittest.TestCase):
         self.assertIn("onrender.com", details)
         self.assertIn("touristappid", details)
         self.assertIn("cutover:tencent", "\n".join(report["nextSteps"]))
+        self.assertIn("真实小程序 AppID", "\n".join(report["nextSteps"]))
+        self.assertTrue(report["blockedDetails"])
 
     def test_gate_passes_ready_static_configs_and_mocked_domain_network(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -131,6 +133,9 @@ class TencentLaunchGateTests(unittest.TestCase):
         details = "\n".join(phase["detail"] for phase in report["phases"])
         self.assertIn("用户访问固定域名 is missing", details)
         self.assertIn("media.yourdomain.com", details)
+        next_steps = "\n".join(report["nextSteps"])
+        self.assertIn("Web 固定域名", next_steps)
+        self.assertIn("媒体固定域名", next_steps)
 
 
 if __name__ == "__main__":

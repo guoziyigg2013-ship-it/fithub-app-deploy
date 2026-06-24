@@ -240,11 +240,17 @@ def build_report(
         check_live=check_live,
         require_cos_media=require_cos_media,
     )
+    launch_blockers = [
+        f"{item.get('label')}: {item.get('detail')}"
+        for item in launch_report.get("phases", [])
+        if not item.get("ready")
+    ]
+    production_detail = "已通过" if launch_report["ready"] else "；".join(launch_blockers[:3]) or f"{launch_report['blockerCount']} 个上线阻断阶段未通过"
     production_phase = {
         "name": "p0-domestic-production",
         "label": "P0 国内生产链路",
         "ready": bool(launch_report["ready"]),
-        "detail": "已通过" if launch_report["ready"] else f"{launch_report['blockerCount']} 个上线阻断阶段未通过",
+        "detail": production_detail,
         "payload": launch_report,
     }
     phases = [production_phase, *build_feature_phases(root)]
@@ -260,22 +266,31 @@ def build_report(
 
 
 def render_markdown(report: dict[str, Any]) -> str:
+    status = report.get("status") or report.get("overallStatus") or ("ready" if report.get("ready") else "blocked")
+    blocker_count = int(report.get("blockerCount") or 0)
     lines = [
         "# FitHub 上架前大升级总门禁",
         "",
         f"- 生成时间：{report['generatedAt']}",
-        f"- 状态：{report['status']}",
-        f"- 阻断阶段数：{report['blockerCount']}",
+        f"- 状态：{status}",
+        f"- 阻断阶段数：{blocker_count}",
         "",
     ]
     for item in report["phases"]:
         mark = "OK" if item["ready"] else "BLOCKED"
         lines.append(f"- [{mark}] {item['label']}：{item['detail']}")
+        nested_blockers = [
+            f"{phase.get('label')}：{phase.get('detail')}"
+            for phase in (item.get("payload") or {}).get("phases", [])
+            if not phase.get("ready")
+        ]
+        for nested in nested_blockers[:5]:
+            lines.append(f"  - {nested}")
     lines.append("")
-    if report["ready"]:
+    if bool(report.get("ready")):
         lines.append("结论：上架前总门禁通过，可以进入真机全量验收和提审准备。")
     else:
-        lines.append(f"结论：还有 {report['blockerCount']} 个阶段未通过，不要提交小程序审核或面向正式用户发布。")
+        lines.append(f"结论：还有 {blocker_count} 个阶段未通过，不要提交小程序审核或面向正式用户发布。")
         next_steps = list(report.get("nextSteps") or [])
         if next_steps:
             lines.extend(["", "下一步建议："])
