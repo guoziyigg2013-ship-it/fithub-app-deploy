@@ -23,6 +23,32 @@ DEFAULT_MAX_BOOTSTRAP_SECONDS = 8.0
 DEFAULT_MIN_REAL_PROFILES = 1
 
 
+def public_dns_diagnostic(host: str) -> str:
+    host = str(host or "").strip().lower()
+    if not host:
+        return ""
+    url = "https://cloudflare-dns.com/dns-query?name=" + urllib.parse.quote(host) + "&type=A"
+    try:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/dns-json",
+                "User-Agent": "FitHubSmoke/1.0",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8") or "{}")
+        status = int(payload.get("Status") or 0)
+        answers = payload.get("Answer") or []
+        if status == 3:
+            return "publicDns=NXDOMAIN"
+        if answers:
+            return f"publicDns=OK:{len(answers)}A"
+        return f"publicDns=status-{status}"
+    except Exception as exc:
+        return f"publicDnsError={exc}"
+
+
 def fetch_text(url: str, *, timeout: int = 20) -> tuple[int, str, float]:
     request = urllib.request.Request(url, headers={"User-Agent": "FitHubSmoke/1.0"})
     started_at = time.time()
@@ -57,14 +83,26 @@ def ensure(condition: bool, message: str) -> None:
 
 def storage_diagnostic_suffix(storage_payload: dict) -> str:
     supabase = storage_payload.get("supabase") or {}
+    supabase_dns = storage_payload.get("supabaseDns") or {}
     remote_rows = storage_payload.get("remoteRows") or {}
     details = []
     if supabase.get("host"):
-        details.append(f"host={supabase.get('host')}")
+        host = supabase.get("host")
+        details.append(f"host={host}")
+        dns_detail = public_dns_diagnostic(host)
+        if dns_detail:
+            details.append(dns_detail)
     if "hasServiceRoleKey" in supabase:
         details.append(f"hasServiceRoleKey={bool(supabase.get('hasServiceRoleKey'))}")
     if supabase.get("configIssue"):
         details.append(f"configIssue={supabase.get('configIssue')}")
+    if supabase_dns:
+        if "resolved" in supabase_dns:
+            details.append(f"runtimeDnsResolved={bool(supabase_dns.get('resolved'))}")
+        if supabase_dns.get("error"):
+            details.append(f"runtimeDnsError={supabase_dns.get('error')}")
+        if supabase_dns.get("flags"):
+            details.append(f"runtimeDnsFlags={','.join(supabase_dns.get('flags') or [])}")
     if remote_rows.get("error"):
         details.append(f"remoteError={remote_rows.get('error')}")
     return f" ({'; '.join(details)})" if details else ""

@@ -96,6 +96,7 @@ remoteError=<urlopen error [Errno -2] Name or service not known>
 - 线上后端没有稳定读到远端主数据。
 - 代码已经保护了“本地 fallback 不覆盖远端数据”，这是好事。
 - 但只要仍是 `local-fallback`，就不适合继续真实用户测试，更不适合上架。
+- 进一步 DNS 诊断显示，当前 `SUPABASE_URL` 的主机 `gjhyfcqqrtpratguvlqc.supabase.co` 在 Cloudflare DNS 和 Google DNS 查询中返回 `NXDOMAIN`，也就是公共 DNS 认为该 Supabase 项目域名不存在。下一步应优先在 Render/国内后端环境变量里改成 Supabase 后台 `Project URL` 的真实值；如果真实项目在国内访问仍不稳定，则直接迁到国内数据库。
 
 #### 阻断 2：小程序生产检查失败
 
@@ -184,6 +185,7 @@ python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
 
 - 查明线上 DNS/网络为什么访问不到 `gjhyfcqqrtpratguvlqc.supabase.co`。
 - 确认 `SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`、表名、Row ID 都正确。
+- 不要手打项目 ref。必须从 Supabase 项目后台复制完整 `Project URL`，格式应类似 `https://xxxxxxxxxxxxxxxxxxxx.supabase.co`。
 - 跑通 `/api/storage/status?remote=1`。
 - 确认 `loadedFrom != local-fallback`。
 

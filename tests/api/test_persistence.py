@@ -222,6 +222,18 @@ class SupabaseRecoveryUnitTests(unittest.TestCase):
             server.STATE_RUNTIME_META.clear()
             server.STATE_RUNTIME_META.update(original_meta)
 
+    def test_host_dns_diagnostics_is_safe_and_classifies_addresses(self):
+        localhost = server.host_dns_diagnostics("localhost")
+        self.assertTrue(localhost["resolved"])
+        self.assertIn("localhost", localhost["host"])
+        self.assertIn("loopback", localhost["flags"])
+
+        missing = server.host_dns_diagnostics("")
+        self.assertFalse(missing["resolved"])
+        self.assertIn("error", missing)
+        serialized = json.dumps(missing, ensure_ascii=False)
+        self.assertNotIn("service_role", serialized)
+
     def test_supabase_refresh_retry_is_rate_limited_after_fallback_failure(self):
         original_enabled = server.supabase_storage_enabled
         original_load = server.load_state_from_supabase

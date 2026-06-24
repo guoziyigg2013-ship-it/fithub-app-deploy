@@ -94,6 +94,25 @@ npm run check:smoke
 - Supabase 项目是否暂停或网络不可达
 - Render 环境变量是否被清空
 
+如果 `npm run check:smoke` 的错误里出现 `publicDns=NXDOMAIN`，说明当前 `SUPABASE_URL` 的域名在公共 DNS 中不存在。优先处理：
+
+1. 打开 Supabase 项目后台。
+2. 进入 `Project Settings -> API`。
+3. 复制完整 `Project URL`，不要手打项目 ref。
+4. 在 Render 或新的国内后端里替换 `SUPABASE_URL`。
+5. 重新部署后再次打开：
+
+```text
+https://你的后端域名/api/storage/status?remote=1
+```
+
+必须确认：
+
+- `storage.loadedFrom` 不是 `local-fallback`
+- `storage.supabaseWritable` 是 `true`
+- `remoteRows.reachable` 是 `true`
+- `supabaseDns.resolved` 是 `true`
+
 ## 6. 当前限制
 
 当前是“整份状态 JSON 持久化”方案，优点是改动小、上线快。

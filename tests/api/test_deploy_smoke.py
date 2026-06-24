@@ -39,6 +39,13 @@ def healthy_storage_payload(**overrides):
 
 
 class DeploySmokeGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.original_public_dns = deploy_smoke.public_dns_diagnostic
+        deploy_smoke.public_dns_diagnostic = lambda host: "publicDns=NXDOMAIN" if host else ""
+
+    def tearDown(self):
+        deploy_smoke.public_dns_diagnostic = self.original_public_dns
+
     def test_storage_status_accepts_healthy_remote_state(self):
         deploy_smoke.validate_storage_status(healthy_storage_payload(), min_real_profiles=1)
 
@@ -54,7 +61,22 @@ class DeploySmokeGuardTests(unittest.TestCase):
             remoteRows={"reachable": False, "error": "dns failed"},
         )
 
-        with self.assertRaisesRegex(RuntimeError, "local fallback.*example\\.supabase\\.co.*dns failed"):
+        with self.assertRaisesRegex(RuntimeError, "local fallback.*example\\.supabase\\.co.*NXDOMAIN.*dns failed"):
+            deploy_smoke.validate_storage_status(payload, min_real_profiles=1)
+
+    def test_storage_status_failure_includes_runtime_dns_diagnostics(self):
+        payload = healthy_storage_payload(
+            status="degraded",
+            storage={
+                "loadedFrom": "local-fallback",
+                "supabaseWritable": False,
+                "remoteWriteProtected": True,
+            },
+            supabase={"host": "missing.supabase.co", "hasServiceRoleKey": True},
+            supabaseDns={"resolved": False, "error": "[Errno -2] Name or service not known", "flags": []},
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "NXDOMAIN.*runtimeDnsResolved=False.*Name or service not known"):
             deploy_smoke.validate_storage_status(payload, min_real_profiles=1)
 
     def test_storage_status_rejects_unwritable_remote_storage(self):

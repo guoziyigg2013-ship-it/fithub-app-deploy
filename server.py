@@ -2,11 +2,13 @@ import argparse
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import mimetypes
 import os
 import re
 import secrets
+import socket
 import sys
 import threading
 import time
@@ -824,6 +826,44 @@ def supabase_url_diagnostics():
         "hasServiceRoleKey": bool(SUPABASE_SERVICE_ROLE_KEY),
         "issue": issue,
     }
+
+
+def host_dns_diagnostics(host):
+    host = str(host or "").strip().lower()
+    if not host:
+        return {"host": "", "resolved": False, "addresses": [], "flags": [], "error": "missing host"}
+    try:
+        infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        addresses = []
+        for info in infos:
+            address = str((info[4] or [""])[0] or "")
+            if address and address not in addresses:
+                addresses.append(address)
+        flags = []
+        for address in addresses:
+            try:
+                parsed_ip = ipaddress.ip_address(address)
+            except ValueError:
+                continue
+            if parsed_ip.is_private:
+                flags.append("private")
+            if parsed_ip.is_loopback:
+                flags.append("loopback")
+            if parsed_ip.is_reserved:
+                flags.append("reserved")
+            if parsed_ip.is_link_local:
+                flags.append("link-local")
+        return {
+            "host": host,
+            "resolved": bool(addresses),
+            "addresses": addresses[:6],
+            "flags": sorted(set(flags)),
+            "error": "",
+        }
+    except socket.gaierror as exc:
+        return {"host": host, "resolved": False, "addresses": [], "flags": [], "error": str(exc)}
+    except Exception as exc:
+        return {"host": host, "resolved": False, "addresses": [], "flags": [], "error": str(exc)}
 
 
 def supabase_config_valid():
@@ -5686,6 +5726,8 @@ class FitHubHandler(BaseHTTPRequestHandler):
             def action(state):
                 response = storage_runtime_status(state)
                 if include_remote:
+                    supabase_host = (response.get("supabase") or {}).get("host")
+                    response["supabaseDns"] = host_dns_diagnostics(supabase_host)
                     try:
                         response["remoteRows"] = supabase_state_rows_report()
                     except Exception as exc:
