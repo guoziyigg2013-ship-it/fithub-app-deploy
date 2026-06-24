@@ -470,10 +470,20 @@ python3 scripts/tencent_server_doctor.py \
   --env-file deploy/tencent-cloud/.env.production \
   --check-public \
   --allow-running-service
+python3 scripts/wechat_domain_manifest.py
 python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com
 python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com --require-cos-media
 python3 scripts/deploy_smoke.py --frontend-url https://app.yourdomain.com/ --backend-url https://api.yourdomain.com --require-cos-media
 ```
+
+`wechat_domain_manifest.py` 会输出微信公众平台需要配置的：
+
+- `request 合法域名`
+- `uploadFile 合法域名`
+- `downloadFile 合法域名`
+- `socket 合法域名`
+
+如果仍看到 `onrender.com`、`touristappid`，或下载域名没有使用腾讯 COS/CDN，它会直接失败。
 
 最后跑一次写入链路验收，确认不是“页面能打开但用户数据不稳”：
 
@@ -505,4 +515,4 @@ npm run check:production
 - 当前阶段可以继续用 Supabase 做远端主状态，但必须确保 `api.yourdomain.com` 的运行环境能稳定访问 Supabase。
 - 国内生产媒体建议直接使用腾讯云 COS + CDN。`/api/storage/status?remote=1` 的 `media.storageProvider` 应该显示 `cos`，否则不要提交小程序审核。
 - 如果 Supabase 在国内云环境仍不稳定，下一阶段要把主业务数据也拆到国内 PostgreSQL/MySQL。
-- 微信小程序后台需要把 `https://api.yourdomain.com` 配置到合法域名，否则真机请求会失败。
+- 微信小程序后台需要按 `npm run check:wechat-domains` 输出配置合法域名，否则真机请求、上传或媒体加载会失败。

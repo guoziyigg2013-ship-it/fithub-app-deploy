@@ -167,7 +167,8 @@
 
 - 在微信开发者工具里导入 `wechat-miniprogram`
 - 用真实小程序 AppID 替换 `project.config.json`
-- 在微信后台配置合法 request/uploadFile 域名
+- 用 `npm run check:wechat-domains` 生成微信后台合法域名清单
+- 在微信后台配置合法 `request` / `uploadFile` / `downloadFile` 域名
 - 给后端配置微信 AppID 和 AppSecret
 - 接入微信内容安全接口，对图片、视频和文本做正式审核
 
