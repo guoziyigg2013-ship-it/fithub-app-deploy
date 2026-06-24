@@ -1,0 +1,155 @@
+import importlib.util
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+
+ROOT = Path(__file__).resolve().parents[2]
+GATE_PATH = ROOT / "scripts" / "prelaunch_gate.py"
+SPEC = importlib.util.spec_from_file_location("prelaunch_gate", GATE_PATH)
+prelaunch_gate = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(prelaunch_gate)
+
+
+READY_LAUNCH_REPORT = {
+    "ready": True,
+    "blockerCount": 0,
+    "nextSteps": [],
+    "phases": [],
+}
+
+
+def write(path: Path, text: str = "") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def write_minimal_configs(root: Path) -> None:
+    write(root / "config.js", 'window.__FITHUB_CONFIG__ = { apiOrigin: "https://api.fithub.example.cn" };\n')
+    write(root / "wechat-miniprogram" / "config.js", 'module.exports = { apiBase: "https://api.fithub.example.cn/api" };\n')
+    write(root / "wechat-miniprogram" / "project.config.json", '{"appid": "wx1234567890abcdef"}\n')
+
+
+def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> None:
+    write_minimal_configs(root)
+    write(
+        root / "package.json",
+        '{"scripts":{"snapshot:prod":"python3 scripts/production_snapshot.py","test:api":"python3 -m unittest","check:miniapp":"python3 scripts/check_miniprogram.py","check:wechat-domains":"python3 scripts/wechat_domain_manifest.py"}}',
+    )
+    write(
+        root / "server.py",
+        "\n".join(
+            [
+                "/auth/restore",
+                "/auth/restore-follows",
+                "/auth/logout",
+                "FITHUB_MEDIA_STORAGE_PROVIDER",
+                "media/upload-file",
+                "thumbnail",
+                "/auth/wechat-mini-login",
+                "/availability/create",
+                "/availability/delete",
+                "/booking/create",
+                "/report/create",
+                "/admin/moderation",
+                "/admin/moderation/resolve",
+                "/block/toggle",
+                "/account/delete-request",
+            ]
+        ),
+    )
+    write(
+        root / "app.js",
+        "\n".join(
+            [
+                "/auth/restore",
+                "/auth/restore-follows",
+                "/auth/logout",
+                "postWithoutStateSync(`${API_BASE}/follow/toggle`",
+                "postWithoutStateSync(`${API_BASE}/post/like`",
+                "postWithoutStateSync(`${API_BASE}/post/favorite-toggle`",
+                "postWithoutStateSync(`${API_BASE}/message/send`",
+                "/availability/create",
+                "/availability/delete",
+                "/booking/create",
+            ]
+        ),
+    )
+    write(root / "scripts" / "production_snapshot.py")
+    write(root / "scripts" / "check_miniprogram.py")
+    write(root / "scripts" / "wechat_domain_manifest.py")
+    write(root / "tests" / "api" / "test_persistence.py", "production_snapshot_metric_comparison_rejects_regressions")
+    write(root / "tests" / "api" / "test_social.py", "follow_state_survives_login_and_server_restart\nmulti_identity_threads_are_scoped_to_current_identity")
+    write(root / "tests" / "api" / "test_booking.py", "multi_identity_bookings_are_scoped_to_current_identity\nbooking_surfaces_for_both_outgoing_and_incoming_sides")
+    write(
+        root / "tests" / "api" / "test_content.py",
+        "\n".join(
+            [
+                "multipart_media_upload_returns_reusable_asset_payload",
+                "video_post_persists_thumbnail",
+                "like_favorite_comment_and_notifications_surface",
+                "risky_post_comment_and_message_are_queued_for_moderation",
+                "user_report_is_persisted_and_admin_endpoint_is_protected",
+                "private_message_does_not_require_follow_but_respects_block",
+            ]
+        ),
+    )
+    write(root / "tests" / "api" / "test_tencent_cos_media.py", "upload_media_asset_uses_cos_provider_and_public_url")
+    write(root / "tests" / "api" / "test_auth.py", "account_deletion_request")
+    for rel in [
+        "wechat-miniprogram/pages/home/index.js",
+        "wechat-miniprogram/pages/discover/index.js",
+        "wechat-miniprogram/pages/booking/index.js",
+        "wechat-miniprogram/pages/me/index.js",
+    ]:
+        write(root / rel)
+    write(root / "wechat-miniprogram/pages/publish/index.js", "chooseMedia\n/media/upload-file")
+    write(root / "wechat-miniprogram/utils/api.js", "wx.uploadFile" if include_upload_file else "wx.request")
+
+
+class PrelaunchGateTests(unittest.TestCase):
+    def test_current_prelaunch_shape_is_blocked_by_production_gate(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write(root / "config.js", 'window.__FITHUB_CONFIG__ = { apiOrigin: "https://fithub-app-1btg.onrender.com" };\n')
+            write(root / "wechat-miniprogram" / "config.js", 'module.exports = { apiBase: "https://fithub-app-1btg.onrender.com/api" };\n')
+            write(root / "wechat-miniprogram" / "project.config.json", '{"appid": "touristappid"}\n')
+
+            report = prelaunch_gate.build_report(
+                root=root,
+                env_file=root / "deploy" / "tencent-cloud" / ".env.production",
+            )
+
+        self.assertFalse(report["ready"])
+        self.assertGreaterEqual(report["blockerCount"], 1)
+        self.assertEqual(report["phases"][0]["name"], "p0-domestic-production")
+        self.assertFalse(report["phases"][0]["ready"])
+
+    def test_ready_launch_and_feature_inventory_passes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_feature_inventory(root)
+
+            with mock.patch.object(prelaunch_gate.tencent_launch_gate, "build_gate", return_value=READY_LAUNCH_REPORT):
+                report = prelaunch_gate.build_report(root=root)
+
+        self.assertTrue(report["ready"])
+        self.assertEqual(report["blockerCount"], 0)
+
+    def test_missing_miniapp_file_upload_blocks_media_phase(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_feature_inventory(root, include_upload_file=False)
+
+            with mock.patch.object(prelaunch_gate.tencent_launch_gate, "build_gate", return_value=READY_LAUNCH_REPORT):
+                report = prelaunch_gate.build_report(root=root)
+
+        self.assertFalse(report["ready"])
+        media_phase = next(item for item in report["phases"] if item["name"] == "p0-media-production")
+        self.assertFalse(media_phase["ready"])
+        self.assertIn("wx.uploadFile", media_phase["detail"])
+
+
+if __name__ == "__main__":
+    unittest.main()

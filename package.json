@@ -6,6 +6,7 @@
     "check:miniapp": "python3 scripts/check_miniprogram.py",
     "check:preflight": "python3 scripts/preflight_check.py",
     "check:production": "python3 scripts/production_readiness.py",
+    "check:prelaunch": "python3 scripts/prelaunch_gate.py",
     "check:domestic": "python3 scripts/domestic_migration_status.py",
     "check:wechat-domains": "python3 scripts/wechat_domain_manifest.py",
     "check:tencent-domains": "python3 scripts/tencent_domain_readiness.py",
