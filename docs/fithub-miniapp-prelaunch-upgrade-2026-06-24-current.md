@@ -170,7 +170,7 @@ FITHUB_ADMIN_TOKEN=你的管理员token npm run snapshot:prod
 
 - 绑定备案自定义域名，避免长期依赖腾讯云默认域名。
 - 统一 UI 状态：按钮点击即刻反馈，所有提交动作有 loading/成功/失败态。
-- 加生产监控：慢接口、失败接口、前端错误、媒体上传失败率。
+- 加生产监控：已接入 `/api/monitor/event`、`/api/admin/monitor`，覆盖慢接口、失败接口、前端错误、媒体上传失败率，并纳入 `check:prelaunch` / `check:trial` 门禁。
 - 加发布门禁：每次上线自动跑 smoke、生产写入验收、小程序脚手架检查。
 - 做数据备份：定期导出 CloudBase 关键集合，至少保留 7 天。
 - 加小程序真机回归清单：登录、发动态、上传媒体、关注、评论、私信、预约、打卡、切换身份。

@@ -67,6 +67,10 @@ class ApiClient:
         suffix = "?remote=1" if remote else ""
         return self.request("GET", f"/api/storage/status{suffix}")
 
+    def admin_monitor(self, token="test-maintenance-token", expected_status=200):
+        query = urllib.parse.urlencode({"token": token})
+        return self.request("GET", f"/api/admin/monitor?{query}", expected_status=expected_status)
+
     def post(self, path, body=None, expected_status=200):
         body = dict(body or {})
         body.setdefault("sessionId", self.session_id)
@@ -94,6 +98,9 @@ class ApiClient:
         if dev_openid:
             body["devOpenId"] = dev_openid
         return self.post("/api/auth/wechat-mini-login", body)
+
+    def report_monitor_event(self, **body):
+        return self.post("/api/monitor/event", body)
 
     def lookup_phone(self, phone):
         return self.post("/api/auth/lookup-phone", {"phone": phone})

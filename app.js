@@ -1718,6 +1718,74 @@ let managedSwitchSequence = 0;
 function wait(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
+
+function trimMonitorValue(value, limit = 180) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+function monitorPath(path) {
+  const raw = trimMonitorValue(path, 220);
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    return parsed.pathname;
+  } catch (_error) {
+    return raw.split("?")[0].slice(0, 160);
+  }
+}
+
+function reportMonitorEvent(event = {}) {
+  if (!API_BASE) return;
+  const payload = {
+    type: trimMonitorValue(event.type || "frontend-event", 48),
+    severity: trimMonitorValue(event.severity || "info", 16),
+    path: monitorPath(event.path || window.location.pathname),
+    message: trimMonitorValue(event.message || "", 220),
+    durationMs: Math.max(0, Math.round(Number(event.durationMs || 0))),
+    status: Math.max(0, Math.round(Number(event.status || 0))),
+    sessionId: state.sessionId || getStoredSessionId() || ""
+  };
+  const body = JSON.stringify(payload);
+  const url = `${API_BASE}/monitor/event`;
+  try {
+    if (navigator.sendBeacon) {
+      const blob = new Blob([body], { type: "application/json" });
+      if (navigator.sendBeacon(url, blob)) return;
+    }
+  } catch (_error) {
+    // Monitoring must never block the user flow.
+  }
+  try {
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      keepalive: true
+    }).catch(() => {});
+  } catch (_error) {
+    // Ignore monitoring transport errors.
+  }
+}
+
+function installFrontendMonitoring() {
+  window.addEventListener("error", (event) => {
+    const target = event.target || {};
+    const resourcePath = target?.src || target?.href || "";
+    reportMonitorEvent({
+      type: resourcePath ? "resource-error" : "frontend-error",
+      severity: "error",
+      path: resourcePath || window.location.pathname,
+      message: event.message || "资源加载失败"
+    });
+  }, true);
+  window.addEventListener("unhandledrejection", (event) => {
+    reportMonitorEvent({
+      type: "unhandled-rejection",
+      severity: "error",
+      path: window.location.pathname,
+      message: event.reason?.message || event.reason || "未处理的异步错误"
+    });
+  });
+}
 const routeMapRegistry = new Map();
 
 function escapeHtml(value = "") {
@@ -2828,11 +2896,13 @@ async function apiRequest(
 ) {
   let lastError = null;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const startedAt = Date.now();
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
     const slowId = slowAfterMs && typeof onSlow === "function"
       ? window.setTimeout(() => onSlow(attempt + 1), slowAfterMs)
       : null;
+    let responseStatus = 0;
 
     try {
       const response = await fetch(path, {
@@ -2841,17 +2911,39 @@ async function apiRequest(
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
       });
+      responseStatus = response.status;
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         const error = new Error(payload.error || "请求失败，请稍后再试。");
         error.retryable = response.status >= 500;
         throw error;
       }
+      const elapsed = Date.now() - startedAt;
+      const slowThreshold = Math.max(2500, Number(slowAfterMs || 0));
+      if (!String(path).includes("/monitor/event") && elapsed >= slowThreshold) {
+        reportMonitorEvent({
+          type: "api-slow",
+          severity: "warn",
+          path,
+          status: responseStatus,
+          durationMs: elapsed
+        });
+      }
       return payload;
     } catch (error) {
       lastError = error;
       const retryable = error?.name === "AbortError" || error?.retryable || error instanceof TypeError;
       if (!retryable || attempt >= retries) {
+        if (!String(path).includes("/monitor/event")) {
+          reportMonitorEvent({
+            type: "api-error",
+            severity: "error",
+            path,
+            status: responseStatus,
+            durationMs: Date.now() - startedAt,
+            message: error?.name === "AbortError" ? "请求超时" : error?.message || "请求失败"
+          });
+        }
         if (error?.name === "AbortError") {
           throw new Error("服务响应较慢，请稍后再试。");
         }
@@ -3499,18 +3591,31 @@ async function readSingleFile(inputName, formData) {
 }
 
 async function uploadManagedMedia({ dataUrl, fileName, assetType, category, thumbnailDataUrl = "", thumbnailName = "" }) {
-  const payload = await apiRequest(`${API_BASE}/media/upload`, {
-    method: "POST",
-    body: {
-      sessionId: state.sessionId || getStoredSessionId(),
-      dataUrl,
-      fileName,
-      assetType,
-      category,
-      thumbnailDataUrl,
-      thumbnailName,
-    }
-  });
+  const startedAt = Date.now();
+  let payload;
+  try {
+    payload = await apiRequest(`${API_BASE}/media/upload`, {
+      method: "POST",
+      body: {
+        sessionId: state.sessionId || getStoredSessionId(),
+        dataUrl,
+        fileName,
+        assetType,
+        category,
+        thumbnailDataUrl,
+        thumbnailName,
+      }
+    });
+  } catch (error) {
+    reportMonitorEvent({
+      type: "media-upload-failed",
+      severity: "error",
+      path: "/api/media/upload",
+      durationMs: Date.now() - startedAt,
+      message: `${assetType || "media"} ${category || "unknown"} ${error?.message || "上传失败"}`
+    });
+    throw error;
+  }
 
   if (payload?.config) {
     state.runtimeConfig = normalizeRuntimeConfig({
@@ -3520,7 +3625,24 @@ async function uploadManagedMedia({ dataUrl, fileName, assetType, category, thum
   }
 
   if (!payload?.media?.url) {
+    reportMonitorEvent({
+      type: "media-upload-failed",
+      severity: "error",
+      path: "/api/media/upload",
+      durationMs: Date.now() - startedAt,
+      message: `${assetType || "media"} ${category || "unknown"} missing url`
+    });
     throw new Error("媒体上传失败，请稍后再试。");
+  }
+  const elapsed = Date.now() - startedAt;
+  if (elapsed >= 4500) {
+    reportMonitorEvent({
+      type: "media-upload-slow",
+      severity: "warn",
+      path: "/api/media/upload",
+      durationMs: elapsed,
+      message: `${assetType || "media"} ${category || "unknown"}`
+    });
   }
 
   return payload.media;
@@ -11814,7 +11936,8 @@ function syncViewportHeight() {
 
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260625-sw-refresh`;
+  if (["localhost", "127.0.0.1"].includes(window.location.hostname)) return;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260625-monitoring`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })
@@ -11837,6 +11960,7 @@ function registerAppServiceWorker() {
 
 syncViewportHeight();
 registerAppServiceWorker();
+installFrontendMonitoring();
 window.addEventListener("resize", syncViewportHeight, { passive: true });
 window.addEventListener("orientationchange", syncViewportHeight, { passive: true });
 window.__FITHUB_READY__ = false;

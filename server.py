@@ -491,6 +491,7 @@ def sanitize_state(state):
     state.setdefault("adminActions", [])
     state.setdefault("deletionRequests", [])
     state.setdefault("blocks", [])
+    state.setdefault("monitorEvents", [])
     for profile in state.get("profiles", {}).values():
         profile["avatarImage"] = compact_avatar_image(profile.get("avatarImage"), profile.get("role", "enthusiast"))
     for post in state.get("posts", {}).values():
@@ -4549,6 +4550,7 @@ def initial_state():
         "moderationQueue": [],
         "adminActions": [],
         "deletionRequests": [],
+        "monitorEvents": [],
     }
 
 
@@ -5624,6 +5626,75 @@ def build_admin_export(state):
     }
 
 
+def trim_monitor_text(value, limit=180):
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text[:limit]
+
+
+def normalize_monitor_path(value):
+    raw = trim_monitor_text(value, 220)
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    if parsed.path:
+        return parsed.path[:160]
+    if raw.startswith("/"):
+        return raw.split("?", 1)[0][:160]
+    return raw.split("?", 1)[0][:160]
+
+
+def record_monitor_event(state, payload):
+    event_type = trim_monitor_text(payload.get("type"), 48) or "frontend-event"
+    severity = trim_monitor_text(payload.get("severity"), 16).lower() or "info"
+    if severity not in {"info", "warn", "error"}:
+        severity = "info"
+    duration_ms = parse_optional_int(payload.get("durationMs"))
+    status_code = parse_optional_int(payload.get("status"))
+    session = (state.get("sessions") or {}).get(str(payload.get("sessionId") or "").strip()) or {}
+    event = {
+        "id": f"monitor-{uuid.uuid4().hex[:10]}",
+        "type": event_type,
+        "severity": severity,
+        "path": normalize_monitor_path(payload.get("path")),
+        "message": trim_monitor_text(payload.get("message"), 220),
+        "durationMs": max(0, min(int(duration_ms or 0), 180000)),
+        "status": max(0, min(int(status_code or 0), 599)),
+        "actorProfileId": session.get("currentActorProfileId") or "",
+        "createdAt": iso_at(),
+    }
+    state.setdefault("monitorEvents", []).insert(0, event)
+    del state["monitorEvents"][200:]
+    return event
+
+
+def build_monitor_dashboard(state):
+    events = list(state.setdefault("monitorEvents", []))[:200]
+    by_type = {}
+    by_severity = {}
+    slow_events = 0
+    media_failures = 0
+    for event in events:
+        event_type = event.get("type") or "unknown"
+        severity = event.get("severity") or "info"
+        by_type[event_type] = by_type.get(event_type, 0) + 1
+        by_severity[severity] = by_severity.get(severity, 0) + 1
+        if int(event.get("durationMs") or 0) >= 2500:
+            slow_events += 1
+        if event_type in {"media-upload-failed", "media-upload-slow"}:
+            media_failures += 1
+    return {
+        "ok": True,
+        "summary": {
+            "totalEvents": len(events),
+            "slowEvents": slow_events,
+            "mediaEvents": media_failures,
+            "byType": by_type,
+            "bySeverity": by_severity,
+        },
+        "events": events[:80],
+    }
+
+
 def moderation_admin_authorized(headers, query=None, payload=None):
     expected_token = ADMIN_TOKEN
     if not expected_token:
@@ -6488,6 +6559,14 @@ class FitHubHandler(BaseHTTPRequestHandler):
 
             self._write_json(self._read_state(build_moderation_dashboard))
             return
+        if parsed.path == f"{API_PREFIX}/admin/monitor":
+            query = parse_qs(parsed.query)
+            if not moderation_admin_authorized(self.headers, query=query):
+                self._write_json({"error": "没有权限查看监控事件。"}, status=HTTPStatus.FORBIDDEN)
+                return
+
+            self._write_json(self._read_state(build_monitor_dashboard))
+            return
         if parsed.path == f"{API_PREFIX}/admin/export":
             query = parse_qs(parsed.query)
             if not moderation_admin_authorized(self.headers, query=query):
@@ -6550,6 +6629,14 @@ class FitHubHandler(BaseHTTPRequestHandler):
 
         payload = self._read_json()
         session_id = payload.get("sessionId")
+
+        if parsed.path == f"{API_PREFIX}/monitor/event":
+            def action(state):
+                event = record_monitor_event(state, payload)
+                return {"ok": True, "eventId": event["id"]}
+
+            self._write_json(self._with_state(action))
+            return
 
         if parsed.path == f"{API_PREFIX}/auth/lookup-phone":
             def action(state):

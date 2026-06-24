@@ -218,6 +218,27 @@ def build_feature_phases(root: Path) -> list[dict[str, Any]]:
                 ),
             ],
         ),
+        phase(
+            "p2-observability",
+            "P2 生产监控与问题定位",
+            [
+                feature_check(
+                    "慢接口、前端错误与媒体上传失败监控",
+                    [
+                        check_file(root, "server.py", ["/monitor/event", "/admin/monitor", "monitorEvents"]),
+                        check_file(root, "app.js", ["api-slow", "frontend-error", "media-upload-failed"]),
+                        check_file(
+                            root,
+                            "tests/api/test_monitoring.py",
+                            [
+                                "monitor_event_endpoint_records_sanitized_event_and_requires_admin_token",
+                                "monitor_events_are_capped_and_classified",
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        ),
     ]
 
 

@@ -701,3 +701,14 @@ tests/
   - 自动覆盖：
     - 主状态丢失某个手机号账号后，可从手机号恢复切片补回账号、关注、点赞、评论、收藏和私信
     - Supabase 手机号恢复行会被合并，且不会误合并备份行里的旧数据
+
+第二十六步当前已落地：
+
+- 生产监控与问题定位：
+  - 前端自动上报慢接口、接口失败、前端异常、资源加载失败、媒体上传失败和媒体上传过慢
+  - 后端新增 `/api/monitor/event` 轻量事件写入，不阻塞用户主流程，最近事件限制为 200 条
+  - 后端新增 `/api/admin/monitor` 管理员监控面板，汇总慢事件、媒体事件、错误等级和最近 80 条明细
+- 回归保护：
+  - 新增 API 监控测试：
+    - `/Users/guoziyi/Documents/gpt/fithub-app-deploy/tests/api/test_monitoring.py`
+  - `check:prelaunch` 和 `check:trial` 门禁已纳入生产监控检查，避免后续升级误删监控链路

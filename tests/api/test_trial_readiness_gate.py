@@ -44,6 +44,9 @@ def write_feature_inventory(root: Path, *, appid: str = "touristappid") -> None:
                 "/admin/moderation/resolve",
                 "/block/toggle",
                 "/account/delete-request",
+                "/monitor/event",
+                "/admin/monitor",
+                "monitorEvents",
             ]
         ),
     )
@@ -61,6 +64,9 @@ def write_feature_inventory(root: Path, *, appid: str = "touristappid") -> None:
                 "/availability/create",
                 "/availability/delete",
                 "/booking/create",
+                "api-slow",
+                "frontend-error",
+                "media-upload-failed",
             ]
         ),
     )
@@ -94,6 +100,10 @@ def write_feature_inventory(root: Path, *, appid: str = "touristappid") -> None:
     )
     write(root / "tests" / "api" / "test_tencent_cos_media.py", "upload_media_asset_uses_cos_provider_and_public_url")
     write(root / "tests" / "api" / "test_auth.py", "account_deletion_request")
+    write(
+        root / "tests" / "api" / "test_monitoring.py",
+        "monitor_event_endpoint_records_sanitized_event_and_requires_admin_token\nmonitor_events_are_capped_and_classified",
+    )
     for rel in [
         "wechat-miniprogram/pages/home/index.js",
         "wechat-miniprogram/pages/discover/index.js",
