@@ -55,6 +55,29 @@ npm run check:production
 
 当前如果还没有备案生产 API 域名，这一步失败是预期的。它的作用是提醒我们：只能继续内部测试，不能提交审核或面向真实用户发布。
 
+拿到正式备案 API 域名和真实小程序 AppID 后，先执行一次配置切换：
+
+```bash
+npm run config:production -- \
+  --api-origin https://api.yourdomain.com \
+  --miniapp-appid wx你的真实小程序AppID
+```
+
+切换后再跑：
+
+```bash
+npm run check:production
+```
+
+如果还没正式切换，只想预览会改什么：
+
+```bash
+npm run config:production -- \
+  --api-origin https://api.yourdomain.com \
+  --miniapp-appid wx你的真实小程序AppID \
+  --dry-run
+```
+
 ### 2. 看一眼本次改动范围
 
 重点确认是否触碰了这些高风险链路：

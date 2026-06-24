@@ -143,6 +143,16 @@ python3 scripts/production_readiness.py
 - 真实微信小程序 AppID
 - 真实可解析的 Supabase Project URL，或迁移后的国内数据库连接
 
+仓库已增加一键切换脚本。拿到真实配置后执行：
+
+```bash
+npm run config:production -- \
+  --api-origin https://api.<你的域名> \
+  --miniapp-appid wx你的真实小程序AppID
+```
+
+该脚本会统一更新 Web、小程序 API 和小程序 AppID，避免手工漏改。
+
 #### 阻断 3：`npm test` 不存在
 
 项目没有 `npm test` 脚本。正确命令是：

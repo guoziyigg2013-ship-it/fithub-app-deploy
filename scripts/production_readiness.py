@@ -29,6 +29,14 @@ def extract_js_string_property(text: str, key: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def read_default_backend() -> str:
+    try:
+        value = extract_js_string_property(read_text(ROOT / "config.js"), "apiOrigin")
+        return value.rstrip("/") or DEFAULT_BACKEND
+    except OSError:
+        return DEFAULT_BACKEND
+
+
 def fail_list_add(failures: list[str], message: str) -> None:
     failures.append(message)
 
@@ -150,7 +158,7 @@ def validate_live_backend(backend_url: str, failures: list[str]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate FitHub production readiness gates.")
-    parser.add_argument("--backend-url", default=DEFAULT_BACKEND)
+    parser.add_argument("--backend-url", default=read_default_backend())
     parser.add_argument("--supabase-url", default=os.getenv("SUPABASE_URL", ""))
     parser.add_argument("--skip-live", action="store_true", help="Only validate static repository configuration.")
     parser.add_argument("--skip-supabase-dns", action="store_true", help="Do not query public DNS for SUPABASE_URL.")

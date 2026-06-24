@@ -8,6 +8,9 @@ data/shared_state.json
 logs/
 tmp/
 backups/
+.env.production
+deploy/tencent-cloud/.env.production
+!deploy/tencent-cloud/.env.production.example
 node_modules/
 playwright-report/
 test-results/

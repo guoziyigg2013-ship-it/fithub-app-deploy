@@ -33,6 +33,29 @@ apiBase: "https://api.yourdomain.com/api"
 5. 用 `scripts/deploy_smoke.py` 做发布后检查。
 6. 用 `scripts/production_readiness.py` 做上架前生产配置检查。
 
+拿到备案 API 域名和真实小程序 AppID 后，不要手工改多个文件，直接执行：
+
+```bash
+python3 scripts/configure_production.py \
+  --api-origin https://api.yourdomain.com \
+  --miniapp-appid wx你的真实小程序AppID
+```
+
+这个脚本会同时更新：
+
+- `config.js` 的 `apiOrigin`
+- `wechat-miniprogram/config.js` 的 `apiBase`
+- `wechat-miniprogram/project.config.json` 的 `appid`
+
+如果只是想先看会改哪些文件，加 `--dry-run`：
+
+```bash
+python3 scripts/configure_production.py \
+  --api-origin https://api.yourdomain.com \
+  --miniapp-appid wx你的真实小程序AppID \
+  --dry-run
+```
+
 腾讯云 CloudBase 云托管官方文档说明，它支持基于 Dockerfile 构建并运行 HTTP 服务；云托管服务应尽量无状态，数据需要放到外部数据库或对象存储。
 
 参考：
@@ -76,6 +99,41 @@ curl http://127.0.0.1:10000/api/storage/status?remote=1
 - `storage.supabaseWritable` 是 `true`
 - `storage.remoteWriteProtected` 是 `false`
 - `remoteRows.reachable` 是 `true`
+
+## 腾讯云轻量服务器 / CVM 快速部署模板
+
+仓库已经提供一个基础模板：
+
+```text
+deploy/tencent-cloud/docker-compose.yml
+deploy/tencent-cloud/.env.production.example
+```
+
+部署时在服务器上执行：
+
+```bash
+cd fithub-app-deploy/deploy/tencent-cloud
+cp .env.production.example .env.production
+```
+
+然后把 `.env.production` 里的域名、Supabase、管理员 token 全部替换为真实值，再启动：
+
+```bash
+docker compose up -d --build
+```
+
+如果你用 Nginx 或腾讯云负载均衡做 HTTPS，反向代理到：
+
+```text
+http://127.0.0.1:10000
+```
+
+绑定域名后，确认：
+
+```bash
+curl https://api.yourdomain.com/healthz
+curl https://api.yourdomain.com/api/storage/status?remote=1
+```
 
 ## 腾讯云部署环境变量
 
@@ -126,6 +184,16 @@ python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
 ```
 
 如果 `production_readiness.py` 仍提示 `onrender.com`、`pages.dev`、`touristappid` 或 Supabase `NXDOMAIN`，说明当前仍是试运行配置，不要提交微信审核。
+
+也可以直接用 npm 命令：
+
+```bash
+npm run config:production -- \
+  --api-origin https://api.yourdomain.com \
+  --miniapp-appid wx你的真实小程序AppID
+
+npm run check:production
+```
 
 ## 关键注意事项
 

@@ -5,22 +5,36 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import socket
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Optional
 
 
+ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_FRONTEND = "https://fithub-cn.pages.dev/"
-DEFAULT_BACKEND = "https://fithub-app-1btg.onrender.com"
+FALLBACK_BACKEND = "https://fithub-app-1btg.onrender.com"
 DEFAULT_MAX_FRONTEND_SECONDS = 3.0
 DEFAULT_MAX_HEALTH_SECONDS = 3.0
 DEFAULT_MAX_STORAGE_SECONDS = 5.0
 DEFAULT_MAX_BOOTSTRAP_SECONDS = 8.0
 DEFAULT_MIN_REAL_PROFILES = 1
+
+
+def read_default_backend() -> str:
+    try:
+        text = (ROOT / "config.js").read_text(encoding="utf-8")
+        match = re.search(r"apiOrigin\s*:\s*[\"']([^\"']+)[\"']", text)
+        if match:
+            return match.group(1).strip().rstrip("/")
+    except OSError:
+        pass
+    return FALLBACK_BACKEND
 
 
 def public_dns_diagnostic(host: str) -> str:
@@ -173,7 +187,7 @@ def validate_storage_status(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the FitHub deploy smoke test.")
     parser.add_argument("--frontend-url", default=DEFAULT_FRONTEND)
-    parser.add_argument("--backend-url", default=DEFAULT_BACKEND)
+    parser.add_argument("--backend-url", default=read_default_backend())
     parser.add_argument(
         "--allow-local-storage",
         action="store_true",

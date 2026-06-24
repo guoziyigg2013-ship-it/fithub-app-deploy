@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -20,7 +21,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_BACKEND = "https://fithub-app-1btg.onrender.com"
+FALLBACK_BACKEND = "https://fithub-app-1btg.onrender.com"
 DEFAULT_OUTPUT_DIR = ROOT / "backups"
 CRITICAL_METRIC_KEYS = (
     "real_profiles",
@@ -32,6 +33,17 @@ CRITICAL_METRIC_KEYS = (
     "real_threads",
     "real_checkins",
 )
+
+
+def read_default_backend() -> str:
+    try:
+        text = (ROOT / "config.js").read_text(encoding="utf-8")
+        match = re.search(r"apiOrigin\s*:\s*[\"']([^\"']+)[\"']", text)
+        if match:
+            return match.group(1).strip().rstrip("/")
+    except OSError:
+        pass
+    return FALLBACK_BACKEND
 
 
 def fetch_json(url: str, *, token: str = "", timeout: int = 30) -> dict[str, Any]:
@@ -111,7 +123,7 @@ def print_metrics(metrics: dict[str, int]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Create or compare FitHub production data snapshots.")
-    parser.add_argument("--backend-url", default=DEFAULT_BACKEND)
+    parser.add_argument("--backend-url", default=read_default_backend())
     parser.add_argument("--token", default=os.getenv("FITHUB_ADMIN_TOKEN", ""))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--compare", default="", help="Compare the current snapshot with a previous snapshot file.")
