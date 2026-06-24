@@ -37,6 +37,24 @@ npm run check:preflight
 - 先修失败项
 - 不要继续发布
 
+### 1.5 跑生产配置门禁
+
+准备小程序上架或真实用户测试前，必须执行：
+
+```bash
+npm run check:production
+```
+
+这一步会检查：
+
+1. Web 前端是否仍指向 Render、Pages、trycloudflare 等临时域名
+2. 小程序是否仍使用 `touristappid`
+3. 小程序 API 是否仍指向临时域名
+4. Supabase Project URL 是否真实可解析
+5. 线上后端是否仍在 `local-fallback`
+
+当前如果还没有备案生产 API 域名，这一步失败是预期的。它的作用是提醒我们：只能继续内部测试，不能提交审核或面向真实用户发布。
+
 ### 2. 看一眼本次改动范围
 
 重点确认是否触碰了这些高风险链路：
@@ -171,6 +189,14 @@ python3 scripts/production_snapshot.py \
 6. `npm run check:smoke`
 7. 生产快照对比
 8. 手工最小 5 条验收
+
+如果是小程序上架前最终验收，把第 6 步前面加上：
+
+```bash
+npm run check:production
+```
+
+只有 `check:production` 和 `check:smoke` 同时通过，才说明“固定域、后端、数据库、小程序配置”都进入可提交状态。
 
 ## 五、当前第一阶段完成标准
 

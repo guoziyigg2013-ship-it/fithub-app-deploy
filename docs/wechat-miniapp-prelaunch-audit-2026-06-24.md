@@ -24,6 +24,7 @@
 python3 scripts/deploy_smoke.py
 python3 scripts/check_miniprogram.py
 python3 scripts/check_miniprogram.py --production
+python3 scripts/production_readiness.py
 python3 -m unittest discover -s tests/api -p 'test_*.py' -v
 python3 -m py_compile server.py
 node --check app.js
@@ -47,6 +48,13 @@ OK
 ```
 
 - `server.py` 和 `app.js` 语法检查通过。
+- 新增生产配置门禁：
+
+```bash
+python3 scripts/production_readiness.py
+```
+
+该门禁会拦截 Render 临时 API 域名、Cloudflare Pages 试用域名、`touristappid`、不可解析的 Supabase Project URL，以及线上后端 `local-fallback`。
 
 ### 1.3 阻断项
 
@@ -117,6 +125,24 @@ Production mini program must use a real AppID, not touristappid.
 
 正式上架前必须替换为真实小程序 AppID 和已备案 HTTPS API 域名。
 
+#### 阻断 2.5：生产配置门禁失败
+
+```bash
+python3 scripts/production_readiness.py
+```
+
+当前失败是预期的，因为仓库仍使用：
+
+- Web API：`https://fithub-app-1btg.onrender.com`
+- 小程序 API：`https://fithub-app-1btg.onrender.com/api`
+- 小程序 AppID：`touristappid`
+
+上线前必须换成：
+
+- 已备案、可长期使用的 HTTPS API 域名，例如 `https://api.<你的域名>`
+- 真实微信小程序 AppID
+- 真实可解析的 Supabase Project URL，或迁移后的国内数据库连接
+
 #### 阻断 3：`npm test` 不存在
 
 项目没有 `npm test` 脚本。正确命令是：
@@ -127,6 +153,7 @@ npm run test:api
 npm run check:preflight
 npm run check:smoke
 npm run check:final
+npm run check:production
 ```
 
 后续发布门禁应统一用这些命令，避免误以为项目没有测试。

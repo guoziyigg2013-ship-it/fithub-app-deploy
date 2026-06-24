@@ -31,6 +31,7 @@ apiBase: "https://api.yourdomain.com/api"
 ```
 
 5. 用 `scripts/deploy_smoke.py` 做发布后检查。
+6. 用 `scripts/production_readiness.py` 做上架前生产配置检查。
 
 腾讯云 CloudBase 云托管官方文档说明，它支持基于 Dockerfile 构建并运行 HTTP 服务；云托管服务应尽量无状态，数据需要放到外部数据库或对象存储。
 
@@ -120,8 +121,11 @@ python3 scripts/deploy_smoke.py \
 
 ```bash
 python3 scripts/check_miniprogram.py --production
+python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com
 python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
 ```
+
+如果 `production_readiness.py` 仍提示 `onrender.com`、`pages.dev`、`touristappid` 或 Supabase `NXDOMAIN`，说明当前仍是试运行配置，不要提交微信审核。
 
 ## 关键注意事项
 

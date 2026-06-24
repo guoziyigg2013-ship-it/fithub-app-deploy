@@ -28,6 +28,8 @@ def run_step(label: str, cmd: list[str]) -> tuple[bool, float]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the complete FitHub acceptance checklist.")
+    parser.add_argument("--production-backend-url", default="", help="Override backend URL for production readiness checks.")
+    parser.add_argument("--skip-production-readiness", action="store_true", help="Skip production config readiness gate.")
     parser.add_argument("--skip-smoke", action="store_true", help="Skip fixed-domain smoke test.")
     parser.add_argument("--skip-media-report", action="store_true", help="Skip read-only media storage report.")
     parser.add_argument("--skip-production-snapshot", action="store_true", help="Skip admin-token production snapshot.")
@@ -37,6 +39,11 @@ def main() -> int:
     steps: list[tuple[str, list[str]]] = [
         ("Local preflight gate", ["python3", "scripts/preflight_check.py"]),
     ]
+    if not args.skip_production_readiness:
+        readiness_cmd = ["python3", "scripts/production_readiness.py"]
+        if args.production_backend_url:
+            readiness_cmd.extend(["--backend-url", args.production_backend_url])
+        steps.append(("Production readiness gate", readiness_cmd))
     if not args.skip_smoke:
         steps.append(("Fixed-domain smoke gate", ["python3", "scripts/deploy_smoke.py"]))
     if not args.skip_media_report:
