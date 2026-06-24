@@ -1,0 +1,18 @@
+{
+  "apiOrigin": "https://api.yourdomain.com",
+  "webOrigin": "https://app.yourdomain.com",
+  "mediaOrigin": "https://media.yourdomain.com",
+  "miniappAppId": "wx你的真实小程序AppID",
+  "serverIp": "你的服务器公网IP",
+  "sshUser": "root",
+  "sshKey": "~/.ssh/你的腾讯云密钥",
+  "certEmail": "ops@example.com",
+  "releaseVersion": "production-cutover",
+  "releaseArchive": "dist/fithub-tencent-release-production-cutover.tar.gz",
+  "supabaseUrl": "https://你的项目ref.supabase.co",
+  "supabaseServiceRoleKey": "你的service_role",
+  "cosSecretId": "你的腾讯云COSSecretId",
+  "cosSecretKey": "你的腾讯云COSSecretKey",
+  "cosRegion": "ap-guangzhou",
+  "cosBucket": "fithub-media-1250000000"
+}

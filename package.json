@@ -10,6 +10,7 @@
     "check:wechat-domains": "python3 scripts/wechat_domain_manifest.py",
     "check:tencent-domains": "python3 scripts/tencent_domain_readiness.py",
     "check:tencent-launch": "python3 scripts/tencent_launch_gate.py",
+    "plan:tencent-launch": "python3 scripts/tencent_launch_plan.py",
     "check:production-write": "python3 scripts/production_write_acceptance.py",
     "config:production": "python3 scripts/configure_production.py",
     "init:tencent-env": "python3 scripts/init_tencent_env.py",

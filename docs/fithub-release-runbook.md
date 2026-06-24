@@ -153,6 +153,15 @@ npm run release:tencent
 
 把生成的 `dist/fithub-tencent-release-*.tar.gz` 上传到腾讯云服务器。不要上传本地整个工作区，避免误带测试数据、备份和密钥。
 
+如果要先生成一份完整上线命令计划：
+
+```bash
+cp deploy/tencent-cloud/launch-plan.example.json deploy/tencent-cloud/launch-plan.json
+npm run plan:tencent-launch -- --config deploy/tencent-cloud/launch-plan.json
+```
+
+`launch-plan.json` 用来填写真实域名、腾讯云服务器、AppID、Supabase 和 COS 信息，会被 `.gitignore` 忽略。计划器不会打印真实密钥，只会显示缺失项和可复制的执行顺序。
+
 如果是一台新腾讯云服务器，先初始化运行环境：
 
 ```bash

@@ -43,6 +43,22 @@ apiBase: "https://api.yourdomain.com/api"
 
 拿到备案 API 域名、真实小程序 AppID、真实 Supabase Project URL 和 `service_role` 后，不要手工改多个文件。先执行正式切换预演：
 
+如果你想先把完整上线步骤排成一张可执行清单，复制上线计划模板：
+
+```bash
+cp deploy/tencent-cloud/launch-plan.example.json deploy/tencent-cloud/launch-plan.json
+```
+
+把 `launch-plan.json` 里的域名、服务器 IP、SSH 密钥、小程序 AppID、Supabase 和 COS 配置换成真实值。这个文件会被 `.gitignore` 忽略，不要提交。
+
+然后运行：
+
+```bash
+npm run plan:tencent-launch -- --config deploy/tencent-cloud/launch-plan.json
+```
+
+它会输出“发布包、切配置、初始化服务器、DNS 检查、证书、部署、总控门禁、最终验收”的完整命令顺序，并标明还缺哪些输入。
+
 ```bash
 npm run cutover:tencent -- \
   --api-origin https://api.yourdomain.com \
