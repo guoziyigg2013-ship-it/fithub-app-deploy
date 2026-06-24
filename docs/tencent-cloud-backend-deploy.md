@@ -328,7 +328,8 @@ FITHUB_MEDIA_MAINTENANCE_TOKEN=请生成强随机字符串
 ```bash
 python3 scripts/deploy_smoke.py \
   --frontend-url https://app.yourdomain.com/ \
-  --backend-url https://api.yourdomain.com
+  --backend-url https://api.yourdomain.com \
+  --require-cos-media
 ```
 
 上架前必须通过：
@@ -344,7 +345,7 @@ python3 scripts/tencent_server_doctor.py \
   --allow-running-service
 python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com
 python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com --require-cos-media
-python3 scripts/deploy_smoke.py --frontend-url https://app.yourdomain.com/ --backend-url https://api.yourdomain.com
+python3 scripts/deploy_smoke.py --frontend-url https://app.yourdomain.com/ --backend-url https://api.yourdomain.com --require-cos-media
 ```
 
 最后跑一次写入链路验收，确认不是“页面能打开但用户数据不稳”：

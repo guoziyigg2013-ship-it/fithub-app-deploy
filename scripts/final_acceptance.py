@@ -33,6 +33,7 @@ def main() -> int:
     parser.add_argument("--skip-smoke", action="store_true", help="Skip fixed-domain smoke test.")
     parser.add_argument("--skip-media-report", action="store_true", help="Skip read-only media storage report.")
     parser.add_argument("--skip-production-snapshot", action="store_true", help="Skip admin-token production snapshot.")
+    parser.add_argument("--require-cos-media", action="store_true", help="Require live production media storage to use Tencent COS.")
     parser.add_argument("--snapshot-baseline", default="", help="Compare production metrics with this previous snapshot file.")
     parser.add_argument("--run-production-write", action="store_true", help="Run write-path production acceptance with a test phone.")
     parser.add_argument("--production-write-phone", default="", help="Dedicated test phone for production write acceptance.")
@@ -47,9 +48,16 @@ def main() -> int:
         readiness_cmd = ["python3", "scripts/production_readiness.py"]
         if args.production_backend_url:
             readiness_cmd.extend(["--backend-url", args.production_backend_url])
+        if args.require_cos_media:
+            readiness_cmd.append("--require-cos-media")
         steps.append(("Production readiness gate", readiness_cmd))
     if not args.skip_smoke:
-        steps.append(("Fixed-domain smoke gate", ["python3", "scripts/deploy_smoke.py"]))
+        smoke_cmd = ["python3", "scripts/deploy_smoke.py"]
+        if args.production_backend_url:
+            smoke_cmd.extend(["--backend-url", args.production_backend_url])
+        if args.require_cos_media:
+            smoke_cmd.append("--require-cos-media")
+        steps.append(("Fixed-domain smoke gate", smoke_cmd))
     if not args.skip_media_report:
         steps.append(("Media storage read-only report", ["python3", "scripts/media_maintenance.py"]))
     if not args.skip_production_snapshot:

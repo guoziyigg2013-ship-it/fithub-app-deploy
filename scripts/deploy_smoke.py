@@ -136,6 +136,7 @@ def validate_storage_status(
     *,
     allow_local_storage: bool = False,
     min_real_profiles: int = DEFAULT_MIN_REAL_PROFILES,
+    require_cos_media: bool = False,
 ) -> None:
     ensure(isinstance(storage_payload, dict), "Storage status payload is not an object")
     ensure("storage" in storage_payload and "metrics" in storage_payload, "Storage status missing diagnostics")
@@ -182,6 +183,12 @@ def validate_storage_status(
             int(metrics.get("real_profiles") or 0) >= min_real_profiles,
             f"real_profiles is {metrics.get('real_profiles')}; expected at least {min_real_profiles}. Production data may have collapsed.",
         )
+    media = storage_payload.get("media") or {}
+    if require_cos_media:
+        ensure(
+            str(media.get("storageProvider") or "").lower() == "cos",
+            f"Production media storage should be Tencent COS, got {media.get('storageProvider') or 'unknown'}.",
+        )
 
 
 def main() -> int:
@@ -198,6 +205,7 @@ def main() -> int:
     parser.add_argument("--max-storage-seconds", type=float, default=DEFAULT_MAX_STORAGE_SECONDS)
     parser.add_argument("--max-bootstrap-seconds", type=float, default=DEFAULT_MAX_BOOTSTRAP_SECONDS)
     parser.add_argument("--min-real-profiles", type=int, default=DEFAULT_MIN_REAL_PROFILES)
+    parser.add_argument("--require-cos-media", action="store_true", help="Require backend media storage to be Tencent COS.")
     args = parser.parse_args()
 
     frontend_url = args.frontend_url.rstrip("/") + "/"
@@ -227,6 +235,7 @@ def main() -> int:
             storage,
             allow_local_storage=args.allow_local_storage,
             min_real_profiles=args.min_real_profiles,
+            require_cos_media=args.require_cos_media,
         )
         print(f"  OK storage status ({storage.get('storage', {}).get('loadedFrom', 'unknown')}, {elapsed:.2f}s)")
 

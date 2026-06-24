@@ -248,7 +248,8 @@ python3 scripts/tencent_server_doctor.py \
 
 python3 scripts/deploy_smoke.py \
   --frontend-url https://app.yourdomain.com/ \
-  --backend-url https://api.yourdomain.com
+  --backend-url https://api.yourdomain.com \
+  --require-cos-media
 
 python3 scripts/production_readiness.py \
   --backend-url https://api.yourdomain.com \

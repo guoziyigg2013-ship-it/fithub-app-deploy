@@ -29,6 +29,10 @@ def healthy_storage_payload(**overrides):
             "reachable": True,
             "primaryRowPresent": True,
         },
+        "media": {
+            "storageProvider": "cos",
+            "bucket": "fithub-media-1250000000",
+        },
     }
     for key, value in overrides.items():
         if isinstance(value, dict) and isinstance(payload.get(key), dict):
@@ -90,6 +94,19 @@ class DeploySmokeGuardTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "real_profiles"):
             deploy_smoke.validate_storage_status(payload, min_real_profiles=1)
+
+    def test_storage_status_accepts_cos_media_when_required(self):
+        deploy_smoke.validate_storage_status(
+            healthy_storage_payload(),
+            min_real_profiles=1,
+            require_cos_media=True,
+        )
+
+    def test_storage_status_rejects_non_cos_media_when_required(self):
+        payload = healthy_storage_payload(media={"storageProvider": "supabase"})
+
+        with self.assertRaisesRegex(RuntimeError, "Tencent COS"):
+            deploy_smoke.validate_storage_status(payload, min_real_profiles=1, require_cos_media=True)
 
     def test_storage_status_rejects_unreachable_remote_rows(self):
         payload = healthy_storage_payload(remoteRows={"reachable": False, "error": "dns failed"})
