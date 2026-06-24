@@ -145,6 +145,7 @@ cp .env.production.example .env.production
 然后把 `.env.production` 里的域名、Supabase、管理员 token 全部替换为真实值，再启动：
 
 ```bash
+python3 ../../scripts/tencent_cloud_preflight.py
 chmod +x deploy.sh
 ./deploy.sh
 ```
@@ -166,6 +167,13 @@ deploy/tencent-cloud/nginx-fithub.conf.example
 ```bash
 curl https://api.yourdomain.com/healthz
 curl https://api.yourdomain.com/api/storage/status?remote=1
+```
+
+再跑一次带线上域名的预检：
+
+```bash
+python3 ../../scripts/tencent_cloud_preflight.py \
+  --backend-url https://api.yourdomain.com
 ```
 
 确认国内 API 正常后，再回到本地仓库执行正式配置切换：
@@ -222,6 +230,9 @@ python3 scripts/deploy_smoke.py \
 
 ```bash
 python3 scripts/check_miniprogram.py --production
+python3 scripts/tencent_cloud_preflight.py \
+  --env-file deploy/tencent-cloud/.env.production \
+  --backend-url https://api.yourdomain.com
 python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com
 python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
 ```

@@ -111,6 +111,14 @@ npm run release:tencent
 
 把生成的 `dist/fithub-tencent-release-*.tar.gz` 上传到腾讯云服务器。不要上传本地整个工作区，避免误带测试数据、备份和密钥。
 
+服务器上填好 `deploy/tencent-cloud/.env.production` 后，先跑：
+
+```bash
+python3 ../../scripts/tencent_cloud_preflight.py
+```
+
+如果这一步失败，说明域名、数据库、token 或 Docker 配置还没达到生产要求，不要启动或对外开放。
+
 ### 4. 大升级前做生产数据快照
 
 如果这次发布会影响账号、关注、动态、消息、预约、打卡、媒体或存储配置，先执行：
@@ -136,6 +144,7 @@ tar -xzf fithub-tencent-release-*.tar.gz
 cd fithub-app-deploy/deploy/tencent-cloud
 cp .env.production.example .env.production
 # 填写真实域名、数据库、管理员 token 后：
+python3 ../../scripts/tencent_cloud_preflight.py
 ./deploy.sh
 ```
 

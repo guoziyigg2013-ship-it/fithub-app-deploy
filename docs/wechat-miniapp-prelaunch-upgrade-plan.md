@@ -524,6 +524,7 @@ npm run release:tencent
 tar -xzf fithub-tencent-release-*.tar.gz
 cd fithub-app-deploy/deploy/tencent-cloud
 cp .env.production.example .env.production
+python3 ../../scripts/tencent_cloud_preflight.py
 ./deploy.sh
 ```
 
@@ -537,6 +538,8 @@ npm run check:production
 ```
 
 `check:production` 通过前，不提交微信审核。
+
+服务器上的 `tencent_cloud_preflight.py` 会检查 `.env.production` 里是否还留着占位域名、假 Supabase key、短 token、错误端口或不可解析的 Docker Compose 配置。它是国内固定域上线前的第一道门禁。
 - 小程序 API 域名仍是 Render 临时域。
 - 没有用户协议和隐私政策。
 - 没有账号注销入口。
