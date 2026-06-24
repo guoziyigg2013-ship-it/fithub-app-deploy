@@ -509,6 +509,34 @@ python3 scripts/final_acceptance.py
 - `/api/storage/status` 显示 `local-fallback`。
 - 后端健康检查超过 3 秒。
 - 小程序仍使用 `touristappid`。
+
+## 国内后端迁移执行补充
+
+当前仓库已准备腾讯云轻量/CVM 的发布包流程：
+
+```bash
+npm run release:tencent
+```
+
+生成包上传到腾讯云服务器后：
+
+```bash
+tar -xzf fithub-tencent-release-*.tar.gz
+cd fithub-app-deploy/deploy/tencent-cloud
+cp .env.production.example .env.production
+./deploy.sh
+```
+
+绑定备案 HTTPS API 域名后，再执行：
+
+```bash
+npm run config:production -- \
+  --api-origin https://api.yourdomain.com \
+  --miniapp-appid wx你的真实小程序AppID
+npm run check:production
+```
+
+`check:production` 通过前，不提交微信审核。
 - 小程序 API 域名仍是 Render 临时域。
 - 没有用户协议和隐私政策。
 - 没有账号注销入口。

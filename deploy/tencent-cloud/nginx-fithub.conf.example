@@ -1,0 +1,36 @@
+# Replace api.yourdomain.com with your ICP-filed API domain.
+# This example assumes the FitHub API container listens on 127.0.0.1:10000.
+
+server {
+    listen 80;
+    server_name api.yourdomain.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name api.yourdomain.com;
+
+    ssl_certificate /etc/letsencrypt/live/api.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.yourdomain.com/privkey.pem;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://127.0.0.1:10000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+}

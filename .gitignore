@@ -8,6 +8,7 @@ data/shared_state.json
 logs/
 tmp/
 backups/
+dist/
 .env.production
 deploy/tencent-cloud/.env.production
 !deploy/tencent-cloud/.env.production.example

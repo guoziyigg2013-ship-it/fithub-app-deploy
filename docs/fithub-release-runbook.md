@@ -101,6 +101,16 @@ git commit -m "..."
 git push
 ```
 
+### 3.5 构建腾讯云后端发布包
+
+如果这次要部署到国内后端，执行：
+
+```bash
+npm run release:tencent
+```
+
+把生成的 `dist/fithub-tencent-release-*.tar.gz` 上传到腾讯云服务器。不要上传本地整个工作区，避免误带测试数据、备份和密钥。
+
 ### 4. 大升级前做生产数据快照
 
 如果这次发布会影响账号、关注、动态、消息、预约、打卡、媒体或存储配置，先执行：
@@ -115,9 +125,19 @@ FITHUB_ADMIN_TOKEN=你的管理员token npm run snapshot:prod
 
 ### 1. 后端发布
 
-在 Render 上：
+迁到国内前，旧流程是在 Render 上：
 
 - 选择 `Deploy latest commit`
+
+迁到腾讯云后，改为在服务器上：
+
+```bash
+tar -xzf fithub-tencent-release-*.tar.gz
+cd fithub-app-deploy/deploy/tencent-cloud
+cp .env.production.example .env.production
+# 填写真实域名、数据库、管理员 token 后：
+./deploy.sh
+```
 
 ### 2. 中国固定域发布
 

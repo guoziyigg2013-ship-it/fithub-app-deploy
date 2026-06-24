@@ -107,11 +107,37 @@ curl http://127.0.0.1:10000/api/storage/status?remote=1
 ```text
 deploy/tencent-cloud/docker-compose.yml
 deploy/tencent-cloud/.env.production.example
+deploy/tencent-cloud/deploy.sh
+deploy/tencent-cloud/nginx-fithub.conf.example
 ```
+
+### 1. 在本地构建干净发布包
+
+不要上传整个工作区。先在本地生成只包含 Git 跟踪代码和部署模板的发布包：
+
+```bash
+npm run release:tencent
+```
+
+输出位置类似：
+
+```text
+dist/fithub-tencent-release-20260624-120000.tar.gz
+dist/fithub-tencent-release-20260624-120000.tar.gz.manifest.json
+```
+
+发布包会自动排除：
+
+- 真实 `.env` 文件
+- 运行态数据 `data/`
+- 生产快照 `backups/`
+- `node_modules/`
+- Playwright 产物和临时文件
 
 部署时在服务器上执行：
 
 ```bash
+tar -xzf fithub-tencent-release-*.tar.gz
 cd fithub-app-deploy/deploy/tencent-cloud
 cp .env.production.example .env.production
 ```
@@ -119,7 +145,8 @@ cp .env.production.example .env.production
 然后把 `.env.production` 里的域名、Supabase、管理员 token 全部替换为真实值，再启动：
 
 ```bash
-docker compose up -d --build
+chmod +x deploy.sh
+./deploy.sh
 ```
 
 如果你用 Nginx 或腾讯云负载均衡做 HTTPS，反向代理到：
@@ -128,12 +155,28 @@ docker compose up -d --build
 http://127.0.0.1:10000
 ```
 
+Nginx 可以参考：
+
+```text
+deploy/tencent-cloud/nginx-fithub.conf.example
+```
+
 绑定域名后，确认：
 
 ```bash
 curl https://api.yourdomain.com/healthz
 curl https://api.yourdomain.com/api/storage/status?remote=1
 ```
+
+确认国内 API 正常后，再回到本地仓库执行正式配置切换：
+
+```bash
+npm run config:production -- \
+  --api-origin https://api.yourdomain.com \
+  --miniapp-appid wx你的真实小程序AppID
+```
+
+然后提交、发布前端和小程序代码。
 
 ## 腾讯云部署环境变量
 
