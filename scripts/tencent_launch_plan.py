@@ -83,6 +83,8 @@ def build_plan(config: dict[str, str]) -> dict[str, Any]:
     cert_email = value(config, "certEmail", "你的证书通知邮箱")
     release_version = value(config, "releaseVersion", "production-cutover")
     release_archive = value(config, "releaseArchive", f"dist/fithub-tencent-release-{release_version}.tar.gz")
+    before_snapshot = value(config, "beforeSnapshot", "<BEFORE_SNAPSHOT_JSON>")
+    after_snapshot = value(config, "afterSnapshot", "<AFTER_SNAPSHOT_JSON>")
     cos_secret_id = value(config, "cosSecretId", "你的腾讯云COSSecretId")
     cos_secret_key = value(config, "cosSecretKey", "你的腾讯云COSSecretKey")
     cos_region = value(config, "cosRegion", "ap-guangzhou")
@@ -150,6 +152,23 @@ def build_plan(config: dict[str, str]) -> dict[str, Any]:
             ],
             config,
             ["serverIp", "sshKey"],
+        ),
+        step(
+            "发布前生产数据快照",
+            [
+                "env",
+                "FITHUB_ADMIN_TOKEN=<FITHUB_ADMIN_TOKEN>",
+                "npm",
+                "run",
+                "snapshot:prod",
+                "--",
+                "--backend-url",
+                api_origin,
+                "--output-dir",
+                "backups/tencent-cutover-before",
+            ],
+            config,
+            ["apiOrigin", "adminToken"],
         ),
         step(
             "检查 DNS 与 ACME 端口",
@@ -245,6 +264,25 @@ def build_plan(config: dict[str, str]) -> dict[str, Any]:
             ["serverIp", "sshKey"],
         ),
         step(
+            "发布后生产数据快照并对比",
+            [
+                "env",
+                "FITHUB_ADMIN_TOKEN=<FITHUB_ADMIN_TOKEN>",
+                "npm",
+                "run",
+                "snapshot:prod",
+                "--",
+                "--backend-url",
+                api_origin,
+                "--compare",
+                before_snapshot,
+                "--output-dir",
+                "backups/tencent-cutover-after",
+            ],
+            config,
+            ["apiOrigin", "adminToken"],
+        ),
+        step(
             "运行腾讯云上线总控门禁",
             [
                 "npm",
@@ -280,6 +318,26 @@ def build_plan(config: dict[str, str]) -> dict[str, Any]:
                 api_origin,
                 "--verify-frontend-api-origin",
                 "--require-cos-media",
+            ],
+            config,
+            ["apiOrigin", "webOrigin"],
+        ),
+        step(
+            "生成上线证据报告",
+            [
+                "npm",
+                "run",
+                "evidence:tencent-launch",
+                "--",
+                "--frontend-url",
+                web_origin + "/",
+                "--backend-url",
+                api_origin,
+                "--release-archive",
+                release_archive,
+                "--snapshot",
+                after_snapshot,
+                "--check-live",
             ],
             config,
             ["apiOrigin", "webOrigin"],
@@ -346,6 +404,7 @@ def main() -> int:
             "releaseArchive": "dist/fithub-tencent-release-production-cutover.tar.gz",
             "supabaseUrl": "https://你的项目ref.supabase.co",
             "supabaseServiceRoleKey": "你的service_role",
+            "adminToken": "你的FITHUB_ADMIN_TOKEN",
             "cosSecretId": "你的腾讯云COSSecretId",
             "cosSecretKey": "你的腾讯云COSSecretKey",
             "cosRegion": "ap-guangzhou",

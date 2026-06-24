@@ -23,6 +23,7 @@ READY_CONFIG = {
     "certEmail": "ops@fithub.cn",
     "supabaseUrl": "https://abcdefghijklmnopqrst.supabase.co",
     "supabaseServiceRoleKey": "s" * 80,
+    "adminToken": "admin-token-production-value",
     "cosSecretId": "AKIDFITHUBPRODUCTION",
     "cosSecretKey": "cos-secret-key-production",
     "cosBucket": "fithub-media-1250000000",
@@ -45,10 +46,14 @@ class TencentLaunchPlanTests(unittest.TestCase):
         rendered = "\n".join(step["display"] for step in plan["steps"])
         self.assertIn("check:tencent-launch", rendered)
         self.assertIn("deploy:tencent-remote", rendered)
+        self.assertIn("snapshot:prod", rendered)
+        self.assertIn("evidence:tencent-launch", rendered)
         self.assertIn("<SUPABASE_SERVICE_ROLE_KEY>", rendered)
         self.assertIn("<COS_SECRET_KEY>", rendered)
+        self.assertIn("<FITHUB_ADMIN_TOKEN>", rendered)
         self.assertNotIn("s" * 80, rendered)
         self.assertNotIn("cos-secret-key-production", rendered)
+        self.assertNotIn("admin-token-production-value", rendered)
 
     def test_load_config_reads_json_object(self):
         with tempfile.TemporaryDirectory() as temp_dir:

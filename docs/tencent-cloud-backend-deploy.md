@@ -57,7 +57,7 @@ cp deploy/tencent-cloud/launch-plan.example.json deploy/tencent-cloud/launch-pla
 npm run plan:tencent-launch -- --config deploy/tencent-cloud/launch-plan.json
 ```
 
-它会输出“发布包、切配置、初始化服务器、DNS 检查、证书、部署、总控门禁、最终验收”的完整命令顺序，并标明还缺哪些输入。
+它会输出“发布包、切配置、初始化服务器、发布前数据快照、DNS 检查、证书、部署、发布后快照对比、总控门禁、最终验收、上线证据报告”的完整命令顺序，并标明还缺哪些输入。
 
 ```bash
 npm run cutover:tencent -- \

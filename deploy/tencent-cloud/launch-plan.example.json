@@ -11,6 +11,7 @@
   "releaseArchive": "dist/fithub-tencent-release-production-cutover.tar.gz",
   "supabaseUrl": "https://你的项目ref.supabase.co",
   "supabaseServiceRoleKey": "你的service_role",
+  "adminToken": "你的FITHUB_ADMIN_TOKEN",
   "cosSecretId": "你的腾讯云COSSecretId",
   "cosSecretKey": "你的腾讯云COSSecretKey",
   "cosRegion": "ap-guangzhou",
