@@ -63,6 +63,12 @@ npm run cutover:tencent -- \
   --miniapp-appid wx你的真实小程序AppID \
   --supabase-url https://你的项目ref.supabase.co \
   --supabase-service-role-key 你的真实service_role_key \
+  --media-storage-provider cos \
+  --cos-secret-id 你的腾讯云COSSecretId \
+  --cos-secret-key 你的腾讯云COSSecretKey \
+  --cos-region ap-guangzhou \
+  --cos-bucket fithub-media-1250000000 \
+  --cos-public-base-url https://media.yourdomain.com \
   --skip-release
 ```
 
@@ -74,6 +80,12 @@ npm run cutover:tencent -- \
   --miniapp-appid wx你的真实小程序AppID \
   --supabase-url https://你的项目ref.supabase.co \
   --supabase-service-role-key 你的真实service_role_key \
+  --media-storage-provider cos \
+  --cos-secret-id 你的腾讯云COSSecretId \
+  --cos-secret-key 你的腾讯云COSSecretKey \
+  --cos-region ap-guangzhou \
+  --cos-bucket fithub-media-1250000000 \
+  --cos-public-base-url https://media.yourdomain.com \
   --apply \
   --write-env \
   --force
@@ -176,6 +188,12 @@ python3 scripts/init_tencent_env.py \
   --api-origin https://api.yourdomain.com \
   --supabase-url https://你的真实项目ref.supabase.co \
   --supabase-service-role-key '你的真实service_role_key' \
+  --media-storage-provider cos \
+  --cos-secret-id '你的腾讯云COSSecretId' \
+  --cos-secret-key '你的腾讯云COSSecretKey' \
+  --cos-region ap-guangzhou \
+  --cos-bucket fithub-media-1250000000 \
+  --cos-public-base-url https://media.yourdomain.com \
   --output deploy/tencent-cloud/.env.production \
   --nginx-output deploy/tencent-cloud/nginx-fithub.conf \
   --print-redacted
@@ -228,6 +246,10 @@ python3 scripts/tencent_server_doctor.py \
 python3 scripts/deploy_smoke.py \
   --frontend-url https://fithub-cn.pages.dev/ \
   --backend-url https://api.yourdomain.com
+
+python3 scripts/production_readiness.py \
+  --backend-url https://api.yourdomain.com \
+  --require-cos-media
 ```
 
 ### 1.5 对比生产数据快照

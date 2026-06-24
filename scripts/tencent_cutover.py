@@ -46,7 +46,13 @@ def redact_env(values: dict[str, str]) -> list[str]:
         "FITHUB_PUBLIC_API_ORIGIN",
         "SUPABASE_URL",
         "SUPABASE_SERVICE_ROLE_KEY",
+        "FITHUB_MEDIA_STORAGE_PROVIDER",
         "FITHUB_MEDIA_BUCKET",
+        "FITHUB_TENCENT_COS_SECRET_ID",
+        "FITHUB_TENCENT_COS_SECRET_KEY",
+        "FITHUB_TENCENT_COS_REGION",
+        "FITHUB_TENCENT_COS_BUCKET",
+        "FITHUB_TENCENT_COS_PUBLIC_BASE_URL",
         "FITHUB_ADMIN_TOKEN",
         "FITHUB_MEDIA_MAINTENANCE_TOKEN",
     ):
@@ -74,6 +80,12 @@ def run_cutover(
     admin_token: str = "",
     media_maintenance_token: str = "",
     media_bucket: str = "fithub-media",
+    media_storage_provider: str = "supabase",
+    cos_secret_id: str = "",
+    cos_secret_key: str = "",
+    cos_region: str = "",
+    cos_bucket: str = "",
+    cos_public_base_url: str = "",
     apply: bool = False,
     write_env: bool = False,
     force: bool = False,
@@ -99,6 +111,12 @@ def run_cutover(
         admin_token=admin_token,
         media_maintenance_token=media_maintenance_token,
         media_bucket=media_bucket,
+        media_storage_provider=media_storage_provider,
+        cos_secret_id=cos_secret_id,
+        cos_secret_key=cos_secret_key,
+        cos_region=cos_region,
+        cos_bucket=cos_bucket,
+        cos_public_base_url=cos_public_base_url,
     )
     validate_backend_if_requested(backend_url)
 
@@ -181,6 +199,12 @@ def main() -> int:
     parser.add_argument("--admin-token", default="", help="Optional fixed admin token. Defaults to generated.")
     parser.add_argument("--media-maintenance-token", default="", help="Optional fixed media maintenance token.")
     parser.add_argument("--media-bucket", default="fithub-media")
+    parser.add_argument("--media-storage-provider", default="supabase", choices=["supabase", "cos", "inline"])
+    parser.add_argument("--cos-secret-id", default="")
+    parser.add_argument("--cos-secret-key", default="")
+    parser.add_argument("--cos-region", default="")
+    parser.add_argument("--cos-bucket", default="")
+    parser.add_argument("--cos-public-base-url", default="")
     parser.add_argument("--apply", action="store_true", help="Actually update files. Omit for dry-run.")
     parser.add_argument("--write-env", action="store_true", help="Write .env.production and nginx config when --apply is set.")
     parser.add_argument("--force", action="store_true", help="Overwrite generated env/nginx files.")
@@ -203,6 +227,12 @@ def main() -> int:
             admin_token=args.admin_token,
             media_maintenance_token=args.media_maintenance_token,
             media_bucket=args.media_bucket,
+            media_storage_provider=args.media_storage_provider,
+            cos_secret_id=args.cos_secret_id,
+            cos_secret_key=args.cos_secret_key,
+            cos_region=args.cos_region,
+            cos_bucket=args.cos_bucket,
+            cos_public_base_url=args.cos_public_base_url,
             apply=args.apply,
             write_env=args.write_env,
             force=args.force,

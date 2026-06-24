@@ -93,6 +93,7 @@ class ProductionReadinessTests(unittest.TestCase):
                 "reachable": False,
                 "error": "dns failed",
             },
+            "media": {"storageProvider": "inline"},
         }
 
         try:
@@ -104,6 +105,56 @@ class ProductionReadinessTests(unittest.TestCase):
         self.assertTrue(any("local-fallback" in item for item in failures))
         self.assertTrue(any("not writable" in item for item in failures))
         self.assertTrue(any("remote rows" in item and "dns failed" in item for item in failures))
+
+    def test_live_backend_can_require_tencent_cos_media(self):
+        original_fetch_json = production_readiness.fetch_json
+        production_readiness.fetch_json = lambda _url, timeout=20: {
+            "status": "ok",
+            "storage": {
+                "loadedFrom": "supabase",
+                "remoteWriteProtected": False,
+                "supabaseWritable": True,
+            },
+            "remoteRows": {"reachable": True},
+            "media": {"storageProvider": "supabase"},
+        }
+
+        try:
+            failures = []
+            production_readiness.validate_live_backend(
+                "https://api.fithub.example.com",
+                failures,
+                require_cos_media=True,
+            )
+        finally:
+            production_readiness.fetch_json = original_fetch_json
+
+        self.assertTrue(any("Tencent COS" in item for item in failures))
+
+    def test_live_backend_accepts_tencent_cos_media_when_required(self):
+        original_fetch_json = production_readiness.fetch_json
+        production_readiness.fetch_json = lambda _url, timeout=20: {
+            "status": "ok",
+            "storage": {
+                "loadedFrom": "supabase",
+                "remoteWriteProtected": False,
+                "supabaseWritable": True,
+            },
+            "remoteRows": {"reachable": True},
+            "media": {"storageProvider": "cos"},
+        }
+
+        try:
+            failures = []
+            production_readiness.validate_live_backend(
+                "https://api.fithub.example.com",
+                failures,
+                require_cos_media=True,
+            )
+        finally:
+            production_readiness.fetch_json = original_fetch_json
+
+        self.assertEqual(failures, [])
 
 
 if __name__ == "__main__":

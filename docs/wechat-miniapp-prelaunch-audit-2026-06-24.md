@@ -265,7 +265,8 @@ python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
 
 - 后端已支持 `/api/media/upload-file` 和 multipart 上传。
 - 小程序已改为 `wx.uploadFile`。
-- 但生产对象存储仍依赖当前 Supabase Storage 环境和跨境链路。
+- 后端已支持通过 `FITHUB_MEDIA_STORAGE_PROVIDER=cos` 切换腾讯云 COS。
+- 正式上架前必须把媒体域名切到国内 COS/CDN，而不是继续依赖跨境 Supabase Storage。
 
 建议方案：
 
@@ -273,6 +274,7 @@ python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
 - 上传图片自动压缩并生成缩略图。
 - 视频限制大小和时长，生成封面。
 - 上传失败保留草稿，不让用户重写。
+- 生产验收时执行 `python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com --require-cos-media`，确认线上 `media.storageProvider=cos`。
 
 验收标准：
 

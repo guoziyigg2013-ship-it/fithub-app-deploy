@@ -41,6 +41,12 @@ npm run cutover:tencent -- \
   --miniapp-appid wx你的真实小程序AppID \
   --supabase-url https://你的项目ref.supabase.co \
   --supabase-service-role-key 你的真实service_role_key \
+  --media-storage-provider cos \
+  --cos-secret-id 你的腾讯云COSSecretId \
+  --cos-secret-key 你的腾讯云COSSecretKey \
+  --cos-region ap-guangzhou \
+  --cos-bucket fithub-media-1250000000 \
+  --cos-public-base-url https://media.yourdomain.com \
   --skip-release
 ```
 
@@ -52,6 +58,12 @@ npm run cutover:tencent -- \
   --miniapp-appid wx你的真实小程序AppID \
   --supabase-url https://你的项目ref.supabase.co \
   --supabase-service-role-key 你的真实service_role_key \
+  --media-storage-provider cos \
+  --cos-secret-id 你的腾讯云COSSecretId \
+  --cos-secret-key 你的腾讯云COSSecretKey \
+  --cos-region ap-guangzhou \
+  --cos-bucket fithub-media-1250000000 \
+  --cos-public-base-url https://media.yourdomain.com \
   --apply \
   --write-env \
   --force
@@ -169,6 +181,12 @@ python3 scripts/init_tencent_env.py \
   --api-origin https://api.yourdomain.com \
   --supabase-url https://你的真实项目ref.supabase.co \
   --supabase-service-role-key '你的真实service_role_key' \
+  --media-storage-provider cos \
+  --cos-secret-id '你的腾讯云COSSecretId' \
+  --cos-secret-key '你的腾讯云COSSecretKey' \
+  --cos-region ap-guangzhou \
+  --cos-bucket fithub-media-1250000000 \
+  --cos-public-base-url https://media.yourdomain.com \
   --output deploy/tencent-cloud/.env.production \
   --nginx-output deploy/tencent-cloud/nginx-fithub.conf \
   --print-redacted
@@ -262,6 +280,12 @@ FITHUB_SUPABASE_TABLE=fithub_app_state
 FITHUB_SUPABASE_ROW_ID=primary
 FITHUB_MEDIA_BUCKET=fithub-media
 FITHUB_PUBLIC_API_ORIGIN=https://api.yourdomain.com
+FITHUB_MEDIA_STORAGE_PROVIDER=cos
+FITHUB_TENCENT_COS_SECRET_ID=你的腾讯云COSSecretId
+FITHUB_TENCENT_COS_SECRET_KEY=你的腾讯云COSSecretKey
+FITHUB_TENCENT_COS_REGION=ap-guangzhou
+FITHUB_TENCENT_COS_BUCKET=fithub-media-1250000000
+FITHUB_TENCENT_COS_PUBLIC_BASE_URL=https://media.yourdomain.com
 ```
 
 建议：
@@ -300,6 +324,7 @@ python3 scripts/tencent_server_doctor.py \
   --check-public \
   --allow-running-service
 python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com
+python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com --require-cos-media
 python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
 ```
 
@@ -331,5 +356,6 @@ npm run check:production
 
 - 不要把容器本地 `/data/fithub/shared_state.json` 当生产主数据。容器重建、扩容或迁移时，本地文件可能消失。
 - 当前阶段可以继续用 Supabase 做远端主状态，但必须确保 `api.yourdomain.com` 的运行环境能稳定访问 Supabase。
-- 如果 Supabase 在国内云环境仍不稳定，下一阶段要把数据拆到国内 PostgreSQL/MySQL，把媒体迁到腾讯云 COS。
+- 国内生产媒体建议直接使用腾讯云 COS + CDN。`/api/storage/status?remote=1` 的 `media.storageProvider` 应该显示 `cos`，否则不要提交小程序审核。
+- 如果 Supabase 在国内云环境仍不稳定，下一阶段要把主业务数据也拆到国内 PostgreSQL/MySQL。
 - 微信小程序后台需要把 `https://api.yourdomain.com` 配置到合法域名，否则真机请求会失败。

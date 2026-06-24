@@ -133,7 +133,7 @@ def fetch_json(url: str, *, timeout: int = 20) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8") or "{}")
 
 
-def validate_live_backend(backend_url: str, failures: list[str]) -> None:
+def validate_live_backend(backend_url: str, failures: list[str], *, require_cos_media: bool = False) -> None:
     backend_url = backend_url.rstrip("/")
     validate_https_custom_url("Backend URL", backend_url, failures)
     try:
@@ -154,6 +154,13 @@ def validate_live_backend(backend_url: str, failures: list[str]) -> None:
         fail_list_add(failures, "Backend persistent storage is not writable.")
     if remote_rows and not remote_rows.get("reachable"):
         fail_list_add(failures, f"Backend remote rows are unreachable: {remote_rows.get('error') or 'unknown error'}")
+    media_info = storage.get("media") or {}
+    if require_cos_media and str(media_info.get("storageProvider") or "").lower() != "cos":
+        fail_list_add(
+            failures,
+            "Backend media storage must use Tencent COS before mainland China production launch "
+            f"(got {media_info.get('storageProvider') or 'unknown'}).",
+        )
 
 
 def main() -> int:
@@ -162,12 +169,13 @@ def main() -> int:
     parser.add_argument("--supabase-url", default=os.getenv("SUPABASE_URL", ""))
     parser.add_argument("--skip-live", action="store_true", help="Only validate static repository configuration.")
     parser.add_argument("--skip-supabase-dns", action="store_true", help="Do not query public DNS for SUPABASE_URL.")
+    parser.add_argument("--require-cos-media", action="store_true", help="Require live backend media storage to be Tencent COS.")
     args = parser.parse_args()
 
     failures: list[str] = []
     validate_static_configs(failures, supabase_url=args.supabase_url, skip_dns=args.skip_supabase_dns)
     if not args.skip_live:
-        validate_live_backend(args.backend_url, failures)
+        validate_live_backend(args.backend_url, failures, require_cos_media=args.require_cos_media)
 
     if failures:
         print("FitHub production readiness failed:")

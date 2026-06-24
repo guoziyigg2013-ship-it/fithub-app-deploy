@@ -62,6 +62,34 @@ class TencentCloudPreflightTests(unittest.TestCase):
 
         self.assertEqual(failures, [])
 
+    def test_validate_env_accepts_tencent_cos_media_storage(self):
+        values = dict(VALID_ENV)
+        values.update(
+            {
+                "FITHUB_MEDIA_STORAGE_PROVIDER": "cos",
+                "FITHUB_TENCENT_COS_SECRET_ID": "AKIDEXAMPLE",
+                "FITHUB_TENCENT_COS_SECRET_KEY": "cos-secret-key-example",
+                "FITHUB_TENCENT_COS_REGION": "ap-guangzhou",
+                "FITHUB_TENCENT_COS_BUCKET": "fithub-media-1250000000",
+                "FITHUB_TENCENT_COS_PUBLIC_BASE_URL": "https://media.fithub.example.cn",
+            }
+        )
+        failures = []
+
+        tencent_cloud_preflight.validate_env(values, failures)
+
+        self.assertEqual(failures, [])
+
+    def test_validate_env_rejects_incomplete_tencent_cos_media_storage(self):
+        values = dict(VALID_ENV)
+        values["FITHUB_MEDIA_STORAGE_PROVIDER"] = "cos"
+        failures = []
+
+        tencent_cloud_preflight.validate_env(values, failures)
+
+        self.assertTrue(any("FITHUB_TENCENT_COS_SECRET_ID" in item for item in failures))
+        self.assertTrue(any("FITHUB_TENCENT_COS_BUCKET" in item for item in failures))
+
     def test_validate_live_backend_rejects_local_fallback(self):
         original_fetch_json = tencent_cloud_preflight.fetch_json
         tencent_cloud_preflight.fetch_json = lambda _url, timeout=10: {

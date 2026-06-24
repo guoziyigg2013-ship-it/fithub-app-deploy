@@ -40,6 +40,35 @@ class InitTencentEnvTests(unittest.TestCase):
                 supabase_service_role_key="s" * 80,
             )
 
+    def test_build_env_values_accepts_tencent_cos_media_storage(self):
+        values = init_tencent_env.build_env_values(
+            api_origin="https://api.fithub.example.cn",
+            supabase_url="https://abcdefghijklmnopqrst.supabase.co",
+            supabase_service_role_key="s" * 80,
+            media_storage_provider="cos",
+            cos_secret_id="AKIDEXAMPLE",
+            cos_secret_key="cos-secret-key-example",
+            cos_region="ap-guangzhou",
+            cos_bucket="fithub-media-1250000000",
+            cos_public_base_url="https://media.fithub.example.cn",
+        )
+        failures = []
+
+        tencent_cloud_preflight.validate_env(values, failures)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(values["FITHUB_MEDIA_STORAGE_PROVIDER"], "cos")
+        self.assertEqual(values["FITHUB_TENCENT_COS_BUCKET"], "fithub-media-1250000000")
+
+    def test_build_env_values_rejects_incomplete_tencent_cos_media_storage(self):
+        with self.assertRaisesRegex(ValueError, "FITHUB_TENCENT_COS_SECRET_ID"):
+            init_tencent_env.build_env_values(
+                api_origin="https://api.fithub.example.cn",
+                supabase_url="https://abcdefghijklmnopqrst.supabase.co",
+                supabase_service_role_key="s" * 80,
+                media_storage_provider="cos",
+            )
+
     def test_render_env_roundtrips_through_preflight_parser(self):
         values = init_tencent_env.build_env_values(
             api_origin="https://api.fithub.example.cn",
@@ -55,6 +84,7 @@ class InitTencentEnvTests(unittest.TestCase):
 
         self.assertEqual(parsed["FITHUB_PUBLIC_API_ORIGIN"], "https://api.fithub.example.cn")
         self.assertEqual(parsed["FITHUB_ADMIN_TOKEN"], "a" * 32)
+        self.assertEqual(parsed["FITHUB_MEDIA_STORAGE_PROVIDER"], "supabase")
 
     def test_render_nginx_config_replaces_domain(self):
         rendered = init_tencent_env.render_nginx_config("https://api.fithub.example.cn")

@@ -42,6 +42,7 @@ NUMERIC_LIMIT_KEYS = (
     "FITHUB_VIDEO_UPLOAD_LIMIT_BYTES",
     "FITHUB_THUMB_UPLOAD_LIMIT_BYTES",
 )
+MEDIA_STORAGE_PROVIDERS = {"", "supabase", "cos", "tencent-cos", "tencent_cos", "inline"}
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -105,6 +106,25 @@ def validate_env(values: dict[str, str], failures: list[str]) -> None:
         value = values.get(key, "")
         if looks_placeholder(value) or len(value) < 24:
             failures.append(f"{key} must be a long random production token.")
+
+    media_provider = str(values.get("FITHUB_MEDIA_STORAGE_PROVIDER") or "").strip().lower()
+    if media_provider not in MEDIA_STORAGE_PROVIDERS:
+        failures.append("FITHUB_MEDIA_STORAGE_PROVIDER must be one of: supabase, cos, inline.")
+    if media_provider in {"cos", "tencent-cos", "tencent_cos"}:
+        for key in (
+            "FITHUB_TENCENT_COS_SECRET_ID",
+            "FITHUB_TENCENT_COS_SECRET_KEY",
+            "FITHUB_TENCENT_COS_REGION",
+            "FITHUB_TENCENT_COS_BUCKET",
+        ):
+            value = values.get(key, "")
+            if looks_placeholder(value) or len(value) < 4:
+                failures.append(f"{key} must be configured for Tencent COS media storage.")
+        public_base = values.get("FITHUB_TENCENT_COS_PUBLIC_BASE_URL", "")
+        if public_base:
+            ok, detail = host_is_custom_https(public_base)
+            if not ok:
+                failures.append(f"FITHUB_TENCENT_COS_PUBLIC_BASE_URL {detail}: {public_base}")
 
     for key in NUMERIC_LIMIT_KEYS:
         value = values.get(key, "")

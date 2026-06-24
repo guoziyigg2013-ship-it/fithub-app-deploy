@@ -45,7 +45,14 @@ def build_env_values(
     admin_token: str = "",
     media_maintenance_token: str = "",
     media_bucket: str = "fithub-media",
+    media_storage_provider: str = "supabase",
+    cos_secret_id: str = "",
+    cos_secret_key: str = "",
+    cos_region: str = "",
+    cos_bucket: str = "",
+    cos_public_base_url: str = "",
 ) -> dict[str, str]:
+    provider = str(media_storage_provider or "supabase").strip().lower()
     values = {
         "PORT": "10000",
         "FITHUB_URL_PREFIX": "/",
@@ -59,7 +66,13 @@ def build_env_values(
         "FITHUB_SUPABASE_REFRESH_COOLDOWN_SECONDS": "30",
         "FITHUB_SUPABASE_BACKUP_RETENTION": "96",
         "FITHUB_SUPABASE_PRUNE_INTERVAL_SECONDS": "3600",
+        "FITHUB_MEDIA_STORAGE_PROVIDER": provider,
         "FITHUB_MEDIA_BUCKET": media_bucket,
+        "FITHUB_TENCENT_COS_SECRET_ID": str(cos_secret_id or "").strip(),
+        "FITHUB_TENCENT_COS_SECRET_KEY": str(cos_secret_key or "").strip(),
+        "FITHUB_TENCENT_COS_REGION": str(cos_region or "").strip(),
+        "FITHUB_TENCENT_COS_BUCKET": str(cos_bucket or "").strip(),
+        "FITHUB_TENCENT_COS_PUBLIC_BASE_URL": normalize_origin(cos_public_base_url) if cos_public_base_url else "",
         "FITHUB_IMAGE_UPLOAD_LIMIT_BYTES": "10485760",
         "FITHUB_VIDEO_UPLOAD_LIMIT_BYTES": "8388608",
         "FITHUB_THUMB_UPLOAD_LIMIT_BYTES": "2097152",
@@ -92,7 +105,13 @@ def render_env(values: dict[str, str]) -> str:
         "FITHUB_SUPABASE_REFRESH_COOLDOWN_SECONDS",
         "FITHUB_SUPABASE_BACKUP_RETENTION",
         "FITHUB_SUPABASE_PRUNE_INTERVAL_SECONDS",
+        "FITHUB_MEDIA_STORAGE_PROVIDER",
         "FITHUB_MEDIA_BUCKET",
+        "FITHUB_TENCENT_COS_SECRET_ID",
+        "FITHUB_TENCENT_COS_SECRET_KEY",
+        "FITHUB_TENCENT_COS_REGION",
+        "FITHUB_TENCENT_COS_BUCKET",
+        "FITHUB_TENCENT_COS_PUBLIC_BASE_URL",
         "FITHUB_IMAGE_UPLOAD_LIMIT_BYTES",
         "FITHUB_VIDEO_UPLOAD_LIMIT_BYTES",
         "FITHUB_THUMB_UPLOAD_LIMIT_BYTES",
@@ -104,7 +123,9 @@ def render_env(values: dict[str, str]) -> str:
 
 
 def redact_value(key: str, value: str) -> str:
-    if key in {"SUPABASE_SERVICE_ROLE_KEY", "FITHUB_ADMIN_TOKEN", "FITHUB_MEDIA_MAINTENANCE_TOKEN"}:
+    if not value:
+        return ""
+    if key in {"SUPABASE_SERVICE_ROLE_KEY", "FITHUB_ADMIN_TOKEN", "FITHUB_MEDIA_MAINTENANCE_TOKEN", "FITHUB_TENCENT_COS_SECRET_KEY"}:
         return value[:6] + "..." + value[-4:]
     return value
 
@@ -139,6 +160,12 @@ def main() -> int:
         help="Optional fixed media maintenance token. Defaults to a generated token.",
     )
     parser.add_argument("--media-bucket", default="fithub-media")
+    parser.add_argument("--media-storage-provider", default="supabase", choices=["supabase", "cos", "inline"])
+    parser.add_argument("--cos-secret-id", default="")
+    parser.add_argument("--cos-secret-key", default="")
+    parser.add_argument("--cos-region", default="")
+    parser.add_argument("--cos-bucket", default="")
+    parser.add_argument("--cos-public-base-url", default="")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--print-redacted", action="store_true", help="Print generated values with secrets redacted.")
@@ -153,6 +180,12 @@ def main() -> int:
             admin_token=args.admin_token,
             media_maintenance_token=args.media_maintenance_token,
             media_bucket=args.media_bucket,
+            media_storage_provider=args.media_storage_provider,
+            cos_secret_id=args.cos_secret_id,
+            cos_secret_key=args.cos_secret_key,
+            cos_region=args.cos_region,
+            cos_bucket=args.cos_bucket,
+            cos_public_base_url=args.cos_public_base_url,
         )
         output = Path(args.output)
         write_text_securely(output, render_env(values), force=args.force)

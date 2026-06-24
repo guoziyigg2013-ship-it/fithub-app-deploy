@@ -79,6 +79,12 @@ AMAP_WEB_KEY = (os.getenv("FITHUB_AMAP_WEB_KEY") or "").strip()
 AMAP_SECURITY_CODE = (os.getenv("FITHUB_AMAP_SECURITY_CODE") or "").strip()
 BAIDU_MAP_AK = (os.getenv("FITHUB_BAIDU_MAP_AK") or "").strip()
 SUPABASE_MEDIA_BUCKET = (os.getenv("FITHUB_MEDIA_BUCKET") or "fithub-media").strip()
+MEDIA_STORAGE_PROVIDER = (os.getenv("FITHUB_MEDIA_STORAGE_PROVIDER") or "").strip().lower()
+TENCENT_COS_SECRET_ID = (os.getenv("FITHUB_TENCENT_COS_SECRET_ID") or "").strip()
+TENCENT_COS_SECRET_KEY = (os.getenv("FITHUB_TENCENT_COS_SECRET_KEY") or "").strip()
+TENCENT_COS_REGION = (os.getenv("FITHUB_TENCENT_COS_REGION") or "").strip()
+TENCENT_COS_BUCKET = (os.getenv("FITHUB_TENCENT_COS_BUCKET") or "").strip()
+TENCENT_COS_PUBLIC_BASE_URL = (os.getenv("FITHUB_TENCENT_COS_PUBLIC_BASE_URL") or "").strip().rstrip("/")
 MEDIA_IMAGE_LIMIT_BYTES = int(os.getenv("FITHUB_IMAGE_UPLOAD_LIMIT_BYTES") or str(10 * 1024 * 1024))
 MEDIA_VIDEO_LIMIT_BYTES = int(os.getenv("FITHUB_VIDEO_UPLOAD_LIMIT_BYTES") or str(8 * 1024 * 1024))
 MEDIA_THUMB_LIMIT_BYTES = int(os.getenv("FITHUB_THUMB_UPLOAD_LIMIT_BYTES") or str(2 * 1024 * 1024))
@@ -139,8 +145,8 @@ def runtime_config():
         "amapKey": AMAP_WEB_KEY,
         "amapSecurityCode": AMAP_SECURITY_CODE,
         "baiduAk": BAIDU_MAP_AK,
-        "mediaStorageProvider": "supabase" if supabase_media_storage_enabled() else "",
-        "mediaBucket": SUPABASE_MEDIA_BUCKET if supabase_media_storage_enabled() else "",
+        "mediaStorageProvider": active_media_storage_provider(),
+        "mediaBucket": active_media_bucket(),
         "mediaLimits": {
             "imageBytes": MEDIA_IMAGE_LIMIT_BYTES,
             "videoBytes": MEDIA_VIDEO_LIMIT_BYTES,
@@ -878,13 +884,58 @@ def supabase_media_storage_enabled():
     return bool(supabase_storage_enabled() and SUPABASE_MEDIA_BUCKET)
 
 
+def cos_media_storage_configured():
+    return all([TENCENT_COS_SECRET_ID, TENCENT_COS_SECRET_KEY, TENCENT_COS_REGION, TENCENT_COS_BUCKET])
+
+
+def cos_media_storage_enabled():
+    if MEDIA_STORAGE_PROVIDER in {"cos", "tencent-cos", "tencent_cos"}:
+        return cos_media_storage_configured()
+    if MEDIA_STORAGE_PROVIDER in {"supabase", "inline", "local"}:
+        return False
+    return cos_media_storage_configured()
+
+
+def active_media_storage_provider():
+    if cos_media_storage_enabled():
+        return "cos"
+    if supabase_media_storage_enabled():
+        return "supabase"
+    return ""
+
+
+def active_media_bucket():
+    if cos_media_storage_enabled():
+        return TENCENT_COS_BUCKET
+    if supabase_media_storage_enabled():
+        return SUPABASE_MEDIA_BUCKET
+    return ""
+
+
 def build_supabase_public_media_url(object_path):
     quoted_path = quote(str(object_path or "").lstrip("/"), safe="/")
     return f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_MEDIA_BUCKET}/{quoted_path}"
 
 
+def cos_storage_host():
+    return f"{TENCENT_COS_BUCKET}.cos.{TENCENT_COS_REGION}.myqcloud.com"
+
+
+def build_cos_public_media_url(object_path):
+    quoted_path = quote(str(object_path or "").lstrip("/"), safe="/")
+    if TENCENT_COS_PUBLIC_BASE_URL:
+        return f"{TENCENT_COS_PUBLIC_BASE_URL}/{quoted_path}"
+    return f"https://{cos_storage_host()}/{quoted_path}"
+
+
 def supabase_public_media_prefix():
     return build_supabase_public_media_url("").rstrip("/")
+
+
+def cos_public_media_prefix():
+    if not cos_media_storage_enabled():
+        return ""
+    return build_cos_public_media_url("").rstrip("/")
 
 
 def extract_storage_path_from_public_url(url):
@@ -893,7 +944,10 @@ def extract_storage_path_from_public_url(url):
         return ""
     prefix = supabase_public_media_prefix()
     if not text.startswith(prefix):
-        return ""
+        cos_prefix = cos_public_media_prefix()
+        if not cos_prefix or not text.startswith(cos_prefix):
+            return ""
+        prefix = cos_prefix
     suffix = text[len(prefix):].lstrip("/")
     return unquote(suffix)
 
@@ -930,6 +984,95 @@ def ensure_supabase_media_bucket():
         if getattr(exc, "code", None) not in {400, 409} or ("exists" not in body.lower() and "duplicate" not in body.lower()):
             raise
     SUPABASE_MEDIA_BUCKET_READY = True
+
+
+def sha1_hex(value):
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    return hashlib.sha1(value or b"").hexdigest()
+
+
+def hmac_sha1_hex(key, msg):
+    if isinstance(key, str):
+        key = key.encode("utf-8")
+    if isinstance(msg, str):
+        msg = msg.encode("utf-8")
+    return hmac.new(key, msg, hashlib.sha1).hexdigest()
+
+
+def cos_authorization(method, object_path, headers):
+    current = int(now_utc().timestamp())
+    sign_time = f"{current};{current + 600}"
+    key_time = sign_time
+    canonical_uri = "/" + quote(str(object_path or "").lstrip("/"), safe="/-_.~")
+    canonical_headers_map = {
+        str(key or "").strip().lower(): str(value or "").strip()
+        for key, value in (headers or {}).items()
+        if str(key or "").strip()
+    }
+    header_names = sorted(canonical_headers_map)
+    canonical_headers = "".join(
+        f"{quote(name, safe='-_.~')}={quote(canonical_headers_map[name], safe='-_.~')}&"
+        for name in header_names
+    )
+    signed_headers = ";".join(header_names)
+    http_string = "\n".join([
+        str(method or "GET").lower(),
+        canonical_uri,
+        "",
+        canonical_headers,
+        "",
+    ])
+    string_to_sign = "\n".join([
+        "sha1",
+        sign_time,
+        sha1_hex(http_string),
+        "",
+    ])
+    sign_key = hmac_sha1_hex(TENCENT_COS_SECRET_KEY, key_time)
+    signature = hmac_sha1_hex(sign_key, string_to_sign)
+    return (
+        "q-sign-algorithm=sha1"
+        f"&q-ak={quote(TENCENT_COS_SECRET_ID, safe='')}"
+        f"&q-sign-time={sign_time}"
+        f"&q-key-time={key_time}"
+        f"&q-header-list={signed_headers}"
+        "&q-url-param-list="
+        f"&q-signature={signature}"
+    )
+
+
+def cos_object_request(method, object_path, payload=None, content_type="application/octet-stream", allow_statuses=None):
+    if not cos_media_storage_enabled():
+        raise ValueError("腾讯云 COS 媒体存储未配置完整。")
+    allow_statuses = set(allow_statuses or set())
+    host = cos_storage_host()
+    quoted_path = quote(str(object_path or "").lstrip("/"), safe="/-_.~")
+    url = f"https://{host}/{quoted_path}"
+    headers = {
+        "Host": host,
+        "Content-Type": content_type or "application/octet-stream",
+    }
+    headers["Authorization"] = cos_authorization(method, object_path, headers)
+    request = Request(
+        url,
+        data=payload,
+        headers=headers,
+        method=str(method or "GET").upper(),
+    )
+    try:
+        with urlopen(request, timeout=SUPABASE_TIMEOUT_SECONDS) as response:
+            body = response.read()
+            if response.status >= 400 and response.status not in allow_statuses:
+                raise ValueError(f"COS request failed with HTTP {response.status}")
+            return body
+    except Exception:
+        raise
+
+
+def upload_cos_media_asset(binary, *, object_path, content_type):
+    cos_object_request("PUT", object_path, payload=binary, content_type=content_type or "application/octet-stream")
+    return build_cos_public_media_url(object_path)
 
 
 def decode_data_url(data_url):
@@ -971,7 +1114,7 @@ def upload_media_asset(data_url, *, file_name, category, asset_type, force_inlin
     if len(binary) > max_bytes:
         raise ValueError("媒体文件过大，请选择更短的视频或更小的图片。")
 
-    if force_inline or not supabase_media_storage_enabled():
+    if force_inline or (not cos_media_storage_enabled() and not supabase_media_storage_enabled()):
         return {
             "type": asset_type,
             "url": data_url,
@@ -981,11 +1124,23 @@ def upload_media_asset(data_url, *, file_name, category, asset_type, force_inlin
             "sizeBytes": len(binary),
         }
 
-    ensure_supabase_media_bucket()
-
     timestamp = now_utc().strftime("%Y/%m/%d")
     sanitized_name = sanitize_file_name(file_name, content_type)
     object_path = f"{category}/{timestamp}/{uuid.uuid4().hex[:12]}-{sanitized_name}"
+
+    if cos_media_storage_enabled():
+        return {
+            "type": asset_type,
+            "url": upload_cos_media_asset(binary, object_path=object_path, content_type=content_type),
+            "name": sanitized_name,
+            "contentType": content_type,
+            "storageProvider": "cos",
+            "storagePath": object_path,
+            "sizeBytes": len(binary),
+        }
+
+    ensure_supabase_media_bucket()
+
     quoted_path = quote(object_path, safe="/")
     supabase_storage_request(
         "POST",
@@ -1138,17 +1293,20 @@ def session_allows_media_delete(session, media_item):
 
 def delete_media_asset(media_item):
     deleted_paths = []
-    if not supabase_media_storage_enabled():
+    if not cos_media_storage_enabled() and not supabase_media_storage_enabled():
         return deleted_paths
     for path in iter_media_storage_paths(media_item):
-        quoted_path = quote(path, safe="/")
         try:
-            supabase_storage_request(
-                "DELETE",
-                f"object/{SUPABASE_MEDIA_BUCKET}/{quoted_path}",
-                expect_json=False,
-                allow_statuses={404},
-            )
+            if cos_media_storage_enabled():
+                cos_object_request("DELETE", path, payload=None, content_type="application/octet-stream", allow_statuses={404})
+            else:
+                quoted_path = quote(path, safe="/")
+                supabase_storage_request(
+                    "DELETE",
+                    f"object/{SUPABASE_MEDIA_BUCKET}/{quoted_path}",
+                    expect_json=False,
+                    allow_statuses={404},
+                )
         except Exception as exc:  # noqa: BLE001
             storage_log(f"Media delete skipped for {path}: {exc}")
             continue
@@ -1538,8 +1696,8 @@ def storage_runtime_status(state=None):
             "backupPruneIntervalSeconds": SUPABASE_BACKUP_PRUNE_INTERVAL_SECONDS,
         },
         "media": {
-            "storageProvider": "supabase" if supabase_media_storage_enabled() else "inline",
-            "bucket": SUPABASE_MEDIA_BUCKET if supabase_media_storage_enabled() else "",
+            "storageProvider": active_media_storage_provider() or "inline",
+            "bucket": active_media_bucket(),
             "imageLimitBytes": MEDIA_IMAGE_LIMIT_BYTES,
             "videoLimitBytes": MEDIA_VIDEO_LIMIT_BYTES,
             "thumbnailLimitBytes": MEDIA_THUMB_LIMIT_BYTES,
