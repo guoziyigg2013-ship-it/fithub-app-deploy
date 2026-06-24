@@ -406,6 +406,20 @@ npm run check:production
 如果已经切到腾讯云国内正式域名，用最终验收命令一次性确认前端、后端和媒体存储：
 
 ```bash
+npm run check:tencent-launch -- \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --media-origin https://media.yourdomain.com \
+  --expected-ip 你的服务器公网IP \
+  --check-domain-network \
+  --check-acme \
+  --check-tls \
+  --check-live
+```
+
+这条是总控门禁：它会把国内配置、小程序合法域名、DNS、ACME、TLS 和线上后端健康状态汇总成一个 `ready/blocked` 报告。只要这里不是 `ready`，先不要提交微信审核。
+
+```bash
 npm run check:final -- \
   --production-frontend-url https://app.yourdomain.com/ \
   --production-backend-url https://api.yourdomain.com \

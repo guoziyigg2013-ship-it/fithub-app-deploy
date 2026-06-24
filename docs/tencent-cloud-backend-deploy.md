@@ -558,6 +558,30 @@ python3 scripts/deploy_smoke.py --frontend-url https://app.yourdomain.com/ --bac
 - `downloadFile 合法域名`
 - `socket 合法域名`
 
+如果要用一条命令汇总上面这些检查，先跑腾讯云上线总控门禁：
+
+```bash
+npm run check:tencent-launch -- \
+  --api-origin https://api.yourdomain.com \
+  --web-origin https://app.yourdomain.com \
+  --media-origin https://media.yourdomain.com \
+  --expected-ip 你的服务器公网IP \
+  --check-domain-network \
+  --check-acme \
+  --check-tls \
+  --check-live
+```
+
+总控门禁会同时汇总：
+
+- 国内生产配置是否还指向 Render / Pages / touristappid。
+- 微信小程序合法域名是否可提交到微信公众平台。
+- DNS 是否指向腾讯云服务器。
+- ACME 证书签发端口和 HTTPS/TLS 是否就绪。
+- 线上后端是否健康、可写、媒体是否走腾讯 COS。
+
+只有总控门禁输出 `ready`，才继续执行最终验收和上线证据报告。
+
 如果仍看到 `onrender.com`、`touristappid`，或下载域名没有使用腾讯 COS/CDN，它会直接失败。
 
 最后跑一次写入链路验收，确认不是“页面能打开但用户数据不稳”：
