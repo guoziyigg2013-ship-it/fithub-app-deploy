@@ -76,10 +76,19 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
             ]
         ),
     )
-    write(root / "scripts" / "production_snapshot.py")
+    write(root / "scripts" / "production_snapshot.py", "write_manifest\nprune_snapshots")
     write(root / "scripts" / "check_miniprogram.py")
     write(root / "scripts" / "wechat_domain_manifest.py")
-    write(root / "tests" / "api" / "test_persistence.py", "production_snapshot_metric_comparison_rejects_regressions")
+    write(
+        root / "tests" / "api" / "test_persistence.py",
+        "\n".join(
+            [
+                "production_snapshot_metric_comparison_rejects_regressions",
+                "production_snapshot_manifest_records_local_backups",
+                "production_snapshot_prune_keeps_recent_and_latest_files",
+            ]
+        ),
+    )
     write(root / "tests" / "api" / "test_social.py", "follow_state_survives_login_and_server_restart\nmulti_identity_threads_are_scoped_to_current_identity")
     write(root / "tests" / "api" / "test_booking.py", "multi_identity_bookings_are_scoped_to_current_identity\nbooking_surfaces_for_both_outgoing_and_incoming_sides")
     write(

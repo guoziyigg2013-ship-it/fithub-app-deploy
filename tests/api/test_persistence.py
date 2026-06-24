@@ -1,5 +1,6 @@
 import json
 import importlib.util
+import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -267,6 +268,44 @@ class PersistenceRecoveryTests(FitHubApiTestCase):
             allowances={"real_follows": 2, "real_threads": 1},
         )
         self.assertEqual(allowed, [])
+
+    def test_production_snapshot_manifest_records_local_backups(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            snapshot_path = output_dir / "fithub-production-snapshot-20260624-090000Z.json"
+            snapshot_path.write_text(
+                json.dumps({"metrics": {"real_profiles": 7, "real_follows": 4}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            manifest_path = production_snapshot.write_manifest(output_dir)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(manifest["snapshotCount"], 1)
+        self.assertEqual(manifest["snapshots"][0]["name"], snapshot_path.name)
+        self.assertEqual(manifest["snapshots"][0]["metrics"]["real_profiles"], 7)
+        self.assertIn("real_threads", manifest["criticalMetricKeys"])
+
+    def test_production_snapshot_prune_keeps_recent_and_latest_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            old_path = output_dir / "fithub-production-snapshot-20260101-000000Z.json"
+            kept_latest = output_dir / "fithub-production-snapshot-20260102-000000Z.json"
+            recent_path = output_dir / "fithub-production-snapshot-20260624-000000Z.json"
+            for path in (old_path, kept_latest, recent_path):
+                path.write_text('{"metrics": {"real_profiles": 1}}', encoding="utf-8")
+
+            deleted = production_snapshot.prune_snapshots(
+                output_dir,
+                retention_days=7,
+                keep_latest=2,
+                now=production_snapshot.snapshot_timestamp(recent_path),
+            )
+
+            self.assertEqual([path.name for path in deleted], [old_path.name])
+            self.assertFalse(old_path.exists())
+            self.assertTrue(kept_latest.exists())
+            self.assertTrue(recent_path.exists())
 
 
 class SupabaseRecoveryUnitTests(unittest.TestCase):

@@ -94,7 +94,16 @@ def build_feature_phases(root: Path) -> list[dict[str, Any]]:
                     [
                         check_file(root, "package.json", ['"snapshot:prod"', '"test:api"']),
                         check_exists(root, "scripts/production_snapshot.py"),
-                        check_file(root, "tests/api/test_persistence.py", ["production_snapshot_metric_comparison_rejects_regressions"]),
+                        check_file(root, "scripts/production_snapshot.py", ["write_manifest", "prune_snapshots"]),
+                        check_file(
+                            root,
+                            "tests/api/test_persistence.py",
+                            [
+                                "production_snapshot_metric_comparison_rejects_regressions",
+                                "production_snapshot_manifest_records_local_backups",
+                                "production_snapshot_prune_keeps_recent_and_latest_files",
+                            ],
+                        ),
                         check_file(root, "tests/api/test_social.py", ["follow_state_survives_login_and_server_restart"]),
                     ],
                 ),

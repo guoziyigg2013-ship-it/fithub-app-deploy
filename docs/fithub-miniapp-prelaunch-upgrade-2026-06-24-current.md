@@ -71,6 +71,8 @@ python3 scripts/deploy_smoke.py \
 - `/api/storage/status?remote=1` 显示 `loadedFrom=cloudbase`。
 - `remoteWritable=true`。
 - 发布前后真实用户数、关注数、消息数不能异常归零。
+- 生产快照会写入 `backups/`，并自动更新 `fithub-production-snapshots-manifest.json` 作为本地备份账本。
+- 默认保留最近 30 天内快照，并始终保留最新 20 份，避免频繁升级时误删最近证据。
 
 执行：
 
@@ -78,6 +80,7 @@ python3 scripts/deploy_smoke.py \
 python3 scripts/production_write_acceptance.py \
   --backend-url https://fithub-api-274271-9-1401297280.sh.run.tcloudbase.com \
   --min-real-profiles 0
+FITHUB_ADMIN_TOKEN=你的管理员token npm run snapshot:prod
 ```
 
 ### P0-3. 小程序正式配置检查

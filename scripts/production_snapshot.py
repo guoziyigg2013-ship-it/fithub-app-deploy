@@ -8,6 +8,7 @@ phone-linked accounts, messages, bookings, and media metadata.
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import os
 import re
@@ -23,6 +24,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 FALLBACK_BACKEND = "https://fithub-app-1btg.onrender.com"
 DEFAULT_OUTPUT_DIR = ROOT / "backups"
+SNAPSHOT_GLOB = "fithub-production-snapshot-*.json"
+MANIFEST_NAME = "fithub-production-snapshots-manifest.json"
 CRITICAL_METRIC_KEYS = (
     "real_profiles",
     "phone_profiles",
@@ -116,6 +119,77 @@ def write_snapshot(snapshot: dict[str, Any], output_dir: Path) -> Path:
     return target
 
 
+def snapshot_timestamp(path: Path) -> float:
+    """Return a stable timestamp for pruning even when file mtimes are copied."""
+    match = re.search(r"fithub-production-snapshot-(\d{8})-(\d{6})Z\.json$", path.name)
+    if match:
+        try:
+            return calendar.timegm(time.strptime("".join(match.groups()), "%Y%m%d%H%M%S"))
+        except ValueError:
+            pass
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def snapshot_record(path: Path) -> dict[str, Any]:
+    try:
+        payload = load_json(path)
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    return {
+        "name": path.name,
+        "path": str(path),
+        "sizeBytes": path.stat().st_size if path.exists() else 0,
+        "timestamp": int(snapshot_timestamp(path)),
+        "metrics": extract_metrics(payload),
+    }
+
+
+def list_snapshots(output_dir: Path) -> list[Path]:
+    if not output_dir.exists():
+        return []
+    return sorted(output_dir.glob(SNAPSHOT_GLOB), key=snapshot_timestamp, reverse=True)
+
+
+def prune_snapshots(
+    output_dir: Path,
+    *,
+    retention_days: int = 30,
+    keep_latest: int = 20,
+    now: float | None = None,
+) -> list[Path]:
+    """Remove old local snapshot files while always keeping the newest files."""
+    retention_days = max(1, int(retention_days))
+    keep_latest = max(1, int(keep_latest))
+    now = time.time() if now is None else now
+    cutoff = now - retention_days * 86400
+    snapshots = list_snapshots(output_dir)
+    keep_names = {path.name for path in snapshots[:keep_latest]}
+    deleted: list[Path] = []
+    for path in snapshots:
+        if path.name in keep_names or snapshot_timestamp(path) >= cutoff:
+            continue
+        path.unlink(missing_ok=True)
+        deleted.append(path)
+    return deleted
+
+
+def write_manifest(output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    snapshots = [snapshot_record(path) for path in list_snapshots(output_dir)]
+    manifest = {
+        "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "snapshotCount": len(snapshots),
+        "criticalMetricKeys": list(CRITICAL_METRIC_KEYS),
+        "snapshots": snapshots,
+    }
+    target = output_dir / MANIFEST_NAME
+    target.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
 def print_metrics(metrics: dict[str, int]) -> None:
     for key in CRITICAL_METRIC_KEYS:
         print(f"  {key}: {int(metrics.get(key) or 0)}")
@@ -135,6 +209,10 @@ def main() -> int:
         help="Allow a small expected metric drop while comparing snapshots.",
     )
     parser.add_argument("--min-real-profiles", type=int, default=1)
+    parser.add_argument("--retention-days", type=int, default=30, help="Keep local snapshot files for at least this many days.")
+    parser.add_argument("--keep-latest", type=int, default=20, help="Always keep at least this many newest local snapshots.")
+    parser.add_argument("--no-prune", action="store_true", help="Do not prune old local snapshot files after writing.")
+    parser.add_argument("--no-manifest", action="store_true", help="Do not update the local snapshot manifest.")
     parser.add_argument(
         "--status-only",
         action="store_true",
@@ -173,8 +251,16 @@ def main() -> int:
                 raise RuntimeError("Production metrics regressed: " + "; ".join(failures))
             print(f"Metrics comparison passed against {args.compare}.")
 
-        target = write_snapshot(snapshot, Path(args.output_dir))
+        output_dir = Path(args.output_dir)
+        target = write_snapshot(snapshot, output_dir)
         print(f"Snapshot written: {target}")
+        if not args.no_prune:
+            deleted = prune_snapshots(output_dir, retention_days=args.retention_days, keep_latest=args.keep_latest)
+            if deleted:
+                print(f"Pruned old snapshots: {len(deleted)}")
+        if not args.no_manifest:
+            manifest_path = write_manifest(output_dir)
+            print(f"Snapshot manifest written: {manifest_path}")
         return 0
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"Snapshot failed: {exc}", file=sys.stderr)
