@@ -383,6 +383,19 @@ python3 scripts/deploy_smoke.py \
 
 这一步会检查 `app.yourdomain.com/config.js` 的 `apiOrigin` 是否已经切到国内 API。只要它还指向 Render，就会失败。
 
+最后生成上线证据报告：
+
+```bash
+npm run evidence:tencent-launch -- \
+  --frontend-url https://app.yourdomain.com/ \
+  --backend-url https://api.yourdomain.com \
+  --release-archive dist/fithub-tencent-release-你的版本.tar.gz \
+  --snapshot backups/fithub-production-snapshot-发布时间.json \
+  --check-live
+```
+
+证据报告会输出 Markdown 和 JSON 两份文件到 `reports/`，用于记录本次国内固定域切换的 Git 提交、发布包 SHA256、域名、迁移门禁和数据指标。它不是替代验收命令，而是把验收证据保存下来，方便之后排查和复盘。
+
 确认国内 API 正常后，再回到本地仓库执行正式配置切换。推荐使用总控命令，避免漏改小程序 AppID 或 API 地址：
 
 ```bash

@@ -378,6 +378,19 @@ npm run check:final -- \
 
 其中 `--verify-frontend-api-origin` 会读取 `https://app.yourdomain.com/config.js`，确认它的 `apiOrigin` 正好等于 `https://api.yourdomain.com`。这一步专门防止“页面已经上了国内域名，但实际 API 还在请求 Render”。
 
+最终验收通过后，生成一份可复查的上线证据报告：
+
+```bash
+npm run evidence:tencent-launch -- \
+  --frontend-url https://app.yourdomain.com/ \
+  --backend-url https://api.yourdomain.com \
+  --release-archive dist/fithub-tencent-release-你的版本.tar.gz \
+  --snapshot backups/fithub-production-snapshot-发布时间.json \
+  --check-live
+```
+
+报告会写入 `reports/`，包含 Git 提交、域名配置、发布包 SHA256、国内迁移门禁状态和数据快照关键指标。`reports/` 只用于发布留档，不要把包含真实用户指标的报告当公开资料传播。
+
 只有 `check:production` 和 `check:smoke` 同时通过，才说明“固定域、后端、数据库、小程序配置”都进入可提交状态。
 
 ## 五、当前第一阶段完成标准
