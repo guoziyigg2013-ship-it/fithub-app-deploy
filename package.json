@@ -6,6 +6,7 @@
     "check:miniapp": "python3 scripts/check_miniprogram.py",
     "check:preflight": "python3 scripts/preflight_check.py",
     "check:production": "python3 scripts/production_readiness.py",
+    "check:domestic": "python3 scripts/domestic_migration_status.py",
     "check:production-write": "python3 scripts/production_write_acceptance.py",
     "config:production": "python3 scripts/configure_production.py",
     "init:tencent-env": "python3 scripts/init_tencent_env.py",
