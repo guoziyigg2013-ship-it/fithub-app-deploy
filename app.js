@@ -3755,13 +3755,20 @@ function toRadians(value) {
 }
 
 function getDistanceMeters(from, to) {
+  const fromLat = Number(from?.lat);
+  const fromLng = Number(from?.lng);
+  const toLat = Number(to?.lat);
+  const toLng = Number(to?.lng);
+  if (![fromLat, fromLng, toLat, toLng].every(Number.isFinite)) {
+    return Number.POSITIVE_INFINITY;
+  }
   const earthRadius = 6371000;
-  const dLat = toRadians(to.lat - from.lat);
-  const dLng = toRadians(to.lng - from.lng);
+  const dLat = toRadians(toLat - fromLat);
+  const dLng = toRadians(toLng - fromLng);
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRadians(from.lat)) *
-      Math.cos(toRadians(to.lat)) *
+    Math.cos(toRadians(fromLat)) *
+      Math.cos(toRadians(toLat)) *
       Math.sin(dLng / 2) *
       Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
@@ -3769,8 +3776,17 @@ function getDistanceMeters(from, to) {
 }
 
 function formatDistance(distance) {
-  if (distance < 1000) return `${Math.round(distance)}m`;
-  return `${(distance / 1000).toFixed(1)}km`;
+  const value = Number(distance);
+  if (!Number.isFinite(value) || value < 0) return "同城";
+  if (value < 1000) return `${Math.round(value)}m`;
+  return `${(value / 1000).toFixed(1)}km`;
+}
+
+function compareDistance(leftDistance, rightDistance) {
+  const left = Number.isFinite(Number(leftDistance)) ? Number(leftDistance) : Number.POSITIVE_INFINITY;
+  const right = Number.isFinite(Number(rightDistance)) ? Number(rightDistance) : Number.POSITIVE_INFINITY;
+  if (left === right) return 0;
+  return left - right;
 }
 
 function getRoleLabel(role) {
@@ -4439,7 +4455,7 @@ function getHomeProfiles(role) {
         .toLowerCase()
         .includes(keyword);
     })
-    .sort((left, right) => left.distanceMeters - right.distanceMeters);
+    .sort((left, right) => compareDistance(left.distanceMeters, right.distanceMeters));
 }
 
 function getDiscoverProfiles() {
@@ -4530,7 +4546,7 @@ function getRecommendedProfiles() {
     .sort((left, right) => {
       if (right.sameDistrict !== left.sameDistrict) return Number(right.sameDistrict) - Number(left.sameDistrict);
       if (right.sameCity !== left.sameCity) return Number(right.sameCity) - Number(left.sameCity);
-      if (left.distanceMeters !== right.distanceMeters) return left.distanceMeters - right.distanceMeters;
+      if (left.distanceMeters !== right.distanceMeters) return compareDistance(left.distanceMeters, right.distanceMeters);
       if (right.followers !== left.followers) return right.followers - left.followers;
       return right.ratingAvg - left.ratingAvg;
     });
@@ -4538,7 +4554,7 @@ function getRecommendedProfiles() {
   const followersPool = [...candidates].sort((left, right) => {
     if (right.followers !== left.followers) return right.followers - left.followers;
     if (right.ratingAvg !== left.ratingAvg) return right.ratingAvg - left.ratingAvg;
-    return left.distanceMeters - right.distanceMeters;
+    return compareDistance(left.distanceMeters, right.distanceMeters);
   });
 
   const ratingPool = [...candidates]
@@ -4547,7 +4563,7 @@ function getRecommendedProfiles() {
       if (right.ratingAvg !== left.ratingAvg) return right.ratingAvg - left.ratingAvg;
       if (right.ratingCount !== left.ratingCount) return right.ratingCount - left.ratingCount;
       if (right.followers !== left.followers) return right.followers - left.followers;
-      return left.distanceMeters - right.distanceMeters;
+      return compareDistance(left.distanceMeters, right.distanceMeters);
     });
 
   addFromPool(
@@ -4574,7 +4590,7 @@ function getRecommendedProfiles() {
     if (right.sameCity !== left.sameCity) return Number(right.sameCity) - Number(left.sameCity);
     if (right.followers !== left.followers) return right.followers - left.followers;
     if (right.ratingAvg !== left.ratingAvg) return right.ratingAvg - left.ratingAvg;
-    return left.distanceMeters - right.distanceMeters;
+    return compareDistance(left.distanceMeters, right.distanceMeters);
   });
 
   addFromPool(
@@ -4932,7 +4948,7 @@ function resolveDemoCity(latitude, longitude) {
         { lat: preset.lat, lng: preset.lng }
       )
     }))
-    .sort((left, right) => left.distance - right.distance)[0];
+    .sort((left, right) => compareDistance(left.distance, right.distance))[0];
 
   if (nearest && nearest.distance < 30000) {
     return nearest.preset;

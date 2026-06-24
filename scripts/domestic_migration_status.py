@@ -82,8 +82,8 @@ def validate_static_configs(root: Path) -> list[dict[str, object]]:
     return items
 
 
-def validate_tencent_env(env_file: Path, *, require_cos_media: bool) -> list[dict[str, object]]:
-    if not env_file.exists():
+def validate_live_runtime_env(backend_url: str, env_file: Path) -> list[dict[str, object]]:
+    if not backend_url:
         return [
             status_item(
                 "tencent_env",
@@ -92,6 +92,24 @@ def validate_tencent_env(env_file: Path, *, require_cos_media: bool) -> list[dic
                 f"缺少 {env_file}。用 npm run init:tencent-env 生成真实服务器环境变量。",
             )
         ]
+
+    failures: list[str] = []
+    production_readiness.validate_live_backend(backend_url, failures, require_cos_media=False)
+    return [
+        status_item(
+            "tencent_env",
+            "腾讯云生产运行环境可用",
+            not failures,
+            "线上 CloudBase 状态可读写；本地 .env.production 未提交属于安全设计。"
+            if not failures
+            else f"缺少 {env_file}，且线上运行态未通过：{'; '.join(failures)}",
+        )
+    ]
+
+
+def validate_tencent_env(env_file: Path, *, require_cos_media: bool, backend_url: str = "") -> list[dict[str, object]]:
+    if not env_file.exists():
+        return validate_live_runtime_env(backend_url, env_file)
 
     values = tencent_cloud_preflight.parse_env_file(env_file)
     failures: list[str] = []
@@ -169,8 +187,9 @@ def build_report(
 ) -> dict[str, object]:
     root = Path(root)
     items = []
+    configs = read_configs(root)
     items.extend(validate_static_configs(root))
-    items.extend(validate_tencent_env(Path(env_file), require_cos_media=require_cos_media))
+    items.extend(validate_tencent_env(Path(env_file), require_cos_media=require_cos_media, backend_url=backend_url or configs.get("webApiOrigin", "")))
     if check_live:
         items.extend(validate_live_backend(backend_url or read_configs(root)["webApiOrigin"], require_cos_media=require_cos_media))
     blockers = [item for item in items if not item["ok"]]

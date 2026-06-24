@@ -2,6 +2,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,6 +102,35 @@ class DomesticMigrationStatusTests(unittest.TestCase):
         self.assertTrue(report["ready"])
         self.assertEqual(report["blockerCount"], 0)
         self.assertEqual(report["nextSteps"], [])
+
+    def test_report_accepts_live_cloudbase_runtime_when_local_env_is_not_committed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_app(
+                root,
+                api_origin="https://fithub-api.example.tcloudbaseapp.com",
+                api_base="https://fithub-api.example.tcloudbaseapp.com/api",
+                appid="wx1234567890abcdef",
+            )
+
+            with mock.patch.object(domestic_migration_status.production_readiness, "validate_live_backend") as validate_live_backend:
+                report = domestic_migration_status.build_report(
+                    root=root,
+                    env_file=root / "deploy" / "tencent-cloud" / ".env.production",
+                    backend_url="https://fithub-api.example.tcloudbaseapp.com",
+                    require_cos_media=False,
+                )
+
+        validate_live_backend.assert_called_once_with(
+            "https://fithub-api.example.tcloudbaseapp.com",
+            mock.ANY,
+            require_cos_media=False,
+        )
+        self.assertTrue(report["ready"])
+        self.assertEqual(report["blockerCount"], 0)
+        details = "\n".join(str(item["detail"]) for item in report["items"])
+        self.assertIn("线上 CloudBase 状态可读写", details)
+        self.assertNotIn("init:tencent-env", "\n".join(report["nextSteps"]))
 
 
 if __name__ == "__main__":
