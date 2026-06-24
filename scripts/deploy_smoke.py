@@ -90,6 +90,26 @@ def fetch_json(url: str, *, attempts: int = 1, timeout: int = 20, delay: float =
     return code, json.loads(body), elapsed
 
 
+def extract_js_string_property(text: str, key: str) -> str:
+    match = re.search(rf"{re.escape(key)}\s*:\s*[\"']([^\"']+)[\"']", text)
+    return match.group(1).strip() if match else ""
+
+
+def normalized_origin(value: str) -> str:
+    return str(value or "").strip().rstrip("/")
+
+
+def validate_frontend_api_origin(config_js: str, expected_api_origin: str) -> str:
+    expected_api_origin = normalized_origin(expected_api_origin)
+    actual_api_origin = normalized_origin(extract_js_string_property(config_js, "apiOrigin"))
+    ensure(actual_api_origin, "Frontend config.js does not expose apiOrigin")
+    ensure(
+        actual_api_origin == expected_api_origin,
+        f"Frontend config.js points to {actual_api_origin}, expected {expected_api_origin}.",
+    )
+    return actual_api_origin
+
+
 def ensure(condition: bool, message: str) -> None:
     if not condition:
         raise RuntimeError(message)
@@ -206,10 +226,16 @@ def main() -> int:
     parser.add_argument("--max-bootstrap-seconds", type=float, default=DEFAULT_MAX_BOOTSTRAP_SECONDS)
     parser.add_argument("--min-real-profiles", type=int, default=DEFAULT_MIN_REAL_PROFILES)
     parser.add_argument("--require-cos-media", action="store_true", help="Require backend media storage to be Tencent COS.")
+    parser.add_argument(
+        "--expect-frontend-api-origin",
+        default="",
+        help="Fetch frontend config.js and require apiOrigin to match this backend origin.",
+    )
     args = parser.parse_args()
 
     frontend_url = args.frontend_url.rstrip("/") + "/"
     backend_url = args.backend_url.rstrip("/")
+    expected_frontend_api_origin = normalized_origin(args.expect_frontend_api_origin)
 
     try:
         print(f"Checking frontend: {frontend_url}")
@@ -218,6 +244,15 @@ def main() -> int:
         ensure("FitHub" in html or "探索" in html, "Frontend shell does not look like FitHub")
         ensure_elapsed("Frontend shell", elapsed, args.max_frontend_seconds)
         print(f"  OK frontend shell ({elapsed:.2f}s)")
+
+        if expected_frontend_api_origin:
+            config_url = urllib.parse.urljoin(frontend_url, "config.js")
+            print(f"Checking frontend runtime config: {config_url}")
+            code, config_js, elapsed = fetch_text_with_retries(config_url, attempts=2, timeout=20)
+            ensure(code == 200, f"Frontend config.js returned {code}")
+            actual_api_origin = validate_frontend_api_origin(config_js, expected_frontend_api_origin)
+            ensure_elapsed("Frontend runtime config", elapsed, args.max_frontend_seconds)
+            print(f"  OK frontend apiOrigin ({actual_api_origin}, {elapsed:.2f}s)")
 
         print(f"Checking backend health: {backend_url}/healthz")
         code, health, elapsed = fetch_text_with_retries(f"{backend_url}/healthz", attempts=4, timeout=25, delay=3)

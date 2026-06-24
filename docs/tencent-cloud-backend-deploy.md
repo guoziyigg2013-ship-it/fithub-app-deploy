@@ -321,6 +321,7 @@ server_name api.yourdomain.com app.yourdomain.com;
 
 ```bash
 curl https://app.yourdomain.com/
+curl https://app.yourdomain.com/config.js
 curl https://api.yourdomain.com/healthz
 curl https://api.yourdomain.com/api/storage/status?remote=1
 ```
@@ -335,6 +336,18 @@ python3 ../../scripts/tencent_server_doctor.py \
 python3 ../../scripts/tencent_cloud_preflight.py \
   --backend-url https://api.yourdomain.com
 ```
+
+再从本地仓库跑一次前端/后端一致性 smoke：
+
+```bash
+python3 scripts/deploy_smoke.py \
+  --frontend-url https://app.yourdomain.com/ \
+  --backend-url https://api.yourdomain.com \
+  --expect-frontend-api-origin https://api.yourdomain.com \
+  --require-cos-media
+```
+
+这一步会检查 `app.yourdomain.com/config.js` 的 `apiOrigin` 是否已经切到国内 API。只要它还指向 Render，就会失败。
 
 确认国内 API 正常后，再回到本地仓库执行正式配置切换。推荐使用总控命令，避免漏改小程序 AppID 或 API 地址：
 

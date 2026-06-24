@@ -121,6 +121,23 @@ class DeploySmokeGuardTests(unittest.TestCase):
     def test_elapsed_guard_can_be_disabled_for_local_runs(self):
         deploy_smoke.ensure_elapsed("Local dev", 99.0, 0)
 
+    def test_frontend_runtime_config_accepts_matching_api_origin(self):
+        config_js = 'window.__FITHUB_CONFIG__ = { apiOrigin: "https://api.fithub.example.cn/" };'
+
+        actual = deploy_smoke.validate_frontend_api_origin(config_js, "https://api.fithub.example.cn")
+
+        self.assertEqual(actual, "https://api.fithub.example.cn")
+
+    def test_frontend_runtime_config_rejects_stale_render_origin(self):
+        config_js = 'window.__FITHUB_CONFIG__ = { apiOrigin: "https://fithub-app-1btg.onrender.com" };'
+
+        with self.assertRaisesRegex(RuntimeError, "onrender.com.*expected https://api\\.fithub\\.example\\.cn"):
+            deploy_smoke.validate_frontend_api_origin(config_js, "https://api.fithub.example.cn")
+
+    def test_frontend_runtime_config_requires_api_origin(self):
+        with self.assertRaisesRegex(RuntimeError, "does not expose apiOrigin"):
+            deploy_smoke.validate_frontend_api_origin("window.__FITHUB_CONFIG__ = {};", "https://api.fithub.example.cn")
+
 
 if __name__ == "__main__":
     unittest.main()

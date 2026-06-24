@@ -274,6 +274,7 @@ python3 scripts/tencent_server_doctor.py \
 python3 scripts/deploy_smoke.py \
   --frontend-url https://app.yourdomain.com/ \
   --backend-url https://api.yourdomain.com \
+  --expect-frontend-api-origin https://api.yourdomain.com \
   --require-cos-media
 
 python3 scripts/production_readiness.py \
@@ -352,6 +353,18 @@ python3 scripts/production_snapshot.py \
 ```bash
 npm run check:production
 ```
+
+如果已经切到腾讯云国内正式域名，用最终验收命令一次性确认前端、后端和媒体存储：
+
+```bash
+npm run check:final -- \
+  --production-frontend-url https://app.yourdomain.com/ \
+  --production-backend-url https://api.yourdomain.com \
+  --verify-frontend-api-origin \
+  --require-cos-media
+```
+
+其中 `--verify-frontend-api-origin` 会读取 `https://app.yourdomain.com/config.js`，确认它的 `apiOrigin` 正好等于 `https://api.yourdomain.com`。这一步专门防止“页面已经上了国内域名，但实际 API 还在请求 Render”。
 
 只有 `check:production` 和 `check:smoke` 同时通过，才说明“固定域、后端、数据库、小程序配置”都进入可提交状态。
 

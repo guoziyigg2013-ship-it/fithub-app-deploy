@@ -28,7 +28,13 @@ def run_step(label: str, cmd: list[str]) -> tuple[bool, float]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the complete FitHub acceptance checklist.")
+    parser.add_argument("--production-frontend-url", default="", help="Override frontend URL for fixed-domain smoke checks.")
     parser.add_argument("--production-backend-url", default="", help="Override backend URL for production readiness checks.")
+    parser.add_argument(
+        "--verify-frontend-api-origin",
+        action="store_true",
+        help="Require frontend config.js apiOrigin to match --production-backend-url.",
+    )
     parser.add_argument("--skip-production-readiness", action="store_true", help="Skip production config readiness gate.")
     parser.add_argument("--skip-smoke", action="store_true", help="Skip fixed-domain smoke test.")
     parser.add_argument("--skip-media-report", action="store_true", help="Skip read-only media storage report.")
@@ -53,8 +59,15 @@ def main() -> int:
         steps.append(("Production readiness gate", readiness_cmd))
     if not args.skip_smoke:
         smoke_cmd = ["python3", "scripts/deploy_smoke.py"]
+        if args.production_frontend_url:
+            smoke_cmd.extend(["--frontend-url", args.production_frontend_url])
         if args.production_backend_url:
             smoke_cmd.extend(["--backend-url", args.production_backend_url])
+        if args.verify_frontend_api_origin:
+            if not args.production_backend_url:
+                print("--verify-frontend-api-origin requires --production-backend-url", file=sys.stderr)
+                return 1
+            smoke_cmd.extend(["--expect-frontend-api-origin", args.production_backend_url])
         if args.require_cos_media:
             smoke_cmd.append("--require-cos-media")
         steps.append(("Fixed-domain smoke gate", smoke_cmd))
