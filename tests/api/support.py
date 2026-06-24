@@ -277,6 +277,36 @@ class ApiClient:
     def create_booking(self, target_profile_id, time_label="本周六 20:00"):
         return self.post("/api/booking/create", {"targetProfileId": target_profile_id, "time": time_label})
 
+    def create_availability(self, profile_id, date="2026-07-01", time_label="18:30", duration_minutes=60, note="API 测试时段"):
+        return self.post(
+            "/api/availability/create",
+            {
+                "profileId": profile_id,
+                "date": date,
+                "time": time_label,
+                "durationMinutes": duration_minutes,
+                "note": note,
+            },
+        )
+
+    def create_slot_booking(self, target_profile_id, slot_id):
+        return self.post(
+            "/api/booking/create",
+            {
+                "targetProfileId": target_profile_id,
+                "availabilitySlotId": slot_id,
+            },
+        )
+
+    def update_booking_status(self, booking_id, status):
+        return self.post(
+            "/api/booking/update-status",
+            {
+                "bookingId": booking_id,
+                "status": status,
+            },
+        )
+
     def create_report(self, target_type, target_id, reason="不适内容"):
         return self.post(
             "/api/report/create",

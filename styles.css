@@ -1615,6 +1615,19 @@ form.is-submitting button[type="submit"] {
   font-size: 13px;
 }
 
+.booking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.booking-actions .mini-button {
+  min-width: 72px;
+  min-height: 34px;
+  font-weight: 800;
+}
+
 .availability-card {
   margin: 14px 0;
   padding: 16px;

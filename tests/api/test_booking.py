@@ -78,3 +78,51 @@ class BookingRegressionTests(FitHubApiTestCase):
         self.assertTrue(enthusiast_view.get("bookings"))
         self.assertTrue(all(item.get("createdByProfileId") == enthusiast_profile["id"] for item in enthusiast_view.get("bookings", [])))
         self.assertFalse(any(item.get("targetProfileId") == coach_profile["id"] for item in enthusiast_view.get("bookings", [])))
+
+    def test_provider_availability_slot_can_be_booked_confirmed_and_cancelled(self):
+        buyer_phone = self.make_phone(54)
+        coach_phone = self.make_phone(55)
+
+        coach_client = self.make_client()
+        coach_code = coach_client.send_code(coach_phone, purpose="register")["debugCode"]
+        coach_payload = coach_client.register_coach(coach_phone, "排期测试教练", coach_code)
+        coach_profile = self.current_profile(coach_payload)
+
+        availability_payload = coach_client.create_availability(
+            coach_profile["id"],
+            date="2026-07-08",
+            time_label="19:30",
+            duration_minutes=90,
+            note="晚间私教体验",
+        )
+        refreshed_coach = self.find_profile(availability_payload, coach_profile["id"])
+        slot = refreshed_coach["availabilitySlots"][0]
+        self.assertEqual(slot["status"], "open")
+
+        buyer_client = self.make_client()
+        buyer_code = buyer_client.send_code(buyer_phone, purpose="register")["debugCode"]
+        buyer_payload = buyer_client.register_enthusiast(buyer_phone, "排期测试学员", buyer_code)
+        buyer_profile = self.current_profile(buyer_payload)
+
+        booked_payload = buyer_client.create_slot_booking(coach_profile["id"], slot["id"])
+        outgoing = next((item for item in booked_payload.get("bookings", []) if item.get("targetProfileId") == coach_profile["id"]), None)
+        self.assertIsNotNone(outgoing)
+        self.assertEqual(outgoing["scheduledDate"], "2026-07-08")
+        self.assertEqual(outgoing["scheduledTime"], "19:30")
+        self.assertEqual(outgoing["durationMinutes"], 90)
+
+        coach_view = coach_client.bootstrap()
+        incoming = next((item for item in coach_view.get("bookings", []) if item.get("createdByProfileId") == buyer_profile["id"]), None)
+        self.assertIsNotNone(incoming)
+        confirmed_payload = coach_client.update_booking_status(incoming["id"], "已确认")
+        confirmed = next((item for item in confirmed_payload.get("bookings", []) if item.get("id") == incoming["id"]), None)
+        self.assertEqual(confirmed["status"], "已确认")
+
+        cancelled_payload = buyer_client.update_booking_status(incoming["id"], "已取消")
+        cancelled = next((item for item in cancelled_payload.get("bookings", []) if item.get("id") == incoming["id"]), None)
+        self.assertEqual(cancelled["status"], "已取消")
+
+        coach_after_cancel = coach_client.bootstrap()
+        coach_profile_after_cancel = self.find_profile(coach_after_cancel, coach_profile["id"])
+        released_slot = next(item for item in coach_profile_after_cancel["availabilitySlots"] if item["id"] == slot["id"])
+        self.assertEqual(released_slot["status"], "open")

@@ -6256,7 +6256,7 @@ async function switchManagedProfile(profileId, { waitForSync = false, closeAfter
 async function selectRole(role) {
   const managedProfile = getManagedProfileByRole(role);
   if (managedProfile?.id) {
-    await switchManagedProfile(managedProfile.id, { waitForSync: true });
+    await switchManagedProfile(managedProfile.id, { waitForSync: false });
     return;
   }
 
@@ -6558,9 +6558,10 @@ function renderPostMedia(post, options = {}) {
 function canOpenChatWith(profileId) {
   return Boolean(
     profileId &&
-      !isManagedProfile(profileId) &&
       state.currentActorProfileId &&
-      state.followSet.has(profileId)
+      profileId !== state.currentActorProfileId &&
+      !state.blockSet.has(profileId) &&
+      !state.blockedBySet.has(profileId)
   );
 }
 
@@ -8059,6 +8060,14 @@ async function deleteAvailabilitySlot(profileId, slotId) {
   renderPage();
 }
 
+async function updateBookingStatus(bookingId, status) {
+  await postAndSync(`${API_BASE}/booking/update-status`, {
+    bookingId,
+    status
+  });
+  renderPage();
+}
+
 function renderPersonalShortcutTile(label, sublabel, icon, attrs = "", options = {}) {
   const badgeCount = Math.max(0, Number(options.badgeCount || 0));
   const badge = badgeCount
@@ -8164,6 +8173,10 @@ function renderManagedBookingList(profile, bookings, { emptyText = "" } = {}) {
                 <span>${escapeHtml(metaLeft)}</span>
               </div>
             `;
+          const status = card.status || "待确认";
+          const canCancel = !["已取消", "已完成"].includes(status);
+          const canConfirm = profileRole !== "enthusiast" && card.direction === "incoming" && ["已预约", "待确认"].includes(status);
+          const canComplete = profileRole !== "enthusiast" && card.direction === "incoming" && status === "已确认";
           return `
             <article class="booking-card">
               <div class="booking-top">
@@ -8178,6 +8191,17 @@ function renderManagedBookingList(profile, bookings, { emptyText = "" } = {}) {
               <div class="booking-bottom">
                 <span>${escapeHtml(card.place || card.counterpartLocationLabel || "位置待确认")}</span>
               </div>
+              ${
+                canCancel || canConfirm || canComplete
+                  ? `
+                    <div class="booking-actions">
+                      ${canConfirm ? `<button class="mini-button mini-button--accent" data-booking-status="已确认" data-booking-id="${card.id}" type="button">确认</button>` : ""}
+                      ${canComplete ? `<button class="mini-button mini-button--accent" data-booking-status="已完成" data-booking-id="${card.id}" type="button">完成</button>` : ""}
+                      ${canCancel ? `<button class="mini-button" data-booking-status="已取消" data-booking-id="${card.id}" type="button">取消</button>` : ""}
+                    </div>
+                  `
+                  : ""
+              }
             </article>
           `;
         })
@@ -11280,6 +11304,11 @@ appView.addEventListener("click", (event) => {
 
   if (target.dataset.deleteAvailability) {
     runButtonTask(target, () => deleteAvailabilitySlot(target.dataset.availabilityProfile, target.dataset.deleteAvailability), "取消中");
+    return;
+  }
+
+  if (target.dataset.bookingStatus) {
+    runButtonTask(target, () => updateBookingStatus(target.dataset.bookingId, target.dataset.bookingStatus), "处理中");
     return;
   }
 });

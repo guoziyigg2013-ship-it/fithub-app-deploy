@@ -118,6 +118,95 @@ class PersistenceRecoveryTests(FitHubApiTestCase):
             )
         )
 
+    def test_phone_recovery_tolerates_legacy_auth_version_object(self):
+        phone = self.make_phone(76)
+        client = self.make_client()
+        code = client.send_code(phone, purpose="register")["debugCode"]
+        registered = client.register_enthusiast(phone, "历史账户兼容用户", code)
+        profile = self.current_profile(registered)
+
+        with (self.data_dir / "shared_state.json").open("r", encoding="utf-8") as handle:
+            full_state = server.sanitize_state(json.load(handle))
+
+        account = server.resolve_account_by_phone(full_state, phone)
+        self.assertIsNotNone(account)
+        account["authVersion"] = {"legacy": 1}
+
+        recovery_payload = server.build_phone_recovery_slice(full_state, phone)
+        self.assertIsNotNone(recovery_payload)
+        self.assertEqual(account["authVersion"], 1)
+        self.assertIn(profile["id"], recovery_payload["profiles"])
+
+    def test_profile_serialization_tolerates_legacy_review_score_object(self):
+        state = server.initial_state()
+        target_profile_id = next(
+            profile_id
+            for profile_id, profile in state["profiles"].items()
+            if profile.get("role") in {"coach", "gym"}
+        )
+        state["profiles"][target_profile_id]["reviews"] = [
+            {
+                "id": "review-legacy-score",
+                "authorProfileId": "",
+                "score": {"legacy": 5},
+                "text": "历史评分兼容。",
+                "createdAt": server.iso_at(),
+            }
+        ]
+
+        serialized = server.serialize_profile(state, target_profile_id, "")
+        self.assertEqual(serialized["ratingAvg"], 5)
+        self.assertEqual(serialized["reviews"][0]["score"], 5)
+
+    def test_bootstrap_tolerates_legacy_activity_shapes(self):
+        state = server.initial_state()
+        coach_id = next(
+            profile_id
+            for profile_id, profile in state["profiles"].items()
+            if profile.get("role") == "coach"
+        )
+        enthusiast_id = next(
+            profile_id
+            for profile_id, profile in state["profiles"].items()
+            if profile.get("role") == "enthusiast"
+        )
+        state["profiles"][coach_id]["reviews"] = [{"score": {"legacy": 5}, "text": "历史评分"}]
+        state["profiles"][enthusiast_id]["checkins"] = [{"id": "legacy-checkin", "sportLabel": "户外行走"}]
+        state["posts"]["post-legacy"] = {
+            "id": "post-legacy",
+            "authorProfileId": enthusiast_id,
+            "content": "历史动态",
+            "meta": "",
+            "likes": [],
+            "comments": [{"id": "legacy-comment", "authorProfileId": coach_id, "text": "收到"}],
+            "media": [],
+        }
+        state["threads"].append(
+            {
+                "id": "thread-legacy",
+                "participants": [enthusiast_id, coach_id],
+                "messages": [{"id": "message-legacy", "senderProfileId": coach_id, "text": "旧私信"}],
+            }
+        )
+        state["bookings"].append(
+            {
+                "id": "booking-legacy",
+                "createdByProfileId": enthusiast_id,
+                "targetProfileId": coach_id,
+                "title": "历史预约",
+                "createdAt": {"legacy": True},
+            }
+        )
+        session = server.create_session_record()
+        session["currentActorProfileId"] = enthusiast_id
+        session["managedProfileIds"] = [enthusiast_id]
+        session["selectedRole"] = "enthusiast"
+
+        payload = server.bootstrap_response(state, session)
+        self.assertTrue(payload["profiles"])
+        self.assertIn("threads", payload)
+        self.assertIn("bookings", payload)
+
     def test_admin_export_requires_token_and_contains_full_snapshot_metrics(self):
         client = self.make_client()
         phone = self.make_phone(72)

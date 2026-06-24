@@ -464,6 +464,14 @@ def compact_avatar_image(url, role):
 
 
 def compact_media_item(item):
+    if not isinstance(item, dict):
+        return {
+            "id": f"media-{uuid.uuid4().hex[:10]}",
+            "type": "image",
+            "url": "",
+            "name": str(item or "历史媒体"),
+            "tooLarge": True,
+        }
     trimmed = dict(item)
     url = trimmed.get("url", "")
     if isinstance(url, str) and url.startswith("data:") and len(url) > MAX_INLINE_MEDIA_CHARS:
@@ -3307,7 +3315,7 @@ def ensure_account_identity_bindings(account):
 
     if not account.get("primaryProvider"):
         account["primaryProvider"] = "phone" if phone_key else next(iter(providers.keys()), "")
-    account["authVersion"] = max(1, int(account.get("authVersion") or 1))
+    account["authVersion"] = max(1, parse_optional_int(account.get("authVersion")) or 1)
     return providers
 
 
@@ -3448,7 +3456,7 @@ def reconcile_account_registry(state):
             "profilesByRole": {},
             "primaryProvider": (existing_account or {}).get("primaryProvider") or ("phone" if normalized_phone else ""),
             "identityProviders": deepcopy((existing_account or {}).get("identityProviders") or {}),
-            "authVersion": max(1, int((existing_account or {}).get("authVersion") or 1)),
+            "authVersion": max(1, parse_optional_int((existing_account or {}).get("authVersion")) or 1),
             "createdAt": (existing_account or {}).get("createdAt") or iso_at(),
         }
         ensure_account_identity_bindings(seed)
@@ -3892,7 +3900,7 @@ def serialize_managed_accounts(state, session):
                     for provider_type in ["wechat", "apple"]
                     if provider_type not in providers
                 ],
-                "authVersion": max(1, int(account.get("authVersion") or 1)),
+                "authVersion": max(1, parse_optional_int(account.get("authVersion")) or 1),
             }
         )
 
@@ -4858,10 +4866,32 @@ def author_name(state, profile_id):
     return profile["name"] if profile else "平台用户"
 
 
+def safe_created_at(item):
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("createdAt") or "")
+
+
+def normalize_review_score(review):
+    if not isinstance(review, dict):
+        return 5
+    score = parse_optional_int(review.get("score")) or 5
+    return min(5, max(1, score))
+
+
+def sorted_by_created_at(items, reverse=False):
+    if not isinstance(items, list):
+        return []
+    return sorted([item for item in items if isinstance(item, dict)], key=safe_created_at, reverse=reverse)
+
+
 def profile_posts(state, profile_id):
     alias_ids = collect_profile_alias_ids(state, profile_id)
-    posts = [post for post in state["posts"].values() if post["authorProfileId"] in alias_ids]
-    return sorted(posts, key=lambda item: item["createdAt"], reverse=True)
+    posts = [
+        post for post in state["posts"].values()
+        if isinstance(post, dict) and post.get("authorProfileId") in alias_ids
+    ]
+    return sorted_by_created_at(posts, reverse=True)
 
 
 def get_follow_set(state, current_actor_profile_id):
@@ -4960,27 +4990,28 @@ def remove_relationship_between_profiles(state, source_profile_id, target_profil
 
 
 def serialize_review(state, review):
+    score = normalize_review_score(review)
     return {
-        "id": review["id"],
+        "id": review.get("id") or f"review-{uuid.uuid4().hex[:10]}",
         "author": author_name(state, review.get("authorProfileId")),
         "authorProfileId": review.get("authorProfileId"),
-        "score": review["score"],
-        "text": review["text"],
+        "score": score,
+        "text": str(review.get("text") or ""),
         "time": relative_time_label(review.get("createdAt")),
         "createdAt": review.get("createdAt"),
     }
 
 
 def serialize_comment(state, comment):
-    profile = state["profiles"].get(comment["authorProfileId"])
+    profile = state["profiles"].get(resolve_canonical_profile_id(state, comment.get("authorProfileId")))
     return {
-        "id": comment["id"],
-        "authorProfileId": comment["authorProfileId"],
+        "id": comment.get("id") or f"comment-{uuid.uuid4().hex[:10]}",
+        "authorProfileId": comment.get("authorProfileId") or "",
         "authorName": profile["name"] if profile else "平台用户",
-        "authorAvatarImage": compact_avatar_image(profile["avatarImage"], profile["role"]) if profile else "",
-        "text": comment["text"],
-        "time": relative_time_label(comment["createdAt"]),
-        "createdAt": comment["createdAt"],
+        "authorAvatarImage": compact_avatar_image(profile.get("avatarImage"), profile.get("role", "")) if profile else "",
+        "text": str(comment.get("text") or ""),
+        "time": relative_time_label(comment.get("createdAt")),
+        "createdAt": comment.get("createdAt") or "",
     }
 
 
@@ -5003,19 +5034,19 @@ def serialize_profile_brief(state, profile_id):
             "avatarImage": "",
         }
 
-    reviews = profile.get("reviews", [])
+    reviews = [serialize_review(state, item) for item in sorted_by_created_at(profile.get("reviews", []), reverse=True)]
     rating_count = len(reviews)
     rating_avg = round(sum(item["score"] for item in reviews) / rating_count, 1) if rating_count else 0
     return {
-        "id": profile["id"],
+        "id": profile.get("id") or profile_id,
         "name": profile.get("name", "平台用户"),
-        "handle": profile.get("handle") or f"@{profile['id']}",
+        "handle": profile.get("handle") or f"@{profile.get('id') or profile_id}",
         "role": profile.get("role", ""),
         "city": profile.get("city", ""),
         "locationLabel": profile.get("locationLabel", ""),
         "shortDesc": profile.get("shortDesc", ""),
         "bio": profile.get("bio", ""),
-        "followers": follower_count(state, profile["id"]),
+        "followers": follower_count(state, profile.get("id") or profile_id),
         "ratingAvg": rating_avg,
         "ratingCount": rating_count,
         "avatarImage": compact_avatar_image(profile.get("avatarImage"), profile.get("role", "")),
@@ -5024,7 +5055,7 @@ def serialize_profile_brief(state, profile_id):
 
 def serialize_checkin(checkin):
     return {
-        "id": checkin["id"],
+        "id": checkin.get("id") or f"checkin-{uuid.uuid4().hex[:10]}",
         "source": checkin.get("source", ""),
         "sportId": checkin.get("sportId", ""),
         "sportLabel": checkin.get("sportLabel", "训练打卡"),
@@ -5037,33 +5068,34 @@ def serialize_checkin(checkin):
         "elevationGain": checkin.get("elevationGain", 0),
         "route": deepcopy(checkin.get("route")) if isinstance(checkin.get("route"), dict) else None,
         "note": checkin.get("note", ""),
-        "createdAt": checkin["createdAt"],
-        "time": relative_time_label(checkin["createdAt"]),
+        "createdAt": checkin.get("createdAt") or "",
+        "time": relative_time_label(checkin.get("createdAt")),
     }
 
 
 def serialize_post(state, post, current_actor_profile_id):
     current_actor_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
-    canonical_author_id = resolve_canonical_profile_id(state, post["authorProfileId"])
+    canonical_author_id = resolve_canonical_profile_id(state, post.get("authorProfileId"))
+    post_id = str(post.get("id") or "")
     return {
-        "id": post["id"],
-        "authorProfileId": canonical_author_id or post["authorProfileId"],
-        "createdAt": post["createdAt"],
-        "time": relative_time_label(post["createdAt"]),
-        "content": post["content"],
-        "meta": post["meta"],
+        "id": post_id,
+        "authorProfileId": canonical_author_id or post.get("authorProfileId") or "",
+        "createdAt": post.get("createdAt") or "",
+        "time": relative_time_label(post.get("createdAt")),
+        "content": str(post.get("content") or ""),
+        "meta": str(post.get("meta") or ""),
         "media": [compact_media_item(item) for item in post.get("media", [])],
         "likeCount": len(post.get("likes", [])),
         "favoriteCount": len(
             [
                 item
                 for item in state.get("postFavorites", [])
-                if item.get("postId") == post["id"]
+                if item.get("postId") == post_id
             ]
         ),
         "likedByCurrentActor": any(item in current_actor_alias_ids for item in post.get("likes", [])),
-        "comments": [serialize_comment(state, item) for item in sorted(post.get("comments", []), key=lambda value: value["createdAt"])],
-        "checkin": serialize_checkin(post["checkin"]) if post.get("checkin") else None,
+        "comments": [serialize_comment(state, item) for item in sorted_by_created_at(post.get("comments", []))],
+        "checkin": serialize_checkin(post.get("checkin")) if isinstance(post.get("checkin"), dict) else None,
     }
 
 
@@ -5221,7 +5253,7 @@ def serialize_profile(state, profile_id, current_actor_profile_id):
     profile_id = resolve_canonical_profile_id(state, profile_id)
     current_actor_profile_id = resolve_canonical_profile_id(state, current_actor_profile_id)
     profile = deepcopy(state["profiles"][profile_id])
-    reviews = [serialize_review(state, item) for item in sorted(profile.get("reviews", []), key=lambda value: value["createdAt"], reverse=True)]
+    reviews = [serialize_review(state, item) for item in sorted_by_created_at(profile.get("reviews", []), reverse=True)]
     rating_count = len(reviews)
     rating_avg = round(sum(item["score"] for item in reviews) / rating_count, 1) if rating_count else 0
     profile["followers"] = follower_count(state, profile_id)
@@ -5229,13 +5261,13 @@ def serialize_profile(state, profile_id, current_actor_profile_id):
     profile["ratingAvg"] = rating_avg
     profile["ratingCount"] = rating_count
     profile["reviews"] = reviews
-    profile["avatarImage"] = compact_avatar_image(profile.get("avatarImage"), profile["role"])
+    profile["avatarImage"] = compact_avatar_image(profile.get("avatarImage"), profile.get("role", ""))
     profile["posts"] = [serialize_post(state, post, current_actor_profile_id) for post in profile_posts(state, profile_id)[:4]]
     checkin_limit = 120 if profile_id == current_actor_profile_id else 12
-    profile["checkins"] = [serialize_checkin(item) for item in sorted(profile.get("checkins", []), key=lambda value: value["createdAt"], reverse=True)[:checkin_limit]]
+    profile["checkins"] = [serialize_checkin(item) for item in sorted_by_created_at(profile.get("checkins", []), reverse=True)[:checkin_limit]]
     profile["healthHistory"] = [
         deepcopy(item)
-        for item in sorted(profile.get("healthHistory", []), key=lambda value: value.get("createdAt", ""), reverse=True)[:60]
+        for item in sorted_by_created_at(profile.get("healthHistory", []), reverse=True)[:60]
     ]
     profile["availabilitySlots"] = serialize_availability_slots(profile)
     profile.pop("externalWorkoutIds", None)
@@ -5271,9 +5303,10 @@ def serialize_bookings(state, session):
     current_actor_alias_ids = set(collect_profile_alias_ids(state, current_actor_profile_id))
     bookings = [
         item for item in state["bookings"]
-        if item["createdByProfileId"] in current_actor_alias_ids or item["targetProfileId"] in current_actor_alias_ids
+        if isinstance(item, dict)
+        and (item.get("createdByProfileId") in current_actor_alias_ids or item.get("targetProfileId") in current_actor_alias_ids)
     ]
-    bookings.sort(key=lambda item: item["createdAt"], reverse=True)
+    bookings = sorted_by_created_at(bookings, reverse=True)
     serialized = []
     for item in bookings:
         source_id = resolve_canonical_profile_id(state, item.get("createdByProfileId"))
@@ -5326,29 +5359,32 @@ def serialize_threads(state, current_actor_profile_id):
     current_actor_alias_ids = collect_profile_alias_ids(state, current_actor_profile_id)
     threads = []
     for thread in state["threads"]:
-        if not any(item in current_actor_alias_ids for item in thread["participants"]):
+        if not isinstance(thread, dict):
             continue
-        other_profile_id = next((item for item in thread["participants"] if item not in current_actor_alias_ids), None)
+        participants = thread.get("participants", []) if isinstance(thread.get("participants"), list) else []
+        if not any(item in current_actor_alias_ids for item in participants):
+            continue
+        other_profile_id = next((item for item in participants if item not in current_actor_alias_ids), None)
         other_profile_id = resolve_canonical_profile_id(state, other_profile_id)
         other_profile = state["profiles"].get(other_profile_id)
         messages = [
             {
-                "id": message["id"],
-                "senderProfileId": resolve_canonical_profile_id(state, message["senderProfileId"]) or message["senderProfileId"],
-                "senderName": author_name(state, message["senderProfileId"]),
-                "text": message["text"],
-                "time": relative_time_label(message["createdAt"]),
-                "createdAt": message["createdAt"],
+                "id": message.get("id") or f"message-{uuid.uuid4().hex[:10]}",
+                "senderProfileId": resolve_canonical_profile_id(state, message.get("senderProfileId")) or message.get("senderProfileId") or "",
+                "senderName": author_name(state, message.get("senderProfileId")),
+                "text": str(message.get("text") or ""),
+                "time": relative_time_label(message.get("createdAt")),
+                "createdAt": message.get("createdAt") or "",
             }
-            for message in sorted(thread["messages"], key=lambda item: item["createdAt"])
+            for message in sorted_by_created_at(thread.get("messages", []))
         ]
         last_message = messages[-1] if messages else None
         threads.append(
             {
-                "id": thread["id"],
+                "id": thread.get("id") or get_thread_id(current_actor_profile_id, other_profile_id or "unknown"),
                 "withProfileId": other_profile_id,
                 "withProfileName": other_profile["name"] if other_profile else "未知用户",
-                "withProfileAvatarImage": compact_avatar_image(other_profile["avatarImage"], other_profile["role"]) if other_profile else "",
+                "withProfileAvatarImage": compact_avatar_image(other_profile.get("avatarImage"), other_profile.get("role", "")) if other_profile else "",
                 "messages": messages,
                 "lastMessage": last_message,
             }
@@ -7658,6 +7694,80 @@ class FitHubHandler(BaseHTTPRequestHandler):
                         "price": plan.get("price", target_profile.get("price", "待确认")),
                     },
                 )
+                return bootstrap_response(state, session)
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        if parsed.path == f"{API_PREFIX}/booking/update-status":
+            def action(state):
+                session = ensure_session(state, session_id)
+                allowed, actor = ensure_session_identity(
+                    state,
+                    session,
+                    preferred_role=str(session.get("selectedRole") or "").strip(),
+                )
+                if not allowed or not actor:
+                    raise ValueError("请先登录后再管理预约。")
+
+                booking_id = str(payload.get("bookingId") or "").strip()
+                if not booking_id:
+                    raise ValueError("请选择要处理的预约。")
+                requested_status = str(payload.get("status") or "").strip()
+                status_aliases = {
+                    "confirm": "已确认",
+                    "confirmed": "已确认",
+                    "cancel": "已取消",
+                    "cancelled": "已取消",
+                    "complete": "已完成",
+                    "completed": "已完成",
+                }
+                next_status = status_aliases.get(requested_status, requested_status)
+                if next_status not in {"已确认", "已取消", "已完成"}:
+                    raise ValueError("这个预约状态暂不支持。")
+
+                booking = next((item for item in state.get("bookings", []) if str(item.get("id") or "") == booking_id), None)
+                if not booking:
+                    raise ValueError("没有找到这个预约。")
+
+                source_id = resolve_canonical_profile_id(state, booking.get("createdByProfileId"))
+                target_id = resolve_canonical_profile_id(state, booking.get("targetProfileId"))
+                actor_alias_ids = set(collect_profile_alias_ids(state, actor))
+                is_buyer = source_id in actor_alias_ids
+                is_provider = target_id in actor_alias_ids
+                if not is_buyer and not is_provider:
+                    raise ValueError("你没有权限处理这个预约。")
+
+                current_status = str(booking.get("status") or "")
+                if current_status == "已完成" and next_status != "已完成":
+                    raise ValueError("已完成的预约不能再变更。")
+                if next_status in {"已确认", "已完成"} and not is_provider:
+                    raise ValueError("只有服务方可以确认或完成预约。")
+                if next_status == "已确认" and current_status == "已取消":
+                    raise ValueError("已取消的预约不能确认。")
+                if next_status == "已完成" and current_status == "已取消":
+                    raise ValueError("已取消的预约不能完成。")
+
+                booking["status"] = next_status
+                booking["updatedAt"] = iso_at()
+                booking["statusUpdatedByProfileId"] = actor
+
+                slot_id = str(booking.get("availabilitySlotId") or "").strip()
+                if slot_id and next_status == "已取消":
+                    target_profile = state.get("profiles", {}).get(target_id)
+                    if target_profile:
+                        for slot in target_profile.setdefault("availabilitySlots", []):
+                            if str(slot.get("id") or "") != slot_id:
+                                continue
+                            # Cancelling a booking should free the slot for other users.
+                            slot["status"] = "open"
+                            slot.pop("bookedByProfileId", None)
+                            slot.pop("bookedAt", None)
+                            slot["releasedAt"] = iso_at()
+                            break
+
                 return bootstrap_response(state, session)
             try:
                 self._write_json(self._with_state(action))

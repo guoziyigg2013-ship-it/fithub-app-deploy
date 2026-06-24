@@ -1,21 +1,96 @@
 <view class="page">
-  <text class="eyebrow">BOOKING</text>
-  <view class="title">预约</view>
-
-  <view class="section-title">我的预约</view>
-  <view wx:if="{{!bookings.length}}" class="card empty">当前还没有预约，先选择一个健身房或教练。</view>
-  <view class="card booking" wx:for="{{bookings}}" wx:key="id">
-    <text class="booking-title">{{item.targetName || item.profileName || '预约记录'}}</text>
-    <text class="muted">{{item.time || item.timeLabel}} · {{item.status || '待确认'}}</text>
-  </view>
-
-  <view class="section-title">可预约对象</view>
-  <view class="card target" wx:for="{{targets}}" wx:key="id">
-    <image class="avatar" src="{{item.avatarImage}}" mode="aspectFill"></image>
-    <view class="target-info">
-      <text class="target-name">{{item.name}}</text>
-      <text class="muted">{{item.price}} · {{item.locationLabel}}</text>
+  <view class="space-between page-heading">
+    <view>
+      <text class="eyebrow">BOOKING</text>
+      <view class="title">预约</view>
     </view>
-    <button class="ghost-button" data-id="{{item.id}}" bindtap="createBooking">预约</button>
+    <view class="pill">{{myProfile.role === 'coach' ? '健身教练' : myProfile.role === 'gym' ? '健身房' : '健身爱好者'}}</view>
   </view>
+
+  <view wx:if="{{loading}}" class="card empty">正在加载预约信息...</view>
+
+  <block wx:if="{{!loading}}">
+    <view wx:if="{{isProvider}}" class="card provider-card">
+      <view class="section-title-inline">发布可预约时间</view>
+      <text class="muted">学员会在你的主页和预约页看到这些开放时段。</text>
+
+      <view class="form-grid">
+        <picker mode="date" value="{{form.date}}" bindchange="onDateChange">
+          <view class="form-cell">
+            <text>日期</text>
+            <strong>{{form.date}}</strong>
+          </view>
+        </picker>
+        <picker mode="time" value="{{form.time}}" bindchange="onTimeChange">
+          <view class="form-cell">
+            <text>开始</text>
+            <strong>{{form.time}}</strong>
+          </view>
+        </picker>
+        <picker mode="selector" range="{{durationOptions}}" range-key="label" value="{{durationIndex}}" bindchange="onDurationChange">
+          <view class="form-cell">
+            <text>时长</text>
+            <strong>{{durationOptions[durationIndex].label}}</strong>
+          </view>
+        </picker>
+      </view>
+
+      <input class="note-input" value="{{form.note}}" maxlength="40" placeholder="例如：私教体验课 / 晚间器械区" bindinput="onNoteInput" />
+      <button class="primary-button publish-button" bindtap="createAvailability">发布时段</button>
+
+      <view class="slot-list" wx:if="{{ownSlots.length}}">
+        <view class="slot-item" wx:for="{{ownSlots}}" wx:key="id">
+          <view>
+            <text class="slot-title">{{item.label}}</text>
+            <text class="muted">{{item.note || (item.isBooked ? '已被预约' : '开放预约')}}</text>
+          </view>
+          <button wx:if="{{!item.isBooked}}" class="ghost-button" data-slot-id="{{item.id}}" bindtap="deleteAvailability">取消</button>
+          <view wx:else class="pill">已约</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section-title">我的预约</view>
+    <view wx:if="{{!bookings.length}}" class="card empty">当前还没有预约。{{isProvider ? '发布时段后，学员预约会显示在这里。' : '先选择一个开放时段。'}}</view>
+    <view class="card booking" wx:for="{{bookings}}" wx:key="id">
+      <view class="space-between">
+        <text class="booking-title">{{item.titleText}}</text>
+        <view class="pill">{{item.status || '待确认'}}</view>
+      </view>
+      <text class="muted">{{item.metaText}}</text>
+      <text class="muted">{{item.scheduleText}} · {{item.price || '价格待确认'}}</text>
+      <view class="booking-actions" wx:if="{{item.canConfirm || item.canComplete || item.canCancel}}">
+        <button wx:if="{{item.canConfirm}}" class="ghost-button action-button action-button--accent" data-booking-id="{{item.id}}" data-status="已确认" bindtap="updateBookingStatus">确认</button>
+        <button wx:if="{{item.canComplete}}" class="ghost-button action-button action-button--accent" data-booking-id="{{item.id}}" data-status="已完成" bindtap="updateBookingStatus">完成</button>
+        <button wx:if="{{item.canCancel}}" class="ghost-button action-button" data-booking-id="{{item.id}}" data-status="已取消" bindtap="updateBookingStatus">取消</button>
+      </view>
+    </view>
+
+    <block wx:if="{{!isProvider}}">
+      <view class="section-title">可预约时间</view>
+      <view wx:if="{{!targets.length}}" class="card empty">暂时没有开放时段，稍后再看看。</view>
+      <view class="card target" wx:for="{{targets}}" wx:key="id">
+        <image class="avatar" src="{{item.avatarImage}}" mode="aspectFill"></image>
+        <view class="target-info">
+          <text class="target-name">{{item.name}}</text>
+          <text class="muted">{{item.roleText}} · {{item.price}} · {{item.locationLabel}}</text>
+          <view class="target-slots" wx:if="{{item.openSlots.length}}">
+            <button
+              class="slot-button"
+              wx:for="{{item.openSlots}}"
+              wx:for-item="slot"
+              wx:key="id"
+              data-id="{{item.id}}"
+              data-slot-id="{{slot.id}}"
+              bindtap="createBooking"
+            >
+              <text>{{slot.label}}</text>
+              <text>{{slot.note || '预约'}}</text>
+            </button>
+          </view>
+          <text wx:else class="muted">还没有开放时段</text>
+        </view>
+      </view>
+    </block>
+  </block>
 </view>

@@ -1,0 +1,8 @@
+{
+  "version": "2.0",
+  "envId": "zhangxin-zhinan-d4fwtsmr9a834d58",
+  "$schema": "https://framework-1258016615.tcloudbaseapp.com/schema/latest.json",
+  "cloudrun": {
+    "name": "fithub-api"
+  }
+}

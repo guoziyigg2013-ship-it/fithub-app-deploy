@@ -1,23 +1,125 @@
+.page-heading {
+  margin-bottom: 28rpx;
+}
+
 .empty {
   color: #817872;
   font-size: 27rpx;
+  line-height: 1.6;
+}
+
+.section-title-inline {
+  margin-bottom: 8rpx;
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+.provider-card {
+  margin-top: 22rpx;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14rpx;
+  margin: 22rpx 0 16rpx;
+}
+
+.form-cell {
+  min-height: 116rpx;
+  padding: 18rpx;
+  border-radius: 24rpx;
+  background: #fff7ed;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.form-cell text {
+  color: #9a9188;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.form-cell strong {
+  color: #1b1b1b;
+  font-size: 27rpx;
+  font-weight: 900;
+}
+
+.note-input {
+  height: 78rpx;
+  padding: 0 24rpx;
+  border: 2rpx solid #f0ebe5;
+  border-radius: 26rpx;
+  background: #fff;
+  font-size: 27rpx;
+}
+
+.publish-button {
+  margin-top: 18rpx;
+}
+
+.slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-top: 22rpx;
+}
+
+.slot-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 18rpx;
+  border-radius: 24rpx;
+  background: rgba(255, 248, 239, 0.86);
+}
+
+.slot-title {
+  display: block;
+  margin-bottom: 6rpx;
+  color: #171717;
+  font-size: 27rpx;
+  font-weight: 900;
 }
 
 .booking {
   display: flex;
   flex-direction: column;
-  gap: 10rpx;
+  gap: 12rpx;
   margin-bottom: 18rpx;
 }
 
 .booking-title {
+  flex: 1;
+  min-width: 0;
   font-size: 30rpx;
   font-weight: 900;
+  line-height: 1.35;
+}
+
+.booking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 8rpx;
+}
+
+.action-button {
+  min-width: 116rpx;
+}
+
+.action-button--accent {
+  border-color: transparent;
+  background: linear-gradient(135deg, #ffad42, #f47a10);
+  color: #fff;
 }
 
 .target {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 18rpx;
   margin-bottom: 18rpx;
 }
@@ -33,4 +135,26 @@
 .target-name {
   font-size: 29rpx;
   font-weight: 900;
+}
+
+.target-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  margin-top: 10rpx;
+}
+
+.slot-button {
+  width: 100%;
+  padding: 18rpx 20rpx;
+  border-radius: 24rpx;
+  background: #fff7ed;
+  color: #9f5d17;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  font-size: 24rpx;
+  font-weight: 800;
+  text-align: left;
 }

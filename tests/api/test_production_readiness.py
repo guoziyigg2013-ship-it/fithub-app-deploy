@@ -44,6 +44,26 @@ class ProductionReadinessTests(unittest.TestCase):
 
         production_readiness.validate_static_configs(failures, skip_dns=True)
 
+        self.assertTrue(any("AppID" in item and "touristappid" in item for item in failures))
+
+    def test_static_config_rejects_legacy_render_and_tourist_values(self):
+        original_read_text = production_readiness.read_text
+
+        def fake_read_text(path):
+            path = Path(path)
+            if path.name == "project.config.json":
+                return '{"appid": "touristappid"}'
+            if path.name == "config.js" and path.parent.name == "wechat-miniprogram":
+                return 'module.exports = { apiBase: "https://fithub-app-1btg.onrender.com/api" };'
+            return 'window.__FITHUB_CONFIG__ = { apiOrigin: "https://fithub-app-1btg.onrender.com" };'
+
+        production_readiness.read_text = fake_read_text
+        try:
+            failures = []
+            production_readiness.validate_static_configs(failures, skip_dns=True)
+        finally:
+            production_readiness.read_text = original_read_text
+
         self.assertTrue(any("Web apiOrigin" in item and "custom production domain" in item for item in failures))
         self.assertTrue(any("AppID" in item and "touristappid" in item for item in failures))
         self.assertTrue(any("Mini Program apiBase" in item and "custom production domain" in item for item in failures))
