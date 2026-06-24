@@ -78,6 +78,10 @@ class DomesticMigrationStatusTests(unittest.TestCase):
         details = "\n".join(str(item["detail"]) for item in report["items"])
         self.assertIn("onrender.com", details)
         self.assertIn("touristappid", details)
+        next_steps = "\n".join(report["nextSteps"])
+        self.assertIn("cutover:tencent", next_steps)
+        self.assertIn("init:tencent-env", next_steps)
+        self.assertIn("check:tencent-domains", next_steps)
 
     def test_report_passes_ready_static_configs_and_cos_env(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -95,6 +99,7 @@ class DomesticMigrationStatusTests(unittest.TestCase):
 
         self.assertTrue(report["ready"])
         self.assertEqual(report["blockerCount"], 0)
+        self.assertEqual(report["nextSteps"], [])
 
 
 if __name__ == "__main__":

@@ -132,6 +132,33 @@ def validate_live_backend(backend_url: str, *, require_cos_media: bool) -> list[
     ]
 
 
+def build_next_steps(items: list[dict[str, object]]) -> list[str]:
+    blocked_keys = {str(item["key"]) for item in items if not item["ok"]}
+    steps: list[str] = []
+    if {"web_api_origin", "miniapp_api_base", "miniapp_appid"} & blocked_keys:
+        steps.append(
+            "执行 npm run cutover:tencent -- --api-origin https://api.yourdomain.com "
+            "--web-origin https://app.yourdomain.com --miniapp-appid wx你的真实AppID --apply"
+        )
+    if "tencent_env" in blocked_keys:
+        steps.append(
+            "执行 npm run init:tencent-env -- --api-origin https://api.yourdomain.com "
+            "--supabase-url https://你的项目ref.supabase.co --supabase-service-role-key 你的service_role --write"
+        )
+    if {"web_api_origin", "miniapp_api_base", "tencent_env"} & blocked_keys:
+        steps.append(
+            "拿到服务器公网 IP 后执行 npm run check:tencent-domains -- "
+            "--api-origin https://api.yourdomain.com --web-origin https://app.yourdomain.com "
+            "--media-origin https://media.yourdomain.com --expected-ip 你的服务器公网IP --check-acme"
+        )
+    if "live_backend" in blocked_keys:
+        steps.append(
+            "部署完成后执行 npm run check:smoke -- --frontend-url https://app.yourdomain.com/ "
+            "--backend-url https://api.yourdomain.com --expect-frontend-api-origin https://api.yourdomain.com --require-cos-media"
+        )
+    return steps
+
+
 def build_report(
     *,
     root: Path = ROOT,
@@ -152,6 +179,7 @@ def build_report(
         "ready": not blockers,
         "items": items,
         "blockerCount": len(blockers),
+        "nextSteps": build_next_steps(items),
     }
 
 
@@ -167,6 +195,12 @@ def print_markdown(report: dict[str, object]) -> None:
         print("结论：当前配置已满足国内生产切换门槛。")
     else:
         print(f"结论：还有 {report['blockerCount']} 个阻断项，暂时不要提交小程序审核或面向正式用户发布。")
+        next_steps = list(report.get("nextSteps") or [])
+        if next_steps:
+            print("")
+            print("下一步建议：")
+            for index, step in enumerate(next_steps, start=1):
+                print(f"{index}. {step}")
 
 
 def main() -> int:
