@@ -55,12 +55,28 @@ npm run check:production
 
 当前如果还没有备案生产 API 域名，这一步失败是预期的。它的作用是提醒我们：只能继续内部测试，不能提交审核或面向真实用户发布。
 
-拿到正式备案 API 域名和真实小程序 AppID 后，先执行一次配置切换：
+拿到正式备案 API 域名、真实小程序 AppID 和真实 Supabase 生产配置后，先执行一次腾讯云切换预演：
 
 ```bash
-npm run config:production -- \
+npm run cutover:tencent -- \
   --api-origin https://api.yourdomain.com \
-  --miniapp-appid wx你的真实小程序AppID
+  --miniapp-appid wx你的真实小程序AppID \
+  --supabase-url https://你的项目ref.supabase.co \
+  --supabase-service-role-key 你的真实service_role_key \
+  --skip-release
+```
+
+确认 diff、环境摘要、AppID 都正确后，再正式应用并生成腾讯云发布包：
+
+```bash
+npm run cutover:tencent -- \
+  --api-origin https://api.yourdomain.com \
+  --miniapp-appid wx你的真实小程序AppID \
+  --supabase-url https://你的项目ref.supabase.co \
+  --supabase-service-role-key 你的真实service_role_key \
+  --apply \
+  --write-env \
+  --force
 ```
 
 切换后再跑：

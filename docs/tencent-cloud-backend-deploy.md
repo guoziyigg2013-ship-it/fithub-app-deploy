@@ -33,21 +33,40 @@ apiBase: "https://api.yourdomain.com/api"
 5. 用 `scripts/deploy_smoke.py` 做发布后检查。
 6. 用 `scripts/production_readiness.py` 做上架前生产配置检查。
 
-拿到备案 API 域名和真实小程序 AppID 后，不要手工改多个文件，直接执行：
+拿到备案 API 域名、真实小程序 AppID、真实 Supabase Project URL 和 `service_role` 后，不要手工改多个文件。先执行正式切换预演：
 
 ```bash
-python3 scripts/configure_production.py \
+npm run cutover:tencent -- \
   --api-origin https://api.yourdomain.com \
-  --miniapp-appid wx你的真实小程序AppID
+  --miniapp-appid wx你的真实小程序AppID \
+  --supabase-url https://你的项目ref.supabase.co \
+  --supabase-service-role-key 你的真实service_role_key \
+  --skip-release
 ```
 
-这个脚本会同时更新：
+预演通过后，再正式应用：
+
+```bash
+npm run cutover:tencent -- \
+  --api-origin https://api.yourdomain.com \
+  --miniapp-appid wx你的真实小程序AppID \
+  --supabase-url https://你的项目ref.supabase.co \
+  --supabase-service-role-key 你的真实service_role_key \
+  --apply \
+  --write-env \
+  --force
+```
+
+这个总控脚本会同时处理：
 
 - `config.js` 的 `apiOrigin`
 - `wechat-miniprogram/config.js` 的 `apiBase`
 - `wechat-miniprogram/project.config.json` 的 `appid`
+- `deploy/tencent-cloud/.env.production`
+- `deploy/tencent-cloud/nginx-fithub.conf`
+- `dist/fithub-tencent-release-*.tar.gz` 腾讯云发布包
 
-如果只是想先看会改哪些文件，加 `--dry-run`：
+如果只想单独切配置，仍可以使用较低层的脚本：
 
 ```bash
 python3 scripts/configure_production.py \
