@@ -11,6 +11,7 @@ backups/
 dist/
 .env.production
 deploy/tencent-cloud/.env.production
+deploy/tencent-cloud/nginx-fithub.conf
 !deploy/tencent-cloud/.env.production.example
 node_modules/
 playwright-report/

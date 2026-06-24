@@ -522,9 +522,14 @@ npm run release:tencent
 
 ```bash
 tar -xzf fithub-tencent-release-*.tar.gz
-cd fithub-app-deploy/deploy/tencent-cloud
-cp .env.production.example .env.production
-python3 ../../scripts/tencent_cloud_preflight.py
+cd fithub-app-deploy
+python3 scripts/init_tencent_env.py \
+  --api-origin https://api.yourdomain.com \
+  --supabase-url https://你的真实项目ref.supabase.co \
+  --supabase-service-role-key '你的真实service_role_key' \
+  --output deploy/tencent-cloud/.env.production \
+  --nginx-output deploy/tencent-cloud/nginx-fithub.conf
+cd deploy/tencent-cloud
 ./deploy.sh
 ```
 

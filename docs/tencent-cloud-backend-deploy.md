@@ -142,13 +142,30 @@ cd fithub-app-deploy/deploy/tencent-cloud
 cp .env.production.example .env.production
 ```
 
-然后把 `.env.production` 里的域名、Supabase、管理员 token 全部替换为真实值，再启动：
+推荐不要手填 `.env.production`，而是回到仓库根目录用生成器创建：
 
 ```bash
-python3 ../../scripts/tencent_cloud_preflight.py
+cd ../..
+python3 scripts/init_tencent_env.py \
+  --api-origin https://api.yourdomain.com \
+  --supabase-url https://你的真实项目ref.supabase.co \
+  --supabase-service-role-key '你的真实service_role_key' \
+  --output deploy/tencent-cloud/.env.production \
+  --nginx-output deploy/tencent-cloud/nginx-fithub.conf \
+  --print-redacted
+```
+
+生成器会自动创建长随机 `FITHUB_ADMIN_TOKEN` 和 `FITHUB_MEDIA_MAINTENANCE_TOKEN`。如果文件已存在，需要明确加 `--force` 才会覆盖。
+
+然后启动：
+
+```bash
+cd deploy/tencent-cloud
 chmod +x deploy.sh
 ./deploy.sh
 ```
+
+`deploy.sh` 会在启动前自动执行 `tencent_cloud_preflight.py`，如果发现占位域名、假 key、短 token 或 Docker 配置问题，会直接停止。
 
 如果你用 Nginx 或腾讯云负载均衡做 HTTPS，反向代理到：
 
@@ -160,6 +177,12 @@ Nginx 可以参考：
 
 ```text
 deploy/tencent-cloud/nginx-fithub.conf.example
+```
+
+如果使用上面的 `--nginx-output`，会自动生成已替换域名的：
+
+```text
+deploy/tencent-cloud/nginx-fithub.conf
 ```
 
 绑定域名后，确认：

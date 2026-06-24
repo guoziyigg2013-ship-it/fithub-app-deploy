@@ -26,6 +26,7 @@ else
 fi
 
 cd "$SCRIPT_DIR"
+python3 "$REPO_ROOT/scripts/tencent_cloud_preflight.py" --env-file "$ENV_FILE" --compose-file "$SCRIPT_DIR/docker-compose.yml"
 "${COMPOSE[@]}" up -d --build
 
 echo "Waiting for FitHub API health ..."

@@ -7,6 +7,7 @@
     "check:preflight": "python3 scripts/preflight_check.py",
     "check:production": "python3 scripts/production_readiness.py",
     "config:production": "python3 scripts/configure_production.py",
+    "init:tencent-env": "python3 scripts/init_tencent_env.py",
     "release:tencent": "python3 scripts/build_tencent_release.py",
     "check:tencent": "python3 scripts/tencent_cloud_preflight.py",
     "check:smoke": "python3 scripts/deploy_smoke.py",
