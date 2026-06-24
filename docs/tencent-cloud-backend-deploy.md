@@ -279,6 +279,18 @@ python3 scripts/production_readiness.py --backend-url https://api.yourdomain.com
 python3 scripts/deploy_smoke.py --backend-url https://api.yourdomain.com
 ```
 
+最后跑一次写入链路验收，确认不是“页面能打开但用户数据不稳”：
+
+```bash
+python3 scripts/production_write_acceptance.py \
+  --backend-url https://api.yourdomain.com \
+  --phone 你的内部验收手机号 \
+  --verification-code 注册验证码 \
+  --login-verification-code 登录验证码
+```
+
+如果后端仍是开发验证码模式，脚本会自动使用 `debugCode`。正式生产短信模式下，需要输入验收手机号收到的真实验证码。
+
 如果 `production_readiness.py` 仍提示 `onrender.com`、`pages.dev`、`touristappid` 或 Supabase `NXDOMAIN`，说明当前仍是试运行配置，不要提交微信审核。
 
 也可以直接用 npm 命令：

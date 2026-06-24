@@ -85,6 +85,18 @@ npm run cutover:tencent -- \
 npm run check:production
 ```
 
+腾讯云后端正式上线后，再用专门的验收手机号跑一次写入链路验收：
+
+```bash
+npm run check:production-write -- \
+  --backend-url https://api.yourdomain.com \
+  --phone 你的内部验收手机号 \
+  --verification-code 注册验证码 \
+  --login-verification-code 登录验证码
+```
+
+这一步会验证：验证码注册/登录、关注、发动态、点赞、收藏、评论、私信、预约，以及重新登录后这些数据是否仍存在。只用内部验收手机号，不要拿真实客户手机号做这一步。
+
 如果还没正式切换，只想预览会改什么：
 
 ```bash

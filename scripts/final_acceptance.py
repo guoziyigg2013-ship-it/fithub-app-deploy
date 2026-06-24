@@ -34,6 +34,10 @@ def main() -> int:
     parser.add_argument("--skip-media-report", action="store_true", help="Skip read-only media storage report.")
     parser.add_argument("--skip-production-snapshot", action="store_true", help="Skip admin-token production snapshot.")
     parser.add_argument("--snapshot-baseline", default="", help="Compare production metrics with this previous snapshot file.")
+    parser.add_argument("--run-production-write", action="store_true", help="Run write-path production acceptance with a test phone.")
+    parser.add_argument("--production-write-phone", default="", help="Dedicated test phone for production write acceptance.")
+    parser.add_argument("--production-write-code", default="", help="Register SMS code for production write acceptance.")
+    parser.add_argument("--production-write-login-code", default="", help="Fresh-login SMS code for production write acceptance.")
     args = parser.parse_args()
 
     steps: list[tuple[str, list[str]]] = [
@@ -53,6 +57,17 @@ def main() -> int:
         if args.snapshot_baseline:
             snapshot_cmd.extend(["--compare", args.snapshot_baseline])
         steps.append(("Production data snapshot", snapshot_cmd))
+    if args.run_production_write:
+        write_cmd = ["python3", "scripts/production_write_acceptance.py"]
+        if args.production_backend_url:
+            write_cmd.extend(["--backend-url", args.production_backend_url])
+        if args.production_write_phone:
+            write_cmd.extend(["--phone", args.production_write_phone])
+        if args.production_write_code:
+            write_cmd.extend(["--verification-code", args.production_write_code])
+        if args.production_write_login_code:
+            write_cmd.extend(["--login-verification-code", args.production_write_login_code])
+        steps.append(("Production write-path acceptance", write_cmd))
 
     print("FitHub final acceptance")
     print(f"Workspace: {ROOT}")
