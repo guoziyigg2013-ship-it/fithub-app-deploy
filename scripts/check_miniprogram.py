@@ -50,6 +50,30 @@ def check_js_files() -> int:
     return 0
 
 
+def validate_discover_instant_interactions(discover_js: str) -> list[str]:
+    required_tokens = [
+        "applyOptimisticPostMutation",
+        "mergeConfirmedPost",
+        "desiredFollowing: true",
+        "compact: true",
+        "favoritedByCurrentActor",
+    ]
+    missing = [token for token in required_tokens if token not in discover_js]
+    for action_name in ["like", "favorite"]:
+        match = re.search(rf"async\s+{action_name}\([^)]*\)\s*\{{(?P<body>.*?)\n\s*\}},", discover_js, re.S)
+        if match and "this.load()" in match.group("body"):
+            missing.append(f"{action_name} must not call this.load() after tap")
+    return missing
+
+
+def check_instant_interactions() -> int:
+    discover_js = (MINIAPP_ROOT / "pages" / "discover" / "index.js").read_text(encoding="utf-8")
+    missing = validate_discover_instant_interactions(discover_js)
+    if missing:
+        return fail("Mini program discover interactions must use optimistic updates: " + ", ".join(missing))
+    return 0
+
+
 def read_config_api_base() -> str:
     config_text = (MINIAPP_ROOT / "config.js").read_text(encoding="utf-8")
     match = re.search(r"apiBase\s*:\s*[\"']([^\"']+)[\"']", config_text)
@@ -103,7 +127,7 @@ def main() -> int:
 
     if not MINIAPP_ROOT.exists():
         return fail("wechat-miniprogram directory does not exist.")
-    for check in [check_json_files, check_pages, check_js_files]:
+    for check in [check_json_files, check_pages, check_js_files, check_instant_interactions]:
         result = check()
         if result:
             return result

@@ -104,3 +104,14 @@
   font-size: 26rpx;
   font-weight: 800;
 }
+
+.action-row .mini-action {
+  min-width: 96rpx;
+  color: #8a7968;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.action-row .mini-action.is-active {
+  color: #f47a10;
+  transform: translateY(-1rpx);
+}

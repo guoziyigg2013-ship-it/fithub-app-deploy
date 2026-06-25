@@ -8206,7 +8206,7 @@ async function updateBookingStatus(bookingId, status) {
   renderPage();
 }
 
-function renderPersonalShortcutTile(label, sublabel, icon, attrs = "", options = {}) {
+function renderPersonalShortcutTile(label, icon, attrs = "", options = {}) {
   const badgeCount = Math.max(0, Number(options.badgeCount || 0));
   const badge = badgeCount
     ? `<span class="account-tile-badge">${escapeHtml(badgeCount > 99 ? "99+" : String(badgeCount))}</span>`
@@ -9585,24 +9585,24 @@ function renderPersonalDashboardPage(profile, managedProfiles) {
   const shortcutTiles =
     profile.role === "enthusiast"
       ? [
-          renderPersonalShortcutTile("账户", "资料与安全", "账", 'data-open-my-feature="account"'),
-          renderPersonalShortcutTile("商城", "器材与精选商品", "商", 'data-open-my-feature="shop"'),
-          renderPersonalShortcutTile("消息", `${inboxCount} 条互动`, "信", 'data-open-my-feature="messages"', { badgeCount: inboxCount }),
-          renderPersonalShortcutTile("订单", "预约记录", "单", 'data-open-my-feature="orders"'),
-          renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
-          renderPersonalShortcutTile("收藏", `${getFavoritedPostEntries().length} 条`, "藏", 'data-open-my-feature="collections"'),
-          renderPersonalShortcutTile("积分", `${getProfilePoints(profile, relatedBookings)} 分`, "分", 'data-open-my-feature="points"'),
-          renderPersonalShortcutTile("健康", "数据中心", "健", 'data-open-my-feature="health"')
+          renderPersonalShortcutTile("账户", "账", 'data-open-my-feature="account"'),
+          renderPersonalShortcutTile("商城", "商", 'data-open-my-feature="shop"'),
+          renderPersonalShortcutTile("消息", "信", 'data-open-my-feature="messages"', { badgeCount: inboxCount }),
+          renderPersonalShortcutTile("订单", "单", 'data-open-my-feature="orders"'),
+          renderPersonalShortcutTile("关注", "关", 'data-open-my-feature="favorites"'),
+          renderPersonalShortcutTile("收藏", "藏", 'data-open-my-feature="collections"'),
+          renderPersonalShortcutTile("积分", "分", 'data-open-my-feature="points"'),
+          renderPersonalShortcutTile("健康", "健", 'data-open-my-feature="health"')
         ]
       : [
-          renderPersonalShortcutTile("账户", "资料与主页", "账", 'data-open-my-feature="account"'),
-          renderPersonalShortcutTile("商城", "器材、周边与门店商品", "商", 'data-open-my-feature="shop"'),
-          renderPersonalShortcutTile("消息", `${inboxCount} 条互动`, "信", 'data-open-my-feature="messages"', { badgeCount: inboxCount }),
-          renderPersonalShortcutTile("订单", `别人给我的 ${relatedBookings.length} 单`, "单", 'data-open-my-feature="orders"'),
-          renderPersonalShortcutTile("关注", "我关注的", "关", 'data-open-my-feature="favorites"'),
-          renderPersonalShortcutTile("收藏", `${getFavoritedPostEntries().length} 条`, "藏", 'data-open-my-feature="collections"'),
-          renderPersonalShortcutTile("评分", profile.ratingCount ? `${getRatingDisplay(profile)} 分` : "等待评分", "评", 'data-open-my-feature="reviews"'),
-          renderPersonalShortcutTile("健康", "数据中心", "健", 'data-open-my-feature="health"')
+          renderPersonalShortcutTile("账户", "账", 'data-open-my-feature="account"'),
+          renderPersonalShortcutTile("商城", "商", 'data-open-my-feature="shop"'),
+          renderPersonalShortcutTile("消息", "信", 'data-open-my-feature="messages"', { badgeCount: inboxCount }),
+          renderPersonalShortcutTile("订单", "单", 'data-open-my-feature="orders"'),
+          renderPersonalShortcutTile("关注", "关", 'data-open-my-feature="favorites"'),
+          renderPersonalShortcutTile("收藏", "藏", 'data-open-my-feature="collections"'),
+          renderPersonalShortcutTile("评分", "评", 'data-open-my-feature="reviews"'),
+          renderPersonalShortcutTile("健康", "健", 'data-open-my-feature="health"')
         ];
   const roleSummary =
     profile.role === "enthusiast"

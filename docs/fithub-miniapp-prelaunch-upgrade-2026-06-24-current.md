@@ -186,7 +186,7 @@ npm run check:prelaunch
 ## 3. 上架前 P2 优化
 
 - 绑定备案自定义域名，避免长期依赖腾讯云默认域名。
-- 统一 UI 状态：按钮点击即刻反馈，所有提交动作有 loading/成功/失败态。
+- 统一 UI 状态：按钮点击即刻反馈，所有提交动作有 loading/成功/失败态；小程序探索页的推荐关注、点赞和收藏已改为即时反馈，并纳入 `check_miniprogram.py` 与 `check:prelaunch` 库存检查。
 - 加生产监控：已接入 `/api/monitor/event`、`/api/admin/monitor`，覆盖慢接口、失败接口、前端错误、媒体上传失败率，并纳入 `check:prelaunch` / `check:trial` 门禁。
 - 加发布门禁：每次上线自动跑 smoke、生产写入验收、小程序脚手架检查。
 - 做数据备份：`plan:tencent-launch` 已输出每日生产快照 crontab，默认保留 30 天且至少保留最新 20 份。

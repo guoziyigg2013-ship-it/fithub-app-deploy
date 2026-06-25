@@ -76,7 +76,7 @@ def write_feature_inventory(root: Path, *, appid: str = "touristappid") -> None:
         ),
     )
     write(root / "scripts" / "production_snapshot.py", "write_manifest\nprune_snapshots")
-    write(root / "scripts" / "check_miniprogram.py")
+    write(root / "scripts" / "check_miniprogram.py", "validate_discover_instant_interactions")
     write(root / "scripts" / "wechat_domain_manifest.py")
     write(root / "scripts" / "deploy_tencent_static.py", "admin.html\nadmin.js")
     write(root / "scripts" / "tencent_launch_plan.py", "wechatDomains\nmanualChecks\nrequest 合法域名\ndownloadFile 合法域名\n每日生产快照计划")
@@ -118,6 +118,7 @@ def write_feature_inventory(root: Path, *, appid: str = "touristappid") -> None:
         root / "tests" / "api" / "test_monitoring.py",
         "monitor_event_endpoint_records_sanitized_event_and_requires_admin_token\nmonitor_events_are_capped_and_classified",
     )
+    write(root / "tests" / "api" / "test_check_miniprogram.py", "discover_instant_interactions_rejects_full_reload_after_tap")
     for rel in ["admin.html", "admin.css", "admin.js"]:
         write(root / rel)
     for rel in [
@@ -127,6 +128,10 @@ def write_feature_inventory(root: Path, *, appid: str = "touristappid") -> None:
         "wechat-miniprogram/pages/me/index.js",
     ]:
         write(root / rel)
+    write(
+        root / "wechat-miniprogram/pages/discover/index.js",
+        "applyOptimisticPostMutation\nmergeConfirmedPost\ndesiredFollowing: true\nfavoritedByCurrentActor",
+    )
     write(root / "wechat-miniprogram/pages/publish/index.js", "chooseMedia\n/media/upload-file")
     write(root / "wechat-miniprogram/utils/api.js", "wx.uploadFile")
 

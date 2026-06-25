@@ -712,3 +712,20 @@ tests/
   - 新增 API 监控测试：
     - `/Users/guoziyi/Documents/gpt/fithub-app-deploy/tests/api/test_monitoring.py`
   - `check:prelaunch` 和 `check:trial` 门禁已纳入生产监控检查，避免后续升级误删监控链路
+
+第二十七步当前已落地：
+
+- 小程序探索页即时反馈：
+  - 推荐关注点击后会先从推荐区移除，并把对方动态即时并入关注动态，不再等待整页 `bootstrap`
+  - 点赞和收藏改为本地乐观更新，按钮状态和数量先变化，服务端失败才回滚
+  - 服务端确认使用 compact 小包合并当前动态，不再因为整页重拉导致真机闪动
+- 网页“我的功能”宫格继续精简：
+  - 功能格只保留图标和主标题，去掉“资料与安全、预约记录、数据中心”等说明小字
+  - 未读消息数字仍保留在消息图标角标中，不影响提醒能力
+- 回归保护：
+  - `check_miniprogram.py` 新增小程序探索页即时反馈静态门禁
+  - 新增 API 单元测试，确保小程序点赞/收藏不会退回点击后整页重拉
+  - 最终验收 E2E 增加“我的功能”副标题不可见断言，避免 UI 简洁要求回退
+- 缓存更新：
+  - 前端静态资源版本升级到 `20260626-miniapp-instant`
+  - Service Worker 缓存升级到 `fithub-shell-v38-miniapp-instant`

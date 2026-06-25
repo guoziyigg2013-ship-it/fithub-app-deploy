@@ -39,8 +39,12 @@
     </view>
     <text class="muted">{{item.post.meta}}</text>
     <view class="action-row">
-      <button data-id="{{item.post.id}}" bindtap="like">♡ {{item.post.likeCount || 0}}</button>
-      <button data-id="{{item.post.id}}" bindtap="favorite">☆ {{item.post.favoriteCount || 0}}</button>
+      <button class="mini-action {{item.post.likedByCurrentActor ? 'is-active' : ''}}" data-id="{{item.post.id}}" bindtap="like">
+        {{item.post.likedByCurrentActor ? '♥' : '♡'}} {{item.post.likeCount || 0}}
+      </button>
+      <button class="mini-action {{item.post.favoritedByCurrentActor ? 'is-active' : ''}}" data-id="{{item.post.id}}" bindtap="favorite">
+        {{item.post.favoritedByCurrentActor ? '★' : '☆'}} {{item.post.favoriteCount || 0}}
+      </button>
       <button data-id="{{item.post.id}}" bindtap="report">举报</button>
     </view>
   </view>

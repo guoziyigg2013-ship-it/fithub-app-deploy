@@ -181,6 +181,14 @@ def build_feature_phases(root: Path) -> list[dict[str, Any]]:
                         check_exists(root, "scripts/wechat_domain_manifest.py"),
                     ],
                 ),
+                feature_check(
+                    "小程序关注、点赞和收藏即时反馈",
+                    [
+                        check_file(root, "wechat-miniprogram/pages/discover/index.js", ["applyOptimisticPostMutation", "mergeConfirmedPost", "desiredFollowing: true", "favoritedByCurrentActor"]),
+                        check_file(root, "scripts/check_miniprogram.py", ["validate_discover_instant_interactions"]),
+                        check_file(root, "tests/api/test_check_miniprogram.py", ["discover_instant_interactions_rejects_full_reload_after_tap"]),
+                    ],
+                ),
             ],
         ),
         phase(

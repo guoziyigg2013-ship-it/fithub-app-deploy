@@ -71,4 +71,8 @@ test("最终验收：核心页面切换和高频互动保持即时反馈", async
   await openMyPage(page);
   await expectLastRenderUnder(page, "profile", 1600);
   await expect(page.getByText("我的功能")).toBeVisible();
+  await expect(page.getByText("资料与安全")).toHaveCount(0);
+  await expect(page.getByText("器材与精选商品")).toHaveCount(0);
+  await expect(page.getByText("预约记录")).toHaveCount(0);
+  await expect(page.getByText("数据中心")).toHaveCount(0);
 });
