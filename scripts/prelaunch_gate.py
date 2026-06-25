@@ -204,8 +204,8 @@ def build_feature_phases(root: Path) -> list[dict[str, Any]]:
                 feature_check(
                     "举报、审核队列与管理员接口",
                     [
-                        check_file(root, "server.py", ["/report/create", "/admin/moderation", "/admin/moderation/resolve"]),
-                        check_file(root, "tests/api/test_content.py", ["risky_post_comment_and_message_are_queued_for_moderation", "user_report_is_persisted_and_admin_endpoint_is_protected"]),
+                        check_file(root, "server.py", ["/report/create", "/admin/moderation", "/admin/moderation/resolve", "review_media_safety", "media-upload"]),
+                        check_file(root, "tests/api/test_content.py", ["risky_post_comment_and_message_are_queued_for_moderation", "risky_media_upload_is_queued_for_moderation", "user_report_is_persisted_and_admin_endpoint_is_protected"]),
                     ],
                 ),
                 feature_check(

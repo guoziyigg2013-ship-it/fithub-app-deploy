@@ -54,6 +54,8 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
                 "/report/create",
                 "/admin/moderation",
                 "/admin/moderation/resolve",
+                "review_media_safety",
+                "media-upload",
                 "/block/toggle",
                 "/account/delete-request",
                 "/monitor/event",
@@ -108,6 +110,7 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
                 "video_post_persists_thumbnail",
                 "like_favorite_comment_and_notifications_surface",
                 "risky_post_comment_and_message_are_queued_for_moderation",
+                "risky_media_upload_is_queued_for_moderation",
                 "user_report_is_persisted_and_admin_endpoint_is_protected",
                 "private_message_does_not_require_follow_but_respects_block",
             ]

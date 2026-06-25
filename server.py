@@ -117,6 +117,7 @@ MEDIA_MULTIPART_LIMIT_BYTES = int(
     os.getenv("FITHUB_MULTIPART_UPLOAD_LIMIT_BYTES")
     or str(max(MEDIA_IMAGE_LIMIT_BYTES, MEDIA_VIDEO_LIMIT_BYTES) + MEDIA_THUMB_LIMIT_BYTES + 1024 * 1024)
 )
+MEDIA_SAFETY_PROVIDER = (os.getenv("FITHUB_MEDIA_SAFETY_PROVIDER") or "local").strip().lower()
 MEDIA_MAINTENANCE_TOKEN = (os.getenv("FITHUB_MEDIA_MAINTENANCE_TOKEN") or "").strip()
 ADMIN_TOKEN = (os.getenv("FITHUB_ADMIN_TOKEN") or MEDIA_MAINTENANCE_TOKEN).strip()
 PUBLIC_API_ORIGIN = (os.getenv("FITHUB_PUBLIC_API_ORIGIN") or "").strip().rstrip("/")
@@ -1232,6 +1233,7 @@ def upload_media_asset(data_url, *, file_name, category, asset_type, force_inlin
 
     if force_inline or (not cos_media_storage_enabled() and not supabase_media_storage_enabled()):
         return {
+            "id": f"media-{uuid.uuid4().hex[:12]}",
             "type": asset_type,
             "url": data_url,
             "name": sanitize_file_name(file_name, content_type),
@@ -1246,6 +1248,7 @@ def upload_media_asset(data_url, *, file_name, category, asset_type, force_inlin
 
     if cos_media_storage_enabled():
         return {
+            "id": f"media-{uuid.uuid4().hex[:12]}",
             "type": asset_type,
             "url": upload_cos_media_asset(binary, object_path=object_path, content_type=content_type),
             "name": sanitized_name,
@@ -1270,6 +1273,7 @@ def upload_media_asset(data_url, *, file_name, category, asset_type, force_inlin
         expect_json=True,
     )
     return {
+        "id": f"media-{uuid.uuid4().hex[:12]}",
         "type": asset_type,
         "url": build_supabase_public_media_url(object_path),
         "name": sanitized_name,
@@ -1290,6 +1294,7 @@ def store_uploaded_media_from_data_url(
     session,
     data_url,
     *,
+    state=None,
     file_name,
     category,
     asset_type,
@@ -1317,6 +1322,7 @@ def store_uploaded_media_from_data_url(
             media["thumbnailStorageProvider"] = thumb_media.get("storageProvider", "")
             media["thumbnailStoragePath"] = thumb_media.get("storagePath", "")
             media["thumbnailSizeBytes"] = thumb_media.get("sizeBytes", 0)
+        attach_media_safety_review(state, session, media, file_name=file_name, category=category)
         if session:
             remember_session_draft_media(session, media)
         return {"media": media, "config": runtime_config()}
@@ -1344,6 +1350,7 @@ def store_uploaded_media_from_data_url(
             fallback["thumbnailStorageProvider"] = thumb_fallback.get("storageProvider", "")
             fallback["thumbnailStoragePath"] = thumb_fallback.get("storagePath", "")
             fallback["thumbnailSizeBytes"] = thumb_fallback.get("sizeBytes", 0)
+        attach_media_safety_review(state, session, fallback, file_name=file_name, category=category)
         if session:
             remember_session_draft_media(session, fallback)
         return {"media": fallback, "config": runtime_config()}
@@ -1849,6 +1856,7 @@ def storage_runtime_status(state=None):
         },
         "media": {
             "storageProvider": active_media_storage_provider() or "inline",
+            "safetyProvider": active_media_safety_provider(),
             "bucket": active_media_bucket(),
             "imageLimitBytes": MEDIA_IMAGE_LIMIT_BYTES,
             "videoLimitBytes": MEDIA_VIDEO_LIMIT_BYTES,
@@ -5410,6 +5418,19 @@ CONTENT_REVIEW_KEYWORDS = {
     "加微信": "站外导流风险",
 }
 
+MEDIA_REVIEW_KEYWORDS = {
+    "unsafe": "疑似违规媒体",
+    "illegal": "疑似违规媒体",
+    "adult": "成人内容风险",
+    "porn": "成人内容风险",
+    "violence": "暴力内容风险",
+    "weapon": "暴力内容风险",
+    "违规": "疑似违规媒体",
+    "色情": "成人内容风险",
+    "暴力": "暴力内容风险",
+    "广告": "广告营销风险",
+}
+
 
 def normalize_moderation_text(text):
     return re.sub(r"\s+", "", str(text or "").strip().lower())
@@ -5429,6 +5450,75 @@ def review_text_content(text, source=""):
         "source": source,
         "checkedAt": iso_at(),
     }
+
+
+def active_media_safety_provider():
+    provider = MEDIA_SAFETY_PROVIDER or "local"
+    if provider in {"off", "disabled", "none"}:
+        return "disabled"
+    return provider
+
+
+def review_media_safety(media, *, file_name="", category="", source="media-upload"):
+    provider = active_media_safety_provider()
+    flags = []
+    name = str(file_name or (media or {}).get("name") or "")
+    content_type = str((media or {}).get("contentType") or "")
+    asset_type = str((media or {}).get("type") or "")
+    size_bytes = int((media or {}).get("sizeBytes") or 0)
+    review_text = normalize_moderation_text(" ".join([name, category, content_type, asset_type]))
+    if provider == "disabled":
+        return {
+            "status": "skipped",
+            "provider": provider,
+            "flags": [],
+            "source": source,
+            "checkedAt": iso_at(),
+            "requiresManualReview": False,
+        }
+    for keyword, label in MEDIA_REVIEW_KEYWORDS.items():
+        if normalize_moderation_text(keyword) in review_text and label not in flags:
+            flags.append(label)
+    if asset_type == "video" and not content_type.startswith("video/"):
+        flags.append("视频格式异常")
+    if asset_type == "image" and not content_type.startswith("image/"):
+        flags.append("图片格式异常")
+    if size_bytes <= 0:
+        flags.append("媒体文件为空")
+    if size_bytes > (MEDIA_VIDEO_LIMIT_BYTES if asset_type == "video" else MEDIA_IMAGE_LIMIT_BYTES):
+        flags.append("媒体文件过大")
+    return {
+        "status": "pending_review" if flags else "approved",
+        "provider": provider,
+        "flags": flags,
+        "source": source,
+        "checkedAt": iso_at(),
+        "requiresManualReview": bool(flags),
+    }
+
+
+def attach_media_safety_review(state, session, media, *, file_name="", category="", source="media-upload"):
+    if not isinstance(media, dict):
+        return None
+    media.setdefault("id", f"media-{uuid.uuid4().hex[:12]}")
+    review = review_media_safety(media, file_name=file_name, category=category, source=source)
+    media["safety"] = review
+    if review.get("requiresManualReview") and isinstance(state, dict):
+        owner_profile_id = ""
+        if isinstance(session, dict):
+            owner_profile_id = session.get("currentActorProfileId") or ""
+        queue_moderation_item(
+            state,
+            {
+                "type": "media",
+                "targetId": media.get("id"),
+                "targetOwnerProfileId": owner_profile_id,
+                "source": "media-upload",
+                "flags": review.get("flags", []),
+                "excerpt": f"{media.get('name') or file_name} · {category or 'media'}",
+            },
+        )
+    return review
 
 
 def queue_moderation_item(state, item):
@@ -6610,6 +6700,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
             return store_uploaded_media_from_data_url(
                 session,
                 bytes_to_data_url(upload.get("body") or b"", content_type),
+                state=state,
                 file_name=file_name,
                 category=category,
                 asset_type=asset_type,
@@ -7254,6 +7345,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 return store_uploaded_media_from_data_url(
                     session,
                     payload.get("dataUrl"),
+                    state=state,
                     file_name=payload.get("fileName") or "upload",
                     category=str(payload.get("category") or "posts"),
                     asset_type=str(payload.get("assetType") or "image"),

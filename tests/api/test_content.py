@@ -23,6 +23,7 @@ class ContentRegressionTests(FitHubApiTestCase):
         self.assertEqual(media.get("name"), "tiny-upload.png")
         self.assertEqual(media.get("contentType"), "image/png")
         self.assertIn(media.get("storageProvider"), {"inline", "supabase"})
+        self.assertEqual((media.get("safety") or {}).get("status"), "approved")
         self.assertTrue(str(media.get("url") or "").startswith(("data:image/png", "https://")))
 
     def test_media_upload_returns_reusable_asset_payload(self):
@@ -49,6 +50,30 @@ class ContentRegressionTests(FitHubApiTestCase):
         self.assertEqual(media.get("thumbnailName"), "tiny-thumb.png")
         deleted = client.delete_media([media])
         self.assertIn("deletedPaths", deleted)
+
+    def test_risky_media_upload_is_queued_for_moderation(self):
+        client = self.make_client()
+        tiny_png = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wn0n8kAAAAASUVORK5CYII="
+        )
+        payload = client.upload_media(
+            tiny_png,
+            file_name="unsafe-adult-demo.png",
+            asset_type="image",
+            category="posts",
+        )
+        media = payload.get("media") or {}
+
+        self.assertEqual(media.get("type"), "image")
+        self.assertEqual((media.get("safety") or {}).get("status"), "pending_review")
+        self.assertIn("成人内容风险", (media.get("safety") or {}).get("flags") or [])
+
+        dashboard = client.admin_moderation()
+        queued = next(item for item in dashboard["moderationQueue"] if item.get("targetId") == media.get("id"))
+        self.assertEqual(queued["type"], "media")
+        self.assertEqual(queued["source"], "media-upload")
+        self.assertIn("成人内容风险", queued.get("flags") or [])
 
     def test_post_persists_media_thumbnail_metadata(self):
         phone = self.make_phone(42)
