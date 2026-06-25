@@ -364,6 +364,18 @@ class ApiClient:
             },
         )
 
+    def moderate_content(self, target_id, status="hidden", target_type="post", token="test-maintenance-token", reason="API 测试隐藏"):
+        return self.post(
+            "/api/admin/content/moderation",
+            {
+                "token": token,
+                "targetType": target_type,
+                "targetId": target_id,
+                "status": status,
+                "reason": reason,
+            },
+        )
+
 
 class FitHubApiTestCase(unittest.TestCase):
     @classmethod

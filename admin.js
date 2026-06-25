@@ -18,11 +18,13 @@ const elements = {
   queue: document.getElementById("queueList"),
   deletions: document.getElementById("deletionList"),
   suspended: document.getElementById("suspendedList"),
+  hiddenPosts: document.getElementById("hiddenPostList"),
   actions: document.getElementById("actionsList"),
   reportCount: document.getElementById("reportCount"),
   queueCount: document.getElementById("queueCount"),
   deletionCount: document.getElementById("deletionCount"),
-  suspendedCount: document.getElementById("suspendedCount")
+  suspendedCount: document.getElementById("suspendedCount"),
+  hiddenPostCount: document.getElementById("hiddenPostCount")
 };
 
 function escapeHtml(value) {
@@ -83,9 +85,11 @@ function itemCard(item, kind, actions = true) {
   const owner = profileName(ownerProfile);
   const ownerId = ownerProfile && ownerProfile.id;
   const ownerSuspended = (ownerProfile && ownerProfile.moderationStatus) === "suspended";
+  const targetType = item.targetType || item.type || "";
+  const targetHidden = item.targetModerationStatus === "hidden";
   const reporter = profileName(item.reporterProfile);
   const meta = [
-    item.targetType || item.type || kind,
+    targetType || kind,
     item.targetId ? `ID ${item.targetId}` : "",
     itemTime(item)
   ].filter(Boolean).join(" · ");
@@ -111,6 +115,11 @@ function itemCard(item, kind, actions = true) {
                   ? `<button class="${ownerSuspended ? "secondary" : "danger"}" type="button" data-profile-moderation="${escapeHtml(ownerId)}" data-status="${ownerSuspended ? "active" : "suspended"}">${ownerSuspended ? "解除限制" : "限制作者"}</button>`
                   : ""
               }
+              ${
+                targetType === "post" && item.targetId
+                  ? `<button class="${targetHidden ? "secondary" : "danger"}" type="button" data-content-moderation="${escapeHtml(item.targetId)}" data-target-type="post" data-status="${targetHidden ? "active" : "hidden"}">${targetHidden ? "恢复动态" : "隐藏动态"}</button>`
+                  : ""
+              }
             </div>`
           : ""
       }
@@ -132,6 +141,7 @@ function renderSummary(summary) {
     ["待审核内容", summary.pendingReview || 0],
     ["注销申请", summary.pendingDeletionRequests || 0],
     ["限制账号", summary.suspendedProfiles || 0],
+    ["隐藏内容", summary.hiddenPosts || 0],
     ["历史处理", (state.dashboard.adminActions || []).length]
   ];
   elements.summary.innerHTML = cards
@@ -154,6 +164,25 @@ function profileCard(profile) {
       <p class="item-excerpt">${escapeHtml(reason)}</p>
       <div class="item-actions">
         <button class="secondary" type="button" data-profile-moderation="${escapeHtml(profile.id)}" data-status="active">解除限制</button>
+      </div>
+    </article>
+  `;
+}
+
+function hiddenPostCard(post) {
+  const author = post.authorProfile || {};
+  return `
+    <article class="ops-item" data-post-id="${escapeHtml(post.id)}">
+      <div class="item-top">
+        <div>
+          <div class="item-title">${escapeHtml(author.name || "平台用户")}</div>
+          <div class="item-meta">${escapeHtml(post.meta || "动态")} · ${escapeHtml(post.hiddenAt || post.createdAt || "")}</div>
+        </div>
+        <span class="item-kind">已隐藏</span>
+      </div>
+      <p class="item-excerpt">${escapeHtml(post.content || post.hiddenReason || "已隐藏内容")}</p>
+      <div class="item-actions">
+        <button class="secondary" type="button" data-content-moderation="${escapeHtml(post.id)}" data-target-type="post" data-status="active">恢复动态</button>
       </div>
     </article>
   `;
@@ -192,17 +221,22 @@ function renderDashboard(payload) {
   const queue = openItems(payload.moderationQueue || [], "pending");
   const deletions = openItems(payload.deletionRequests || [], "pending");
   const suspendedProfiles = payload.suspendedProfiles || [];
+  const hiddenPosts = payload.hiddenPosts || [];
   renderSummary(payload.summary || {});
   elements.reportCount.textContent = reports.length;
   elements.queueCount.textContent = queue.length;
   elements.deletionCount.textContent = deletions.length;
   elements.suspendedCount.textContent = suspendedProfiles.length;
+  elements.hiddenPostCount.textContent = hiddenPosts.length;
   renderList(elements.reports, reports, "report", "暂时没有用户举报。");
   renderList(elements.queue, queue, "queue", "暂时没有待审核内容。");
   renderList(elements.deletions, deletions, "deletion", "暂时没有账号注销申请。");
   elements.suspended.innerHTML = suspendedProfiles.length
     ? suspendedProfiles.map(profileCard).join("")
     : emptyState("暂时没有被限制的账号。");
+  elements.hiddenPosts.innerHTML = hiddenPosts.length
+    ? hiddenPosts.map(hiddenPostCard).join("")
+    : emptyState("暂时没有被隐藏的内容。");
   renderActions(payload.adminActions || []);
   elements.layout.hidden = false;
 }
@@ -266,6 +300,31 @@ async function moderateProfile(profileId, status, button) {
   }
 }
 
+async function moderateContent(targetType, targetId, status, button) {
+  const nextStatus = status === "hidden" ? "hidden" : "active";
+  if (button) {
+    button.disabled = true;
+    button.textContent = nextStatus === "hidden" ? "隐藏中..." : "恢复中...";
+  }
+  setStatus(nextStatus === "hidden" ? "正在隐藏这条动态..." : "正在恢复这条动态...");
+  try {
+    const payload = await requestAdmin("/admin/content/moderation", {
+      method: "POST",
+      body: JSON.stringify({
+        targetType,
+        targetId,
+        status: nextStatus,
+        reason: nextStatus === "hidden" ? "运营后台隐藏" : "运营后台恢复"
+      })
+    });
+    renderDashboard(payload);
+    setStatus(nextStatus === "hidden" ? "已隐藏这条动态。" : "已恢复这条动态。");
+  } catch (error) {
+    setStatus(error.message || "内容状态更新失败，请重试。", true);
+    if (button) button.disabled = false;
+  }
+}
+
 elements.token.value = state.token;
 elements.load.addEventListener("click", loadDashboard);
 document.addEventListener("click", (event) => {
@@ -275,8 +334,18 @@ document.addEventListener("click", (event) => {
     return;
   }
   const profileButton = event.target.closest("[data-profile-moderation]");
-  if (!profileButton) return;
-  moderateProfile(profileButton.dataset.profileModeration, profileButton.dataset.status, profileButton);
+  if (profileButton) {
+    moderateProfile(profileButton.dataset.profileModeration, profileButton.dataset.status, profileButton);
+    return;
+  }
+  const contentButton = event.target.closest("[data-content-moderation]");
+  if (!contentButton) return;
+  moderateContent(
+    contentButton.dataset.targetType || "post",
+    contentButton.dataset.contentModeration,
+    contentButton.dataset.status,
+    contentButton
+  );
 });
 
 if (state.token) {

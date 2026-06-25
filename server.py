@@ -514,6 +514,16 @@ def ensure_profile_not_suspended(state, profile_id, action_label="继续操作")
     return profile_id
 
 
+def is_post_hidden(post):
+    return isinstance(post, dict) and post.get("moderationStatus") == "hidden"
+
+
+def ensure_post_visible(post, action_label="继续操作"):
+    if is_post_hidden(post):
+        raise ValueError(f"这条内容已被运营隐藏，暂时不能{action_label}。")
+    return post
+
+
 def parse_optional_float(value):
     if value in (None, ""):
         return None
@@ -4912,7 +4922,7 @@ def profile_posts(state, profile_id):
     alias_ids = collect_profile_alias_ids(state, profile_id)
     posts = [
         post for post in state["posts"].values()
-        if isinstance(post, dict) and post.get("authorProfileId") in alias_ids
+        if isinstance(post, dict) and post.get("authorProfileId") in alias_ids and not is_post_hidden(post)
     ]
     return sorted_by_created_at(posts, reverse=True)
 
@@ -5111,6 +5121,8 @@ def serialize_post(state, post, current_actor_profile_id):
         "content": str(post.get("content") or ""),
         "meta": str(post.get("meta") or ""),
         "media": [compact_media_item(item) for item in post.get("media", [])],
+        "moderationStatus": post.get("moderationStatus", ""),
+        "hiddenReason": post.get("hiddenReason", ""),
         "likeCount": len(post.get("likes", [])),
         "favoriteCount": len(
             [
@@ -5173,6 +5185,8 @@ def serialize_notifications(state, current_actor_profile_id):
         )
 
     for post in state.get("posts", {}).values():
+        if is_post_hidden(post):
+            continue
         post_id = post.get("id")
         author_profile_id = post.get("authorProfileId")
         excerpt = str(post.get("content") or "").strip()[:48]
@@ -5263,7 +5277,7 @@ def serialize_favorite_posts(state, current_actor_profile_id):
     serialized = []
     for item in favorites:
         post = state.get("posts", {}).get(item.get("postId"))
-        if not post:
+        if not post or is_post_hidden(post):
             continue
         serialized.append(
             {
@@ -5624,10 +5638,13 @@ def find_report_target(state, target_type, target_id):
 def serialize_moderation_item(state, item):
     owner_id = resolve_canonical_profile_id(state, item.get("targetOwnerProfileId") or "")
     reporter_id = resolve_canonical_profile_id(state, item.get("reporterProfileId") or "")
+    target = find_report_target(state, item.get("targetType") or item.get("type"), item.get("targetId"))
+    target_record = target.get("record") if target else {}
     return {
         **item,
         "targetOwnerProfile": serialize_profile_brief(state, owner_id) if owner_id else None,
         "reporterProfile": serialize_profile_brief(state, reporter_id) if reporter_id else None,
+        "targetModerationStatus": target_record.get("moderationStatus", "") if isinstance(target_record, dict) else "",
     }
 
 
@@ -5641,6 +5658,19 @@ def serialize_deletion_request(state, item):
     return {
         **item,
         "profiles": profiles,
+    }
+
+
+def serialize_hidden_post(state, post):
+    return {
+        "id": post.get("id") or "",
+        "authorProfile": serialize_profile_brief(state, post.get("authorProfileId")),
+        "content": str(post.get("content") or "")[:220],
+        "meta": str(post.get("meta") or ""),
+        "createdAt": post.get("createdAt") or "",
+        "hiddenAt": post.get("hiddenAt") or "",
+        "hiddenReason": post.get("hiddenReason") or "运营后台隐藏",
+        "moderationStatus": post.get("moderationStatus", ""),
     }
 
 
@@ -5706,6 +5736,11 @@ def build_moderation_dashboard(state):
         for profile_id, profile in (state.get("profiles") or {}).items()
         if profile.get("moderationStatus") == "suspended"
     ]
+    hidden_posts = [
+        serialize_hidden_post(state, post)
+        for post in sorted_by_created_at(list((state.get("posts") or {}).values()), reverse=True)
+        if is_post_hidden(post)
+    ]
     open_reports = [item for item in reports if item.get("status", "open") == "open"]
     pending_queue = [item for item in queue if item.get("status", "pending") == "pending"]
     pending_deletions = [item for item in deletion_requests if item.get("status", "pending") == "pending"]
@@ -5719,11 +5754,13 @@ def build_moderation_dashboard(state):
             "totalQueued": len(queue),
             "totalDeletionRequests": len(deletion_requests),
             "suspendedProfiles": len(suspended_profiles),
+            "hiddenPosts": len(hidden_posts),
         },
         "reports": [serialize_moderation_item(state, item) for item in reports[:100]],
         "moderationQueue": [serialize_moderation_item(state, item) for item in queue[:100]],
         "deletionRequests": [serialize_deletion_request(state, item) for item in deletion_requests[:100]],
         "suspendedProfiles": suspended_profiles[:100],
+        "hiddenPosts": hidden_posts[:100],
         "adminActions": state.setdefault("adminActions", [])[:50],
     }
 
@@ -7539,6 +7576,53 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        if parsed.path == f"{API_PREFIX}/admin/content/moderation":
+            if not moderation_admin_authorized(self.headers, payload=payload):
+                self._write_json({"error": "没有权限管理内容状态。"}, status=HTTPStatus.FORBIDDEN)
+                return
+
+            def action(state):
+                target_type = str(payload.get("targetType") or "post").strip()
+                target_id = str(payload.get("targetId") or "").strip()
+                next_status = str(payload.get("status") or "").strip()
+                if target_type != "post":
+                    raise ValueError("当前只支持管理动态内容。")
+                if next_status not in {"active", "hidden"}:
+                    raise ValueError("内容状态不正确。")
+                post = (state.get("posts") or {}).get(target_id)
+                if not post:
+                    raise ValueError("没有找到这条动态。")
+                reason = str(payload.get("reason") or "").strip()[:300]
+                now = iso_at()
+                if next_status == "hidden":
+                    post["moderationStatus"] = "hidden"
+                    post["hiddenAt"] = now
+                    post["hiddenReason"] = reason or "运营后台隐藏"
+                else:
+                    post["moderationStatus"] = "active"
+                    post["restoredAt"] = now
+                    post["hiddenReason"] = ""
+                state.setdefault("adminActions", []).insert(
+                    0,
+                    {
+                        "id": f"admin-action-{uuid.uuid4().hex[:10]}",
+                        "kind": "content-moderation",
+                        "targetType": target_type,
+                        "targetId": target_id,
+                        "status": next_status,
+                        "note": reason,
+                        "createdAt": now,
+                    },
+                )
+                del state["adminActions"][100:]
+                return build_moderation_dashboard(state)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if parsed.path == f"{API_PREFIX}/admin/profile/moderation":
             if not moderation_admin_authorized(self.headers, payload=payload):
                 self._write_json({"error": "没有权限管理账号状态。"}, status=HTTPStatus.FORBIDDEN)
@@ -7664,7 +7748,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 if not actor:
                     raise ValueError("请先注册后再点赞。")
                 ensure_profile_not_suspended(state, actor, "点赞")
-                post = state["posts"][payload["postId"]]
+                post = ensure_post_visible(state["posts"][payload["postId"]], "点赞")
                 likes = post.setdefault("likes", [])
                 if actor in likes:
                     likes.remove(actor)
@@ -7686,7 +7770,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 if not actor:
                     raise ValueError("请先注册后再收藏。")
                 ensure_profile_not_suspended(state, actor, "收藏")
-                post = state["posts"][payload["postId"]]
+                post = ensure_post_visible(state["posts"][payload["postId"]], "收藏")
                 favorites = state.setdefault("postFavorites", [])
                 existing = next(
                     (
@@ -7727,7 +7811,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 text = (payload.get("text") or "").strip()
                 if not text:
                     raise ValueError("评论内容不能为空。")
-                post = state["posts"][payload["postId"]]
+                post = ensure_post_visible(state["posts"][payload["postId"]], "评论")
                 comment = {
                     "id": f"comment-{uuid.uuid4().hex[:10]}",
                     "authorProfileId": actor,

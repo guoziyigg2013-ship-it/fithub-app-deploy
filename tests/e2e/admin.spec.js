@@ -42,13 +42,15 @@ async function seedRiskyAuthor(request) {
     },
   });
   const authorProfileId = registered.session.currentActorProfileId;
-  await postJson(request, "/api/post/create", sessionId, {
+  const postPayload = await postJson(request, "/api/post/create", sessionId, {
     profileId: authorProfileId,
     content: "这是一条提醒私下付款的风险动态。",
     meta: "运营后台测试",
     media: [],
   });
-  return { authorProfileId };
+  const authorProfile = (postPayload.profiles || []).find((profile) => profile.id === authorProfileId) || {};
+  const post = (authorProfile.posts || []).find((item) => item.content.includes("私下付款")) || {};
+  return { authorProfileId, postId: post.id };
 }
 
 test("运营审核后台可以查看并处理媒体风险队列", async ({ page, request }) => {
@@ -90,4 +92,21 @@ test("运营审核后台可以限制并恢复风险内容作者", async ({ page,
   await page.locator("#suspendedList [data-profile-moderation][data-status='active']").first().click();
   await expect(page.locator("#adminStatus")).toContainText("已解除账号限制");
   await expect(page.locator("#suspendedList")).toContainText("暂时没有被限制的账号");
+});
+
+test("运营审核后台可以隐藏并恢复风险动态", async ({ page, request }) => {
+  await seedRiskyAuthor(request);
+
+  await page.goto("/admin.html");
+  await page.locator("#adminToken").fill("test-maintenance-token");
+  await page.getByRole("button", { name: "加载后台" }).click();
+
+  await expect(page.locator("#queueList")).toContainText("站外交易风险");
+  await page.locator("#queueList [data-content-moderation][data-status='hidden']").first().click();
+  await expect(page.locator("#adminStatus")).toContainText("已隐藏这条动态");
+  await expect(page.locator("#hiddenPostList")).toContainText("私下付款");
+
+  await page.locator("#hiddenPostList [data-content-moderation][data-status='active']").first().click();
+  await expect(page.locator("#adminStatus")).toContainText("已恢复这条动态");
+  await expect(page.locator("#hiddenPostList")).toContainText("暂时没有被隐藏的内容");
 });

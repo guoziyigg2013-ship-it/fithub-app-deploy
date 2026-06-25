@@ -35,6 +35,7 @@
 - 输入 `FITHUB_ADMIN_TOKEN` 后可查看举报、待审核内容、注销申请和最近处理记录。
 - 支持直接将举报、审核队列或注销申请标记为“处理完成”或“忽略”。
 - 支持对风险内容作者执行“限制账号/解除限制”，被限制身份不能继续发布动态、评论、点赞、收藏、私信、关注、预约或排课。
+- 支持对风险动态执行“隐藏动态/恢复动态”，隐藏后用户端主页、探索、收藏和通知不再展示该动态，也不能继续点赞、收藏或评论。
 
 管理员 token 使用：
 
@@ -45,6 +46,8 @@
 
 - `GET /api/admin/moderation?token=...`
 - `POST /api/admin/moderation/resolve`
+- `POST /api/admin/content/moderation`
+- `POST /api/admin/profile/moderation`
 
 `GET /api/admin/moderation` 返回：
 
@@ -54,6 +57,8 @@
 - `reports`
 - `moderationQueue`
 - `deletionRequests`
+- `hiddenPosts`
+- `suspendedProfiles`
 - `adminActions`
 
 `POST /api/admin/moderation/resolve` 请求示例：
@@ -68,11 +73,23 @@
 }
 ```
 
+`POST /api/admin/content/moderation` 请求示例：
+
+```json
+{
+  "token": "你的后台 token",
+  "targetType": "post",
+  "targetId": "post-xxxx",
+  "status": "hidden",
+  "reason": "运营后台隐藏"
+}
+```
+
 ## 后续必须补齐
 
 - 正式企业小程序 AppID 到位后，把 `FITHUB_MEDIA_SAFETY_PROVIDER` 从 `local` 切到微信/腾讯云图片视频审核 provider。
 - 举报对象扩展到评论、私信和个人主页入口。
-- 继续补“删除内容/隐藏内容”等强运营动作。
+- 如需满足更强合规要求，再补硬删除内容动作；当前默认优先隐藏，方便申诉恢复。
 - 正式提审前可把账号限制动作升级为更细的分级处罚，例如仅禁言、暂停预约或永久封禁。
 
 ## 账号注销申请

@@ -508,3 +508,45 @@ class ContentRegressionTests(FitHubApiTestCase):
         self.assertTrue(
             any(item["content"] == "申诉通过后可以继续发布。" for item in self.current_profile(restored_post_payload).get("posts", []))
         )
+
+    def test_admin_can_hide_and_restore_reported_post(self):
+        author_client = self.make_client()
+        author_phone = self.make_phone(76)
+        author_code = author_client.send_code(author_phone, purpose="register")["debugCode"]
+        author_payload = author_client.register_enthusiast(author_phone, "待隐藏动态作者", author_code)
+        author_profile = self.current_profile(author_payload)
+
+        viewer_client = self.make_client()
+        viewer_phone = self.make_phone(77)
+        viewer_code = viewer_client.send_code(viewer_phone, purpose="register")["debugCode"]
+        viewer_payload = viewer_client.register_enthusiast(viewer_phone, "隐藏验证用户", viewer_code)
+        viewer_profile = self.current_profile(viewer_payload)
+
+        created_payload = author_client.create_post(author_profile["id"], "这条风险动态会被后台隐藏。")
+        target_post = next(
+            item for item in self.current_profile(created_payload).get("posts", [])
+            if item["content"] == "这条风险动态会被后台隐藏。"
+        )
+        viewer_client.create_report("post", target_post["id"], reason="不适内容")
+
+        hidden_payload = viewer_client.moderate_content(target_post["id"], status="hidden", reason="不适内容")
+        self.assertEqual(hidden_payload["summary"]["hiddenPosts"], 1)
+        hidden_item = next(item for item in hidden_payload["hiddenPosts"] if item["id"] == target_post["id"])
+        self.assertEqual(hidden_item["moderationStatus"], "hidden")
+
+        refreshed_author = author_client.bootstrap()
+        refreshed_profile = self.current_profile(refreshed_author)
+        self.assertFalse(any(item["id"] == target_post["id"] for item in refreshed_profile.get("posts", [])))
+
+        denied_like = viewer_client.post(
+            "/api/post/like",
+            {"postId": target_post["id"]},
+            expected_status=400,
+        )
+        self.assertIn("运营隐藏", denied_like.get("error", ""))
+
+        restored_payload = viewer_client.moderate_content(target_post["id"], status="active", reason="申诉通过")
+        self.assertEqual(restored_payload["summary"]["hiddenPosts"], 0)
+        restored_author = author_client.bootstrap()
+        restored_profile = self.current_profile(restored_author)
+        self.assertTrue(any(item["id"] == target_post["id"] for item in restored_profile.get("posts", [])))
