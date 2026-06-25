@@ -70,6 +70,98 @@ def step(label: str, command: list[str], config: dict[str, str], required: list[
     return PlanStep(label=label, command=command, missing=[key for key in required if is_missing(config, key)])
 
 
+def manual_item(label: str, value: str, config: dict[str, str], required: list[str], detail: str = "") -> dict[str, Any]:
+    missing = [key for key in required if is_missing(config, key)]
+    return {
+        "label": label,
+        "value": value,
+        "detail": detail,
+        "ready": not missing,
+        "missing": missing,
+    }
+
+
+def build_wechat_domain_tasks(config: dict[str, str], api_origin: str, media_origin: str) -> list[dict[str, Any]]:
+    download_origin = media_origin or api_origin
+    return [
+        manual_item(
+            "request 合法域名",
+            api_origin,
+            config,
+            ["apiOrigin"],
+            "微信公众平台 -> 开发管理 -> 开发设置 -> 服务器域名。",
+        ),
+        manual_item(
+            "uploadFile 合法域名",
+            api_origin,
+            config,
+            ["apiOrigin"],
+            "头像、动态图片和视频上传会走 API 域名。",
+        ),
+        manual_item(
+            "downloadFile 合法域名",
+            download_origin,
+            config,
+            ["mediaOrigin"],
+            "正式环境应使用腾讯 COS/CDN 媒体域名，避免图片/视频走 API 服务。",
+        ),
+        {
+            "label": "socket 合法域名",
+            "value": "暂无",
+            "detail": "当前版本没有 WebSocket；以后做实时聊天再配置。",
+            "ready": True,
+            "missing": [],
+        },
+    ]
+
+
+def build_manual_checks(config: dict[str, str], api_origin: str, web_origin: str, media_origin: str) -> list[dict[str, Any]]:
+    return [
+        manual_item(
+            "微信小程序真实 AppID",
+            value(config, "miniappAppId", "wx你的真实小程序AppID"),
+            config,
+            ["miniappAppId"],
+            "必须来自企业主体小程序，不能继续使用 touristappid。",
+        ),
+        manual_item(
+            "备案后的 Web 用户访问域名",
+            web_origin,
+            config,
+            ["webOrigin"],
+            "正式用户入口，例如 https://app.yourdomain.com。",
+        ),
+        manual_item(
+            "备案后的 API 服务域名",
+            api_origin,
+            config,
+            ["apiOrigin"],
+            "小程序 request/uploadFile 合法域名都依赖它。",
+        ),
+        manual_item(
+            "腾讯 COS/CDN 媒体域名",
+            media_origin,
+            config,
+            ["mediaOrigin", "cosSecretId", "cosSecretKey", "cosBucket"],
+            "正式媒体下载域名，用于头像、动态图片、视频和缩略图。",
+        ),
+        manual_item(
+            "发布前生产数据快照权限",
+            "FITHUB_ADMIN_TOKEN",
+            config,
+            ["adminToken"],
+            "用于上线前后快照对比，防止用户、关注、消息、预约数据丢失。",
+        ),
+        {
+            "label": "隐私协议与权限说明",
+            "value": "定位、相册/摄像头、运动健康数据、私信与社区内容",
+            "detail": "小程序提审材料需要与实际功能一致；未接入的能力不要写成已接入。",
+            "ready": True,
+            "missing": [],
+        },
+    ]
+
+
 def build_plan(config: dict[str, str]) -> dict[str, Any]:
     api_origin = value(config, "apiOrigin", "https://api.yourdomain.com")
     web_origin = value(config, "webOrigin", "https://app.yourdomain.com")
@@ -345,10 +437,21 @@ def build_plan(config: dict[str, str]) -> dict[str, Any]:
     ]
 
     missing = sorted({key for item in steps for key in item.missing})
+    wechat_domains = build_wechat_domain_tasks(config, api_origin, media_origin)
+    manual_checks = build_manual_checks(config, api_origin, web_origin, media_origin)
+    missing = sorted(
+        {
+            *missing,
+            *(key for item in wechat_domains for key in item["missing"]),
+            *(key for item in manual_checks for key in item["missing"]),
+        }
+    )
     return {
         "ready": not missing,
         "missing": missing,
         "config": redact_config(config),
+        "wechatDomains": wechat_domains,
+        "manualChecks": manual_checks,
         "steps": [
             {
                 "label": item.label,
@@ -380,6 +483,28 @@ def print_markdown(plan: dict[str, Any], config_path: Path) -> None:
         print(item["display"])
         print("```")
         print("")
+    print("## 微信公众平台后台配置")
+    print("")
+    print("在“开发管理 -> 开发设置 -> 服务器域名”中配置以下域名：")
+    print("")
+    for item in plan["wechatDomains"]:
+        mark = "OK" if item["ready"] else "WAIT"
+        print(f"- [{mark}] {item['label']}: {item['value']}")
+        if item["detail"]:
+            print(f"  - {item['detail']}")
+        if item["missing"]:
+            print(f"  - 缺少：{', '.join(item['missing'])}")
+    print("")
+    print("## 发布前人工核对")
+    print("")
+    for item in plan["manualChecks"]:
+        mark = "OK" if item["ready"] else "WAIT"
+        print(f"- [{mark}] {item['label']}: {item['value']}")
+        if item["detail"]:
+            print(f"  - {item['detail']}")
+        if item["missing"]:
+            print(f"  - 缺少：{', '.join(item['missing'])}")
+    print("")
 
 
 def main() -> int:
@@ -409,6 +534,7 @@ def main() -> int:
             "cosSecretKey": "你的腾讯云COSSecretKey",
             "cosRegion": "ap-guangzhou",
             "cosBucket": "fithub-media-1250000000",
+            "mediaMaintenanceToken": "你的FITHUB_MEDIA_MAINTENANCE_TOKEN",
         }
         config_path.parent.mkdir(parents=True, exist_ok=True)
         if not config_path.exists():

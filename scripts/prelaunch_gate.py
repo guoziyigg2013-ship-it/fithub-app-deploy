@@ -239,6 +239,21 @@ def build_feature_phases(root: Path) -> list[dict[str, Any]]:
                 ),
             ],
         ),
+        phase(
+            "p2-launch-runbook",
+            "P2 上线执行计划与证据",
+            [
+                feature_check(
+                    "腾讯云上线计划、微信域名清单与最终证据",
+                    [
+                        check_file(root, "package.json", ['"plan:tencent-launch"', '"evidence:tencent-launch"']),
+                        check_file(root, "scripts/tencent_launch_plan.py", ["wechatDomains", "manualChecks", "request 合法域名", "downloadFile 合法域名"]),
+                        check_file(root, "deploy/tencent-cloud/launch-plan.example.json", ["mediaOrigin", "miniappAppId", "cosSecretId", "mediaMaintenanceToken"]),
+                        check_file(root, "docs/fithub-release-runbook.md", ["微信公众平台后台配置", "发布前人工核对"]),
+                    ],
+                ),
+            ],
+        ),
     ]
 
 

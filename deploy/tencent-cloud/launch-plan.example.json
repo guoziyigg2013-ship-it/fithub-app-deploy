@@ -15,5 +15,6 @@
   "cosSecretId": "你的腾讯云COSSecretId",
   "cosSecretKey": "你的腾讯云COSSecretKey",
   "cosRegion": "ap-guangzhou",
-  "cosBucket": "fithub-media-1250000000"
+  "cosBucket": "fithub-media-1250000000",
+  "mediaMaintenanceToken": "你的FITHUB_MEDIA_MAINTENANCE_TOKEN"
 }

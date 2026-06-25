@@ -35,7 +35,7 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
     write_minimal_configs(root)
     write(
         root / "package.json",
-        '{"scripts":{"snapshot:prod":"python3 scripts/production_snapshot.py","test:api":"python3 -m unittest","check:miniapp":"python3 scripts/check_miniprogram.py","check:wechat-domains":"python3 scripts/wechat_domain_manifest.py"}}',
+        '{"scripts":{"snapshot:prod":"python3 scripts/production_snapshot.py","test:api":"python3 -m unittest","check:miniapp":"python3 scripts/check_miniprogram.py","check:wechat-domains":"python3 scripts/wechat_domain_manifest.py","plan:tencent-launch":"python3 scripts/tencent_launch_plan.py","evidence:tencent-launch":"python3 scripts/tencent_launch_evidence.py"}}',
     )
     write(
         root / "server.py",
@@ -85,6 +85,9 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
     write(root / "scripts" / "production_snapshot.py", "write_manifest\nprune_snapshots")
     write(root / "scripts" / "check_miniprogram.py")
     write(root / "scripts" / "wechat_domain_manifest.py")
+    write(root / "scripts" / "tencent_launch_plan.py", "wechatDomains\nmanualChecks\nrequest 合法域名\ndownloadFile 合法域名")
+    write(root / "deploy" / "tencent-cloud" / "launch-plan.example.json", "mediaOrigin\nminiappAppId\ncosSecretId\nmediaMaintenanceToken")
+    write(root / "docs" / "fithub-release-runbook.md", "微信公众平台后台配置\n发布前人工核对")
     write(
         root / "tests" / "api" / "test_persistence.py",
         "\n".join(

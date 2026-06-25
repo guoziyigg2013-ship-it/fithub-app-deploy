@@ -162,6 +162,13 @@ npm run plan:tencent-launch -- --config deploy/tencent-cloud/launch-plan.json
 
 `launch-plan.json` 用来填写真实域名、腾讯云服务器、AppID、Supabase 和 COS 信息，会被 `.gitignore` 忽略。计划器不会打印真实密钥，只会显示缺失项和可复制的执行顺序。
 
+计划器还会在命令步骤后输出两组上线前人工事项：
+
+- 微信公众平台后台配置：request、uploadFile、downloadFile、socket 合法域名。
+- 发布前人工核对：真实企业主体 AppID、备案 Web/API/Media 域名、COS/CDN 媒体域名、上线前后生产数据快照权限、隐私协议与权限说明。
+
+拿到企业小程序和备案域名后，先让 `npm run plan:tencent-launch -- --config deploy/tencent-cloud/launch-plan.json` 变成 `ready`，再继续后面的远程部署和最终验收。
+
 如果是一台新腾讯云服务器，先初始化运行环境：
 
 ```bash

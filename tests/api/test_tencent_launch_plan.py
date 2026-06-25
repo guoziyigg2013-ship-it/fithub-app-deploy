@@ -1,8 +1,10 @@
 import importlib.util
+import io
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from contextlib import redirect_stdout
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,6 +56,27 @@ class TencentLaunchPlanTests(unittest.TestCase):
         self.assertNotIn("s" * 80, rendered)
         self.assertNotIn("cos-secret-key-production", rendered)
         self.assertNotIn("admin-token-production-value", rendered)
+        domains = {item["label"]: item["value"] for item in plan["wechatDomains"]}
+        self.assertEqual(domains["request 合法域名"], READY_CONFIG["apiOrigin"])
+        self.assertEqual(domains["uploadFile 合法域名"], READY_CONFIG["apiOrigin"])
+        self.assertEqual(domains["downloadFile 合法域名"], READY_CONFIG["mediaOrigin"])
+        manual = "\n".join(item["label"] + item["detail"] for item in plan["manualChecks"])
+        self.assertIn("微信小程序真实 AppID", manual)
+        self.assertIn("生产数据快照", manual)
+
+    def test_markdown_includes_wechat_backend_and_manual_checks(self):
+        plan = tencent_launch_plan.build_plan(dict(READY_CONFIG))
+        buffer = io.StringIO()
+
+        with redirect_stdout(buffer):
+            tencent_launch_plan.print_markdown(plan, Path("launch-plan.json"))
+
+        markdown = buffer.getvalue()
+        self.assertIn("微信公众平台后台配置", markdown)
+        self.assertIn("request 合法域名", markdown)
+        self.assertIn("downloadFile 合法域名", markdown)
+        self.assertIn("发布前人工核对", markdown)
+        self.assertIn("隐私协议与权限说明", markdown)
 
     def test_load_config_reads_json_object(self):
         with tempfile.TemporaryDirectory() as temp_dir:

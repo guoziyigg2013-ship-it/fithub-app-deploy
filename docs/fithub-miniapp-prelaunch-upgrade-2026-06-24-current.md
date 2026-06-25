@@ -17,6 +17,7 @@
 - `npm run check:trial` 已通过：腾讯云固定试运行入口、CloudBase API、持久化与核心功能库存可继续给测试用户使用。
 - `python3 scripts/deploy_smoke.py --frontend-url 腾讯云/fithub/ --backend-url 腾讯云API` 已通过：前端壳、运行时 API 配置、后端健康、远端存储和 bootstrap 均可用。
 - `npm run check:prelaunch` 仍然阻止正式提审：当前小程序仍是 `touristappid`，尚未配置微信合法域名、COS/CDN 媒体下载域名和备案后的 Web/API/Media 自定义域名。
+- `npm run plan:tencent-launch -- --config deploy/tencent-cloud/launch-plan.json` 会生成正式上线执行计划，并列出微信公众平台后台需要配置的 request/uploadFile/downloadFile 合法域名和发布前人工核对项。
 - 当前判断：可以继续用腾讯云试运行入口做真实测试；不要提交微信小程序审核，也不要作为正式公开运营入口。
 
 长期上架目标：
@@ -94,6 +95,22 @@ FITHUB_ADMIN_TOKEN=你的管理员token npm run snapshot:prod
 
 - `npm run check:miniapp` 通过。
 - 正式生产检查会阻止 `touristappid` 混进审核包。
+
+执行：
+
+```bash
+npm run check:miniapp
+cp deploy/tencent-cloud/launch-plan.example.json deploy/tencent-cloud/launch-plan.json
+npm run plan:tencent-launch -- --config deploy/tencent-cloud/launch-plan.json
+npm run check:wechat-domains
+npm run check:prelaunch
+```
+
+说明：
+
+- `plan:tencent-launch` 会把命令顺序、微信后台域名配置、COS/CDN 媒体域名和发布前人工核对项放在一份输出里，便于拿到企业主体和正式域名后逐项执行。
+- `check:wechat-domains` 会输出 request/uploadFile/downloadFile 三类域名清单。
+- 只要 AppID 还是 `touristappid`，`check:prelaunch` 必须失败，这是防止误提审。
 
 待用户提供：
 
