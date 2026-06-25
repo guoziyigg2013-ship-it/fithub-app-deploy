@@ -19,6 +19,9 @@ DEFAULT_PUBLIC_ORIGIN = "https://zhangxin-zhinan-d4fwtsmr9a834d58-1401297280.tcl
 STATIC_FILES = (
     "index.html",
     "mobile.html",
+    "admin.html",
+    "admin.css",
+    "admin.js",
     "styles.css",
     "app.js",
     "sw.js",

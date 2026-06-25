@@ -87,6 +87,7 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
     write(root / "scripts" / "production_snapshot.py", "write_manifest\nprune_snapshots")
     write(root / "scripts" / "check_miniprogram.py")
     write(root / "scripts" / "wechat_domain_manifest.py")
+    write(root / "scripts" / "deploy_tencent_static.py", "admin.html\nadmin.js")
     write(root / "scripts" / "tencent_launch_plan.py", "wechatDomains\nmanualChecks\nrequest 合法域名\ndownloadFile 合法域名\n每日生产快照计划")
     write(root / "deploy" / "tencent-cloud" / "launch-plan.example.json", "mediaOrigin\nminiappAppId\ncosSecretId\nmediaMaintenanceToken")
     write(root / "docs" / "fithub-release-runbook.md", "微信公众平台后台配置\n发布前人工核对\n每日生产快照")
@@ -118,10 +119,13 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
     )
     write(root / "tests" / "api" / "test_tencent_cos_media.py", "upload_media_asset_uses_cos_provider_and_public_url")
     write(root / "tests" / "api" / "test_auth.py", "account_deletion_request")
+    write(root / "tests" / "e2e" / "admin.spec.js", "运营审核后台可以查看并处理媒体风险队列")
     write(
         root / "tests" / "api" / "test_monitoring.py",
         "monitor_event_endpoint_records_sanitized_event_and_requires_admin_token\nmonitor_events_are_capped_and_classified",
     )
+    for rel in ["admin.html", "admin.css", "admin.js"]:
+        write(root / rel)
     for rel in [
         "wechat-miniprogram/pages/home/index.js",
         "wechat-miniprogram/pages/discover/index.js",

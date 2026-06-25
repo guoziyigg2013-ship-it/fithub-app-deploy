@@ -1,4 +1,4 @@
-const CACHE_NAME = "fithub-shell-v36-monitoring";
+const CACHE_NAME = "fithub-shell-v37-ops-admin";
 
 function coreUrls() {
   const scope = self.registration.scope;
@@ -8,7 +8,10 @@ function coreUrls() {
     new URL("styles.css", scope).href,
     new URL("config.js", scope).href,
     new URL("app.js", scope).href,
-    new URL("mobile.html", scope).href
+    new URL("mobile.html", scope).href,
+    new URL("admin.html", scope).href,
+    new URL("admin.css", scope).href,
+    new URL("admin.js", scope).href
   ];
 }
 

@@ -26,6 +26,8 @@ def main():
             "FITHUB_DATA_DIR": str(data_dir),
             "FITHUB_PUBLIC_API_ORIGIN": "",
             "FITHUB_SMS_DEV_MODE": "true",
+            "FITHUB_ADMIN_TOKEN": "test-maintenance-token",
+            "FITHUB_MEDIA_MAINTENANCE_TOKEN": "test-maintenance-token",
             "SUPABASE_URL": "",
             "SUPABASE_SERVICE_ROLE_KEY": "",
             "PYTHONUNBUFFERED": "1",

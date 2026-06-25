@@ -209,6 +209,16 @@ def build_feature_phases(root: Path) -> list[dict[str, Any]]:
                     ],
                 ),
                 feature_check(
+                    "运营审核后台页面",
+                    [
+                        check_exists(root, "admin.html"),
+                        check_exists(root, "admin.css"),
+                        check_exists(root, "admin.js"),
+                        check_file(root, "scripts/deploy_tencent_static.py", ["admin.html", "admin.js"]),
+                        check_file(root, "tests/e2e/admin.spec.js", ["运营审核后台可以查看并处理媒体风险队列"]),
+                    ],
+                ),
+                feature_check(
                     "拉黑与账号删除",
                     [
                         check_file(root, "server.py", ["/block/toggle", "/account/delete-request"]),
