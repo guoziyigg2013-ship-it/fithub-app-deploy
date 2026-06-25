@@ -75,4 +75,14 @@ test("最终验收：核心页面切换和高频互动保持即时反馈", async
   await expect(page.getByText("器材与精选商品")).toHaveCount(0);
   await expect(page.getByText("预约记录")).toHaveCount(0);
   await expect(page.getByText("数据中心")).toHaveCount(0);
+
+  await page.locator('[data-open-my-feature="account"]').first().click();
+  await expect(page.getByRole("heading", { name: "账户" })).toBeVisible();
+  await expect(page.getByText("协议与安全")).toBeVisible();
+  await page.locator('.legal-entry-card [data-open-my-feature="legal"]').click();
+  await expect(page.getByRole("heading", { name: "协议与隐私" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "用户协议" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "隐私政策" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "权限说明" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "账号注销与数据删除" })).toBeVisible();
 });

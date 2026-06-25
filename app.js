@@ -8206,6 +8206,28 @@ async function updateBookingStatus(bookingId, status) {
   renderPage();
 }
 
+async function submitAccountDeletionRequest() {
+  const myProfile = getMyPageProfile();
+  if (!myProfile) {
+    showError("请先登录后再提交账号注销申请。");
+    return;
+  }
+  const reason = window.prompt("请简单说明注销原因（可选）", "");
+  if (reason === null) return;
+  try {
+    await postAndSync(`${API_BASE}/account/delete-request`, {
+      reason: String(reason || "").trim()
+    });
+    state.activePage = "profile";
+    state.activeProfileId = myProfile.id;
+    state.profileSubpage = "legal";
+    renderPage();
+    showToast("已提交账号注销申请，我们会进入人工审核。");
+  } catch (error) {
+    showError(error.message || "提交失败，请稍后再试。");
+  }
+}
+
 function renderPersonalShortcutTile(label, icon, attrs = "", options = {}) {
   const badgeCount = Math.max(0, Number(options.badgeCount || 0));
   const badge = badgeCount
@@ -8222,6 +8244,54 @@ function renderPersonalShortcutTile(label, icon, attrs = "", options = {}) {
       </span>
       <strong>${escapeHtml(label)}</strong>
     </button>
+  `;
+}
+
+function renderLegalCenter(profile) {
+  const supportContact = "FitHub 试运行客服";
+  const currentIdentity = profile ? `${getRoleLabel(profile.role)} · ${profile.name}` : "未登录身份";
+  return `
+    <article class="legal-center-card detail-card">
+      <div class="legal-center-hero">
+        <span class="account-tile-icon">规</span>
+        <div>
+          <h2>协议、隐私与账号安全</h2>
+          <p>当前身份：${escapeHtml(currentIdentity)}。这里集中说明 FitHub 试运行阶段的数据使用、权限申请和账号注销方式。</p>
+        </div>
+      </div>
+
+      <section class="legal-section">
+        <h3>用户协议</h3>
+        <p>FitHub 是健身爱好者、教练和健身房的互动试运行平台。用户应确保注册资料真实，不发布违法、侵权、骚扰、虚假宣传或危险训练内容。</p>
+        <p>预约、私信、关注、评论和动态均会围绕当前身份独立记录；平台会持续完善教练与场馆入驻审核、内容审核和举报处理。</p>
+      </section>
+
+      <section class="legal-section">
+        <h3>隐私政策</h3>
+        <p>我们会在你主动注册、发布动态、预约课程、发送私信或打卡时保存必要信息，包括手机号、身份资料、头像、媒体、互动记录和训练记录。</p>
+        <p>手机号用于账号登录和跨设备恢复；头像、动态和公开主页会展示给其他用户；私信、预约和健康数据仅用于对应功能展示与服务沟通。</p>
+      </section>
+
+      <section class="legal-section">
+        <h3>权限说明</h3>
+        <div class="legal-permission-list">
+          <div><strong>定位</strong><span>用于附近健身房/教练推荐、同城动态和户外轨迹记录；拒绝授权后仍可使用基础浏览与发布功能。</span></div>
+          <div><strong>相册/视频</strong><span>用于头像、动态图片和训练视频上传；上传前会限制大小并生成适合列表页加载的媒体版本。</span></div>
+          <div><strong>健康数据</strong><span>未来接入 Apple Watch、小米手表、智能秤等设备时，只读取你授权的训练和身体数据，用于打卡、BMI 和趋势展示。</span></div>
+          <div><strong>通知</strong><span>用于预约、私信、评论、点赞和身份提醒；关闭后不会影响核心功能。</span></div>
+        </div>
+      </section>
+
+      <section class="legal-section legal-section--danger">
+        <h3>账号注销与数据删除</h3>
+        <p>你可以提交账号注销申请。进入人工审核后，我们会核对手机号主账号及其关联身份，处理公开主页、动态、预约和互动记录。</p>
+        <p>正式上线前，企业主体、客服联系邮箱和完整法律文本需要替换为公司确认版本。</p>
+        <div class="legal-action-row">
+          <button class="mini-button mini-button--danger-soft" data-submit-delete-request="1" type="button">提交注销申请</button>
+          <span>${escapeHtml(supportContact)}</span>
+        </div>
+      </section>
+    </article>
   `;
 }
 
@@ -10130,7 +10200,19 @@ function renderMyFeaturePage(profile, managedProfiles, feature) {
             }
           </div>
         </article>
+        <article class="detail-card legal-entry-card">
+          <div>
+            <h3>协议与安全</h3>
+            <p>查看用户协议、隐私政策、权限说明和账号注销入口。</p>
+          </div>
+          <button class="mini-button mini-button--accent" data-open-my-feature="legal" type="button">查看</button>
+        </article>
       `
+    },
+    legal: {
+      title: "协议与隐私",
+      subtitle: "查看用户协议、隐私政策、权限说明和账号注销入口",
+      content: renderLegalCenter(profile)
     },
     checkin: {
       title: "打卡",
@@ -11212,6 +11294,11 @@ appView.addEventListener("click", (event) => {
     return;
   }
 
+  if (target.dataset.submitDeleteRequest) {
+    submitAccountDeletionRequest();
+    return;
+  }
+
   if (target.dataset.openRouteShare) {
     const myProfile = getMyPageProfile();
     if (!myProfile) return;
@@ -11937,7 +12024,7 @@ function syncViewportHeight() {
 function registerAppServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (["localhost", "127.0.0.1"].includes(window.location.hostname)) return;
-  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260625-monitoring`;
+  const swUrl = `${URL_PREFIX || ""}/sw.js?v=20260626-legal-center`;
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register(swUrl, { updateViaCache: "none" })

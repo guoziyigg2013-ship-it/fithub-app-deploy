@@ -2228,6 +2228,96 @@ form.is-submitting button[type="submit"] {
   line-height: 1.2;
 }
 
+.legal-entry-card {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.legal-entry-card h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.legal-entry-card p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.legal-center-card {
+  display: grid;
+  gap: 16px;
+}
+
+.legal-center-hero {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.legal-center-hero h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.legal-center-hero p,
+.legal-section p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.legal-section {
+  border-top: 1px solid rgba(31, 31, 31, 0.06);
+  padding-top: 14px;
+}
+
+.legal-section h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.legal-permission-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.legal-permission-list div {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: #fffaf4;
+}
+
+.legal-permission-list strong {
+  color: #9d580f;
+}
+
+.legal-permission-list span,
+.legal-action-row span {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.legal-section--danger {
+  border-top-color: rgba(154, 60, 35, 0.12);
+}
+
+.legal-action-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .checkin-feature-card {
   overflow: hidden;
 }

@@ -741,3 +741,16 @@ tests/
   - 当前公开存储诊断会记录 `real_profiles`、`real_posts`、`real_bookings`、`real_threads` 等关键指标，便于发布前后对比是否异常归零
 - 回归保护：
   - `test_trial_readiness_gate.py` 新增写入闭环阶段断言，防止后续误删 `trial-write-acceptance` 证据
+
+第二十九步当前已落地：
+
+- Web/PWA 合规入口补齐：
+  - `我的 > 账户` 新增“协议与安全”入口，不改变“我的功能”4x2宫格结构
+  - 新增 `协议与隐私` 子页，集中展示用户协议、隐私政策、定位/相册/健康/通知权限说明、账号注销与数据删除说明
+  - 账号注销按钮已接入后端 `/api/account/delete-request`，提交后进入管理员注销申请队列
+- 回归保护：
+  - 最终验收 E2E 扩展覆盖 `我的 > 账户 > 协议与隐私`
+  - 自动断言用户协议、隐私政策、权限说明和账号注销说明均可见，避免审核入口后续被误删
+- 缓存更新：
+  - 前端静态资源版本升级到 `20260626-legal-center`
+  - Service Worker 缓存升级到 `fithub-shell-v39-legal-center`
