@@ -163,6 +163,47 @@ class TrialReadinessGateTests(unittest.TestCase):
         self.assertEqual(report["blockerCount"], 0)
         self.assertIn("替换真实微信小程序 AppID", "\n".join(report["formalPrelaunchPending"]))
 
+    def test_trial_gate_can_include_write_path_acceptance(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            write_feature_inventory(root)
+            write_phase = trial_readiness_gate.phase(
+                "trial-write-acceptance",
+                "线上写入闭环",
+                True,
+                "注册、关注、动态、私信、预约写入通过",
+                {"profileId": "enthusiast-1", "bookingCount": 1},
+            )
+            with (
+                mock.patch.object(
+                    trial_readiness_gate,
+                    "phase_frontend",
+                    return_value=trial_readiness_gate.phase("trial-fixed-frontend", "前端", True, "ok"),
+                ),
+                mock.patch.object(
+                    trial_readiness_gate,
+                    "phase_backend",
+                    return_value=trial_readiness_gate.phase("trial-cloudbase-api", "后端", True, "ok"),
+                ),
+                mock.patch.object(
+                    trial_readiness_gate,
+                    "phase_write_acceptance",
+                    return_value=write_phase,
+                ),
+            ):
+                report = trial_readiness_gate.build_report(
+                    root=root,
+                    frontend_url="https://app.example.cn/fithub/",
+                    backend_url="https://api.example.cn",
+                    run_write=True,
+                )
+
+        self.assertTrue(report["ready"])
+        names = [item["name"] for item in report["phases"]]
+        self.assertIn("trial-write-acceptance", names)
+        write_result = next(item for item in report["phases"] if item["name"] == "trial-write-acceptance")
+        self.assertEqual(write_result["payload"]["bookingCount"], 1)
+
     def test_trial_gate_blocks_when_feature_inventory_is_incomplete(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

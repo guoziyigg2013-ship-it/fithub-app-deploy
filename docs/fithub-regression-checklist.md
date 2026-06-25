@@ -729,3 +729,15 @@ tests/
 - 缓存更新：
   - 前端静态资源版本升级到 `20260626-miniapp-instant`
   - Service Worker 缓存升级到 `fithub-shell-v38-miniapp-instant`
+
+第二十八步当前已落地：
+
+- 试运行写入闭环门禁：
+  - 新增 `npm run check:trial-write`，在普通腾讯云试运行门禁基础上额外执行线上写入验收
+  - 自动验证当前固定试用 API 能完成注册/登录、关注、发动态、发私信和预约写入
+  - 适合每次大版本部署后执行，避免只检查页面可访问却漏掉用户数据写入链路
+- 生产快照证据：
+  - 已跑通 `production_snapshot.py --status-only`，在无管理员导出 token 时也能写入关键指标快照和 manifest
+  - 当前公开存储诊断会记录 `real_profiles`、`real_posts`、`real_bookings`、`real_threads` 等关键指标，便于发布前后对比是否异常归零
+- 回归保护：
+  - `test_trial_readiness_gate.py` 新增写入闭环阶段断言，防止后续误删 `trial-write-acceptance` 证据

@@ -9,6 +9,7 @@
     "check:prelaunch": "python3 scripts/prelaunch_gate.py",
     "check:domestic": "python3 scripts/domestic_migration_status.py",
     "check:trial": "python3 scripts/trial_readiness_gate.py",
+    "check:trial-write": "python3 scripts/trial_readiness_gate.py --run-write",
     "check:wechat-domains": "python3 scripts/wechat_domain_manifest.py",
     "check:tencent-domains": "python3 scripts/tencent_domain_readiness.py",
     "check:tencent-launch": "python3 scripts/tencent_launch_gate.py",
