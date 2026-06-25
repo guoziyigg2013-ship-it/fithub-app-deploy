@@ -86,7 +86,8 @@ function itemCard(item, kind, actions = true) {
   const ownerId = ownerProfile && ownerProfile.id;
   const ownerSuspended = (ownerProfile && ownerProfile.moderationStatus) === "suspended";
   const targetType = item.targetType || item.type || "";
-  const targetHidden = item.targetModerationStatus === "hidden";
+  const targetStatus = item.targetModerationStatus || "";
+  const targetNonPublic = targetStatus === "hidden" || targetStatus === "deleted";
   const reporter = profileName(item.reporterProfile);
   const meta = [
     targetType || kind,
@@ -117,7 +118,10 @@ function itemCard(item, kind, actions = true) {
               }
               ${
                 targetType === "post" && item.targetId
-                  ? `<button class="${targetHidden ? "secondary" : "danger"}" type="button" data-content-moderation="${escapeHtml(item.targetId)}" data-target-type="post" data-status="${targetHidden ? "active" : "hidden"}">${targetHidden ? "恢复动态" : "隐藏动态"}</button>`
+                  ? targetNonPublic
+                    ? `<button class="secondary" type="button" data-content-moderation="${escapeHtml(item.targetId)}" data-target-type="post" data-status="active">恢复动态</button>`
+                    : `<button class="danger" type="button" data-content-moderation="${escapeHtml(item.targetId)}" data-target-type="post" data-status="hidden">隐藏动态</button>
+                       <button class="danger" type="button" data-content-moderation="${escapeHtml(item.targetId)}" data-target-type="post" data-status="deleted">下架动态</button>`
                   : ""
               }
             </div>`
@@ -141,7 +145,7 @@ function renderSummary(summary) {
     ["待审核内容", summary.pendingReview || 0],
     ["注销申请", summary.pendingDeletionRequests || 0],
     ["限制账号", summary.suspendedProfiles || 0],
-    ["隐藏内容", summary.hiddenPosts || 0],
+    ["隐藏/下架", summary.hiddenPosts || 0],
     ["历史处理", (state.dashboard.adminActions || []).length]
   ];
   elements.summary.innerHTML = cards
@@ -171,16 +175,21 @@ function profileCard(profile) {
 
 function hiddenPostCard(post) {
   const author = post.authorProfile || {};
+  const status = post.moderationStatus === "deleted" ? "deleted" : "hidden";
+  const statusLabel = post.statusLabel || (status === "deleted" ? "已下架" : "已隐藏");
+  const timeLabel = post.deletedAt || post.hiddenAt || post.createdAt || "";
+  const reason = status === "deleted" ? (post.deletedReason || "运营后台下架") : (post.hiddenReason || "运营后台隐藏");
   return `
     <article class="ops-item" data-post-id="${escapeHtml(post.id)}">
       <div class="item-top">
         <div>
           <div class="item-title">${escapeHtml(author.name || "平台用户")}</div>
-          <div class="item-meta">${escapeHtml(post.meta || "动态")} · ${escapeHtml(post.hiddenAt || post.createdAt || "")}</div>
+          <div class="item-meta">${escapeHtml(post.meta || "动态")} · ${escapeHtml(timeLabel)}</div>
         </div>
-        <span class="item-kind">已隐藏</span>
+        <span class="item-kind">${escapeHtml(statusLabel)}</span>
       </div>
-      <p class="item-excerpt">${escapeHtml(post.content || post.hiddenReason || "已隐藏内容")}</p>
+      <p class="item-excerpt">${escapeHtml(post.content || reason || "已处理内容")}</p>
+      <div class="item-meta">原因：${escapeHtml(reason)}</div>
       <div class="item-actions">
         <button class="secondary" type="button" data-content-moderation="${escapeHtml(post.id)}" data-target-type="post" data-status="active">恢复动态</button>
       </div>
@@ -236,7 +245,7 @@ function renderDashboard(payload) {
     : emptyState("暂时没有被限制的账号。");
   elements.hiddenPosts.innerHTML = hiddenPosts.length
     ? hiddenPosts.map(hiddenPostCard).join("")
-    : emptyState("暂时没有被隐藏的内容。");
+    : emptyState("暂时没有被隐藏或下架的内容。");
   renderActions(payload.adminActions || []);
   elements.layout.hidden = false;
 }
@@ -301,12 +310,13 @@ async function moderateProfile(profileId, status, button) {
 }
 
 async function moderateContent(targetType, targetId, status, button) {
-  const nextStatus = status === "hidden" ? "hidden" : "active";
+  const nextStatus = ["hidden", "deleted"].includes(status) ? status : "active";
+  const actionText = nextStatus === "deleted" ? "下架" : nextStatus === "hidden" ? "隐藏" : "恢复";
   if (button) {
     button.disabled = true;
-    button.textContent = nextStatus === "hidden" ? "隐藏中..." : "恢复中...";
+    button.textContent = `${actionText}中...`;
   }
-  setStatus(nextStatus === "hidden" ? "正在隐藏这条动态..." : "正在恢复这条动态...");
+  setStatus(`正在${actionText}这条动态...`);
   try {
     const payload = await requestAdmin("/admin/content/moderation", {
       method: "POST",
@@ -314,11 +324,11 @@ async function moderateContent(targetType, targetId, status, button) {
         targetType,
         targetId,
         status: nextStatus,
-        reason: nextStatus === "hidden" ? "运营后台隐藏" : "运营后台恢复"
+        reason: nextStatus === "deleted" ? "运营后台下架" : nextStatus === "hidden" ? "运营后台隐藏" : "运营后台恢复"
       })
     });
     renderDashboard(payload);
-    setStatus(nextStatus === "hidden" ? "已隐藏这条动态。" : "已恢复这条动态。");
+    setStatus(nextStatus === "deleted" ? "已下架这条动态。" : nextStatus === "hidden" ? "已隐藏这条动态。" : "已恢复这条动态。");
   } catch (error) {
     setStatus(error.message || "内容状态更新失败，请重试。", true);
     if (button) button.disabled = false;

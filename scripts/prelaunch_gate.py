@@ -216,8 +216,8 @@ def build_feature_phases(root: Path) -> list[dict[str, Any]]:
                         check_exists(root, "admin.js"),
                         check_file(root, "server.py", ["/admin/profile/moderation", "/admin/content/moderation", "ensure_profile_not_suspended"]),
                         check_file(root, "scripts/deploy_tencent_static.py", ["admin.html", "admin.js"]),
-                        check_file(root, "tests/api/test_content.py", ["admin_can_suspend_and_restore_reported_profile", "admin_can_hide_and_restore_reported_post"]),
-                        check_file(root, "tests/e2e/admin.spec.js", ["运营审核后台可以查看并处理媒体风险队列", "运营审核后台可以限制并恢复风险内容作者", "运营审核后台可以隐藏并恢复风险动态"]),
+                        check_file(root, "tests/api/test_content.py", ["admin_can_suspend_and_restore_reported_profile", "admin_can_hide_and_restore_reported_post", "admin_can_soft_delete_and_restore_reported_post"]),
+                        check_file(root, "tests/e2e/admin.spec.js", ["运营审核后台可以查看并处理媒体风险队列", "运营审核后台可以限制并恢复风险内容作者", "运营审核后台可以隐藏并恢复风险动态", "运营审核后台可以下架归档并恢复风险动态"]),
                     ],
                 ),
                 feature_check(

@@ -118,13 +118,14 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
                 "user_report_is_persisted_and_admin_endpoint_is_protected",
                 "admin_can_suspend_and_restore_reported_profile",
                 "admin_can_hide_and_restore_reported_post",
+                "admin_can_soft_delete_and_restore_reported_post",
                 "private_message_does_not_require_follow_but_respects_block",
             ]
         ),
     )
     write(root / "tests" / "api" / "test_tencent_cos_media.py", "upload_media_asset_uses_cos_provider_and_public_url")
     write(root / "tests" / "api" / "test_auth.py", "account_deletion_request")
-    write(root / "tests" / "e2e" / "admin.spec.js", "运营审核后台可以查看并处理媒体风险队列\n运营审核后台可以限制并恢复风险内容作者\n运营审核后台可以隐藏并恢复风险动态")
+    write(root / "tests" / "e2e" / "admin.spec.js", "运营审核后台可以查看并处理媒体风险队列\n运营审核后台可以限制并恢复风险内容作者\n运营审核后台可以隐藏并恢复风险动态\n运营审核后台可以下架归档并恢复风险动态")
     write(
         root / "tests" / "api" / "test_monitoring.py",
         "monitor_event_endpoint_records_sanitized_event_and_requires_admin_token\nmonitor_events_are_capped_and_classified",

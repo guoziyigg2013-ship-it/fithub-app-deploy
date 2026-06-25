@@ -108,5 +108,23 @@ test("运营审核后台可以隐藏并恢复风险动态", async ({ page, reque
 
   await page.locator("#hiddenPostList [data-content-moderation][data-status='active']").first().click();
   await expect(page.locator("#adminStatus")).toContainText("已恢复这条动态");
-  await expect(page.locator("#hiddenPostList")).toContainText("暂时没有被隐藏的内容");
+  await expect(page.locator("#hiddenPostList")).toContainText("暂时没有被隐藏或下架的内容");
+});
+
+test("运营审核后台可以下架归档并恢复风险动态", async ({ page, request }) => {
+  await seedRiskyAuthor(request);
+
+  await page.goto("/admin.html");
+  await page.locator("#adminToken").fill("test-maintenance-token");
+  await page.getByRole("button", { name: "加载后台" }).click();
+
+  await expect(page.locator("#queueList")).toContainText("站外交易风险");
+  await page.locator("#queueList [data-content-moderation][data-status='deleted']").first().click();
+  await expect(page.locator("#adminStatus")).toContainText("已下架这条动态");
+  await expect(page.locator("#hiddenPostList")).toContainText("已下架");
+  await expect(page.locator("#hiddenPostList")).toContainText("私下付款");
+
+  await page.locator("#hiddenPostList [data-content-moderation][data-status='active']").first().click();
+  await expect(page.locator("#adminStatus")).toContainText("已恢复这条动态");
+  await expect(page.locator("#hiddenPostList")).toContainText("暂时没有被隐藏或下架的内容");
 });

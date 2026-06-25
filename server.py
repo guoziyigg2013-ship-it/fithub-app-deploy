@@ -514,13 +514,32 @@ def ensure_profile_not_suspended(state, profile_id, action_label="继续操作")
     return profile_id
 
 
+NON_PUBLIC_POST_STATUSES = {"hidden", "deleted"}
+
+
+def post_moderation_status(post):
+    if not isinstance(post, dict):
+        return ""
+    return str(post.get("moderationStatus") or "").strip()
+
+
 def is_post_hidden(post):
-    return isinstance(post, dict) and post.get("moderationStatus") == "hidden"
+    return post_moderation_status(post) == "hidden"
+
+
+def is_post_deleted(post):
+    return post_moderation_status(post) == "deleted"
+
+
+def is_post_non_public(post):
+    return post_moderation_status(post) in NON_PUBLIC_POST_STATUSES
 
 
 def ensure_post_visible(post, action_label="继续操作"):
     if is_post_hidden(post):
         raise ValueError(f"这条内容已被运营隐藏，暂时不能{action_label}。")
+    if is_post_deleted(post):
+        raise ValueError(f"这条内容已被运营下架，暂时不能{action_label}。")
     return post
 
 
@@ -4922,7 +4941,7 @@ def profile_posts(state, profile_id):
     alias_ids = collect_profile_alias_ids(state, profile_id)
     posts = [
         post for post in state["posts"].values()
-        if isinstance(post, dict) and post.get("authorProfileId") in alias_ids and not is_post_hidden(post)
+        if isinstance(post, dict) and post.get("authorProfileId") in alias_ids and not is_post_non_public(post)
     ]
     return sorted_by_created_at(posts, reverse=True)
 
@@ -5185,7 +5204,7 @@ def serialize_notifications(state, current_actor_profile_id):
         )
 
     for post in state.get("posts", {}).values():
-        if is_post_hidden(post):
+        if is_post_non_public(post):
             continue
         post_id = post.get("id")
         author_profile_id = post.get("authorProfileId")
@@ -5277,7 +5296,7 @@ def serialize_favorite_posts(state, current_actor_profile_id):
     serialized = []
     for item in favorites:
         post = state.get("posts", {}).get(item.get("postId"))
-        if not post or is_post_hidden(post):
+        if not post or is_post_non_public(post):
             continue
         serialized.append(
             {
@@ -5662,6 +5681,7 @@ def serialize_deletion_request(state, item):
 
 
 def serialize_hidden_post(state, post):
+    status = post_moderation_status(post)
     return {
         "id": post.get("id") or "",
         "authorProfile": serialize_profile_brief(state, post.get("authorProfileId")),
@@ -5669,8 +5689,11 @@ def serialize_hidden_post(state, post):
         "meta": str(post.get("meta") or ""),
         "createdAt": post.get("createdAt") or "",
         "hiddenAt": post.get("hiddenAt") or "",
+        "deletedAt": post.get("deletedAt") or "",
         "hiddenReason": post.get("hiddenReason") or "运营后台隐藏",
+        "deletedReason": post.get("deletedReason") or "运营后台下架",
         "moderationStatus": post.get("moderationStatus", ""),
+        "statusLabel": "已下架" if status == "deleted" else "已隐藏",
     }
 
 
@@ -5739,8 +5762,9 @@ def build_moderation_dashboard(state):
     hidden_posts = [
         serialize_hidden_post(state, post)
         for post in sorted_by_created_at(list((state.get("posts") or {}).values()), reverse=True)
-        if is_post_hidden(post)
+        if is_post_non_public(post)
     ]
+    deleted_posts = [item for item in hidden_posts if item.get("moderationStatus") == "deleted"]
     open_reports = [item for item in reports if item.get("status", "open") == "open"]
     pending_queue = [item for item in queue if item.get("status", "pending") == "pending"]
     pending_deletions = [item for item in deletion_requests if item.get("status", "pending") == "pending"]
@@ -5755,6 +5779,7 @@ def build_moderation_dashboard(state):
             "totalDeletionRequests": len(deletion_requests),
             "suspendedProfiles": len(suspended_profiles),
             "hiddenPosts": len(hidden_posts),
+            "deletedPosts": len(deleted_posts),
         },
         "reports": [serialize_moderation_item(state, item) for item in reports[:100]],
         "moderationQueue": [serialize_moderation_item(state, item) for item in queue[:100]],
@@ -7587,7 +7612,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 next_status = str(payload.get("status") or "").strip()
                 if target_type != "post":
                     raise ValueError("当前只支持管理动态内容。")
-                if next_status not in {"active", "hidden"}:
+                if next_status not in {"active", "hidden", "deleted"}:
                     raise ValueError("内容状态不正确。")
                 post = (state.get("posts") or {}).get(target_id)
                 if not post:
@@ -7598,10 +7623,15 @@ class FitHubHandler(BaseHTTPRequestHandler):
                     post["moderationStatus"] = "hidden"
                     post["hiddenAt"] = now
                     post["hiddenReason"] = reason or "运营后台隐藏"
+                elif next_status == "deleted":
+                    post["moderationStatus"] = "deleted"
+                    post["deletedAt"] = now
+                    post["deletedReason"] = reason or "运营后台下架"
                 else:
                     post["moderationStatus"] = "active"
                     post["restoredAt"] = now
                     post["hiddenReason"] = ""
+                    post["deletedReason"] = ""
                 state.setdefault("adminActions", []).insert(
                     0,
                     {

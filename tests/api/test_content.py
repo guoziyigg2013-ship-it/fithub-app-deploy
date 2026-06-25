@@ -550,3 +550,57 @@ class ContentRegressionTests(FitHubApiTestCase):
         restored_author = author_client.bootstrap()
         restored_profile = self.current_profile(restored_author)
         self.assertTrue(any(item["id"] == target_post["id"] for item in restored_profile.get("posts", [])))
+
+    def test_admin_can_soft_delete_and_restore_reported_post(self):
+        author_client = self.make_client()
+        author_phone = self.make_phone(78)
+        author_code = author_client.send_code(author_phone, purpose="register")["debugCode"]
+        author_payload = author_client.register_enthusiast(author_phone, "待下架动态作者", author_code)
+        author_profile = self.current_profile(author_payload)
+
+        viewer_client = self.make_client()
+        viewer_phone = self.make_phone(79)
+        viewer_code = viewer_client.send_code(viewer_phone, purpose="register")["debugCode"]
+        viewer_payload = viewer_client.register_enthusiast(viewer_phone, "下架验证用户", viewer_code)
+
+        created_payload = author_client.create_post(author_profile["id"], "这条风险动态会被后台下架归档。")
+        target_post = next(
+            item for item in self.current_profile(created_payload).get("posts", [])
+            if item["content"] == "这条风险动态会被后台下架归档。"
+        )
+        viewer_client.create_report("post", target_post["id"], reason="严重不适内容")
+
+        deleted_payload = viewer_client.moderate_content(target_post["id"], status="deleted", reason="严重不适内容")
+        self.assertEqual(deleted_payload["summary"]["hiddenPosts"], 1)
+        self.assertEqual(deleted_payload["summary"]["deletedPosts"], 1)
+        deleted_item = next(item for item in deleted_payload["hiddenPosts"] if item["id"] == target_post["id"])
+        self.assertEqual(deleted_item["moderationStatus"], "deleted")
+        self.assertEqual(deleted_item["statusLabel"], "已下架")
+
+        refreshed_profile = self.current_profile(author_client.bootstrap())
+        self.assertFalse(any(item["id"] == target_post["id"] for item in refreshed_profile.get("posts", [])))
+
+        denied_like = viewer_client.post(
+            "/api/post/like",
+            {"postId": target_post["id"]},
+            expected_status=400,
+        )
+        self.assertIn("运营下架", denied_like.get("error", ""))
+        denied_favorite = viewer_client.post(
+            "/api/post/favorite-toggle",
+            {"postId": target_post["id"]},
+            expected_status=400,
+        )
+        self.assertIn("运营下架", denied_favorite.get("error", ""))
+        denied_comment = viewer_client.post(
+            "/api/post/comment",
+            {"postId": target_post["id"], "text": "这条评论不应该成功。"},
+            expected_status=400,
+        )
+        self.assertIn("运营下架", denied_comment.get("error", ""))
+
+        restored_payload = viewer_client.moderate_content(target_post["id"], status="active", reason="申诉通过")
+        self.assertEqual(restored_payload["summary"]["hiddenPosts"], 0)
+        self.assertEqual(restored_payload["summary"]["deletedPosts"], 0)
+        restored_profile = self.current_profile(author_client.bootstrap())
+        self.assertTrue(any(item["id"] == target_post["id"] for item in restored_profile.get("posts", [])))
