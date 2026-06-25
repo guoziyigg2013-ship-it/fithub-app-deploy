@@ -165,9 +165,11 @@ npm run plan:tencent-launch -- --config deploy/tencent-cloud/launch-plan.json
 计划器还会在命令步骤后输出两组上线前人工事项：
 
 - 微信公众平台后台配置：request、uploadFile、downloadFile、socket 合法域名。
-- 发布前人工核对：真实企业主体 AppID、备案 Web/API/Media 域名、COS/CDN 媒体域名、上线前后生产数据快照权限、隐私协议与权限说明。
+- 发布前人工核对：真实企业主体 AppID、备案 Web/API/Media 域名、COS/CDN 媒体域名、上线前后生产数据快照权限、每日生产快照计划、隐私协议与权限说明。
 
 拿到企业小程序和备案域名后，先让 `npm run plan:tencent-launch -- --config deploy/tencent-cloud/launch-plan.json` 变成 `ready`，再继续后面的远程部署和最终验收。
+
+上线计划会给出一条可复制的 crontab 命令，用于在腾讯云服务器每天 03:15 UTC 执行 `npm run snapshot:prod`，默认快照保留 30 天且至少保留最新 20 份。正式运营前不要跳过这一步。
 
 如果是一台新腾讯云服务器，先初始化运行环境：
 

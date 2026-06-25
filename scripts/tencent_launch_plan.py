@@ -152,6 +152,13 @@ def build_manual_checks(config: dict[str, str], api_origin: str, web_origin: str
             ["adminToken"],
             "用于上线前后快照对比，防止用户、关注、消息、预约数据丢失。",
         ),
+        manual_item(
+            "每日生产快照计划",
+            "03:15 UTC 每天执行，保留 30 天且至少保留最新 20 份",
+            config,
+            ["apiOrigin", "adminToken"],
+            "上架后必须启用，确保频繁升级时仍能追踪用户、关注、动态、私信、预约和打卡数据。",
+        ),
         {
             "label": "隐私协议与权限说明",
             "value": "定位、相册/摄像头、运动健康数据、私信与社区内容",
@@ -258,6 +265,23 @@ def build_plan(config: dict[str, str]) -> dict[str, Any]:
                 api_origin,
                 "--output-dir",
                 "backups/tencent-cutover-before",
+            ],
+            config,
+            ["apiOrigin", "adminToken"],
+        ),
+        step(
+            "配置每日生产快照计划",
+            [
+                "bash",
+                "-lc",
+                (
+                    "(crontab -l 2>/dev/null | grep -v 'FitHub scheduled production snapshot'; "
+                    "echo '15 3 * * * cd /opt/fithub/fithub-app-deploy && "
+                    "FITHUB_ADMIN_TOKEN=<FITHUB_ADMIN_TOKEN> npm run snapshot:prod -- "
+                    f"--backend-url {api_origin} --output-dir backups/scheduled "
+                    "--retention-days 30 --keep-latest 20 "
+                    "# FitHub scheduled production snapshot') | crontab -"
+                ),
             ],
             config,
             ["apiOrigin", "adminToken"],

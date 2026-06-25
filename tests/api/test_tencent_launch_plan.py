@@ -49,6 +49,9 @@ class TencentLaunchPlanTests(unittest.TestCase):
         self.assertIn("check:tencent-launch", rendered)
         self.assertIn("deploy:tencent-remote", rendered)
         self.assertIn("snapshot:prod", rendered)
+        self.assertIn("FitHub scheduled production snapshot", rendered)
+        self.assertIn("--retention-days 30", rendered)
+        self.assertIn("--keep-latest 20", rendered)
         self.assertIn("evidence:tencent-launch", rendered)
         self.assertIn("<SUPABASE_SERVICE_ROLE_KEY>", rendered)
         self.assertIn("<COS_SECRET_KEY>", rendered)
@@ -63,6 +66,7 @@ class TencentLaunchPlanTests(unittest.TestCase):
         manual = "\n".join(item["label"] + item["detail"] for item in plan["manualChecks"])
         self.assertIn("微信小程序真实 AppID", manual)
         self.assertIn("生产数据快照", manual)
+        self.assertIn("每日生产快照计划", manual)
 
     def test_markdown_includes_wechat_backend_and_manual_checks(self):
         plan = tencent_launch_plan.build_plan(dict(READY_CONFIG))
