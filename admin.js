@@ -17,10 +17,12 @@ const elements = {
   reports: document.getElementById("reportsList"),
   queue: document.getElementById("queueList"),
   deletions: document.getElementById("deletionList"),
+  suspended: document.getElementById("suspendedList"),
   actions: document.getElementById("actionsList"),
   reportCount: document.getElementById("reportCount"),
   queueCount: document.getElementById("queueCount"),
-  deletionCount: document.getElementById("deletionCount")
+  deletionCount: document.getElementById("deletionCount"),
+  suspendedCount: document.getElementById("suspendedCount")
 };
 
 function escapeHtml(value) {
@@ -77,7 +79,10 @@ function renderFlags(flags) {
 
 function itemCard(item, kind, actions = true) {
   const title = item.reason || item.type || item.targetType || item.kind || "待处理项目";
-  const owner = profileName(item.targetOwnerProfile);
+  const ownerProfile = item.targetOwnerProfile || null;
+  const owner = profileName(ownerProfile);
+  const ownerId = ownerProfile && ownerProfile.id;
+  const ownerSuspended = (ownerProfile && ownerProfile.moderationStatus) === "suspended";
   const reporter = profileName(item.reporterProfile);
   const meta = [
     item.targetType || item.type || kind,
@@ -101,6 +106,11 @@ function itemCard(item, kind, actions = true) {
           ? `<div class="item-actions">
               <button type="button" data-resolve-kind="${escapeHtml(kind)}" data-id="${escapeHtml(item.id)}" data-status="resolved">处理完成</button>
               <button class="secondary" type="button" data-resolve-kind="${escapeHtml(kind)}" data-id="${escapeHtml(item.id)}" data-status="dismissed">忽略</button>
+              ${
+                ownerId
+                  ? `<button class="${ownerSuspended ? "secondary" : "danger"}" type="button" data-profile-moderation="${escapeHtml(ownerId)}" data-status="${ownerSuspended ? "active" : "suspended"}">${ownerSuspended ? "解除限制" : "限制作者"}</button>`
+                  : ""
+              }
             </div>`
           : ""
       }
@@ -121,12 +131,32 @@ function renderSummary(summary) {
     ["待处理举报", summary.openReports || 0],
     ["待审核内容", summary.pendingReview || 0],
     ["注销申请", summary.pendingDeletionRequests || 0],
+    ["限制账号", summary.suspendedProfiles || 0],
     ["历史处理", (state.dashboard.adminActions || []).length]
   ];
   elements.summary.innerHTML = cards
     .map(([label, value]) => `<article class="summary-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`)
     .join("");
   elements.summary.hidden = false;
+}
+
+function profileCard(profile) {
+  const reason = profile.suspensionReason || "运营后台限制";
+  return `
+    <article class="ops-item" data-profile-id="${escapeHtml(profile.id)}">
+      <div class="item-top">
+        <div>
+          <div class="item-title">${escapeHtml(profile.name || "平台用户")}</div>
+          <div class="item-meta">${escapeHtml(profile.role || "用户")} · ${escapeHtml(profile.locationLabel || profile.city || "")}</div>
+        </div>
+        <span class="item-kind">已限制</span>
+      </div>
+      <p class="item-excerpt">${escapeHtml(reason)}</p>
+      <div class="item-actions">
+        <button class="secondary" type="button" data-profile-moderation="${escapeHtml(profile.id)}" data-status="active">解除限制</button>
+      </div>
+    </article>
+  `;
 }
 
 function renderList(target, items, kind, emptyText) {
@@ -161,13 +191,18 @@ function renderDashboard(payload) {
   const reports = openItems(payload.reports || [], "open");
   const queue = openItems(payload.moderationQueue || [], "pending");
   const deletions = openItems(payload.deletionRequests || [], "pending");
+  const suspendedProfiles = payload.suspendedProfiles || [];
   renderSummary(payload.summary || {});
   elements.reportCount.textContent = reports.length;
   elements.queueCount.textContent = queue.length;
   elements.deletionCount.textContent = deletions.length;
+  elements.suspendedCount.textContent = suspendedProfiles.length;
   renderList(elements.reports, reports, "report", "暂时没有用户举报。");
   renderList(elements.queue, queue, "queue", "暂时没有待审核内容。");
   renderList(elements.deletions, deletions, "deletion", "暂时没有账号注销申请。");
+  elements.suspended.innerHTML = suspendedProfiles.length
+    ? suspendedProfiles.map(profileCard).join("")
+    : emptyState("暂时没有被限制的账号。");
   renderActions(payload.adminActions || []);
   elements.layout.hidden = false;
 }
@@ -207,12 +242,41 @@ async function resolveItem(kind, id, status) {
   }
 }
 
+async function moderateProfile(profileId, status, button) {
+  const nextStatus = status === "suspended" ? "suspended" : "active";
+  if (button) {
+    button.disabled = true;
+    button.textContent = nextStatus === "suspended" ? "限制中..." : "恢复中...";
+  }
+  setStatus(nextStatus === "suspended" ? "正在限制该账号..." : "正在解除限制...");
+  try {
+    const payload = await requestAdmin("/admin/profile/moderation", {
+      method: "POST",
+      body: JSON.stringify({
+        profileId,
+        status: nextStatus,
+        reason: nextStatus === "suspended" ? "运营后台限制" : "运营后台恢复"
+      })
+    });
+    renderDashboard(payload);
+    setStatus(nextStatus === "suspended" ? "已限制该账号。" : "已解除账号限制。");
+  } catch (error) {
+    setStatus(error.message || "账号状态更新失败，请重试。", true);
+    if (button) button.disabled = false;
+  }
+}
+
 elements.token.value = state.token;
 elements.load.addEventListener("click", loadDashboard);
 document.addEventListener("click", (event) => {
   const button = event.target.closest("[data-resolve-kind]");
-  if (!button) return;
-  resolveItem(button.dataset.resolveKind, button.dataset.id, button.dataset.status);
+  if (button) {
+    resolveItem(button.dataset.resolveKind, button.dataset.id, button.dataset.status);
+    return;
+  }
+  const profileButton = event.target.closest("[data-profile-moderation]");
+  if (!profileButton) return;
+  moderateProfile(profileButton.dataset.profileModeration, profileButton.dataset.status, profileButton);
 });
 
 if (state.token) {

@@ -181,7 +181,7 @@ npm run check:prelaunch
 - 举报入口、拉黑入口。
 - 文本内容安全检测。
 - 图片/视频安全检测：已接入 `media.safety` 本地兜底审核与 `moderationQueue` 入队；正式提审前接微信/腾讯云媒体安全 provider。
-- 简易运营后台或管理接口：已提供 `admin.html` 和 `/api/admin/moderation`，可处理举报、待审核内容和注销申请。
+- 简易运营后台或管理接口：已提供 `admin.html`、`/api/admin/moderation` 和 `/api/admin/profile/moderation`，可处理举报、待审核内容、注销申请，并可限制/恢复风险账号。
 
 ## 3. 上架前 P2 优化
 

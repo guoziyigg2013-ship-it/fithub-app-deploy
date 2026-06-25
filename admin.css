@@ -152,7 +152,7 @@ h2 {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 14px;
   margin-top: 18px;
 }
@@ -278,6 +278,15 @@ h2 {
 .item-actions button.secondary {
   color: #6c6258;
   background: #f6f3ef;
+}
+
+.item-actions button.danger {
+  background: linear-gradient(135deg, #f07b5f, var(--danger));
+}
+
+.item-actions button:disabled {
+  cursor: wait;
+  opacity: 0.68;
 }
 
 @media (max-width: 760px) {

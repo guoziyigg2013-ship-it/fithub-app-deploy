@@ -353,6 +353,17 @@ class ApiClient:
             },
         )
 
+    def moderate_profile(self, profile_id, status="suspended", token="test-maintenance-token", reason="API 测试限制"):
+        return self.post(
+            "/api/admin/profile/moderation",
+            {
+                "token": token,
+                "profileId": profile_id,
+                "status": status,
+                "reason": reason,
+            },
+        )
+
 
 class FitHubApiTestCase(unittest.TestCase):
     @classmethod

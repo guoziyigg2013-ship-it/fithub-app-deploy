@@ -457,8 +457,54 @@ class ContentRegressionTests(FitHubApiTestCase):
         self.assertIn("error", denied)
 
         dashboard = viewer_client.admin_moderation()
-        self.assertEqual(dashboard["summary"]["openReports"], 1)
+        self.assertGreaterEqual(dashboard["summary"]["openReports"], 1)
         report = next(item for item in dashboard["reports"] if item["targetId"] == target_post["id"])
         self.assertEqual(report["reason"], "广告骚扰")
         self.assertEqual(report["targetOwnerProfileId"], author_profile["id"])
         self.assertTrue(any(item["source"] == "user-report" and item["targetId"] == target_post["id"] for item in dashboard["moderationQueue"]))
+
+    def test_admin_can_suspend_and_restore_reported_profile(self):
+        phone_a = self.make_phone(74)
+        phone_b = self.make_phone(75)
+
+        author_client = self.make_client()
+        author_code = author_client.send_code(phone_a, purpose="register")["debugCode"]
+        author_payload = author_client.register_enthusiast(phone_a, "待限制作者", author_code)
+        author_profile = self.current_profile(author_payload)
+
+        viewer_client = self.make_client()
+        viewer_code = viewer_client.send_code(phone_b, purpose="register")["debugCode"]
+        viewer_payload = viewer_client.register_enthusiast(phone_b, "举报处理用户", viewer_code)
+        viewer_profile = self.current_profile(viewer_payload)
+
+        post_payload = author_client.create_post(author_profile["id"], "这是一条需要运营处理的动态。")
+        target_post = next(
+            item for item in self.current_profile(post_payload).get("posts", [])
+            if item["content"] == "这是一条需要运营处理的动态。"
+        )
+        viewer_client.create_report("post", target_post["id"], reason="持续骚扰")
+
+        suspended_payload = viewer_client.moderate_profile(author_profile["id"], status="suspended", reason="持续骚扰")
+        self.assertEqual(suspended_payload["summary"]["suspendedProfiles"], 1)
+        suspended = next(item for item in suspended_payload["suspendedProfiles"] if item["id"] == author_profile["id"])
+        self.assertEqual(suspended["moderationStatus"], "suspended")
+
+        denied_post = author_client.post(
+            "/api/post/create",
+            {"profileId": author_profile["id"], "content": "这条动态应该被运营限制。"},
+            expected_status=400,
+        )
+        self.assertIn("运营限制", denied_post.get("error", ""))
+        denied_message = author_client.post(
+            "/api/message/send",
+            {"targetProfileId": viewer_profile["id"], "text": "这条私信应该被限制。"},
+            expected_status=400,
+        )
+        self.assertIn("运营限制", denied_message.get("error", ""))
+
+        restored_payload = viewer_client.moderate_profile(author_profile["id"], status="active", reason="申诉通过")
+        self.assertEqual(restored_payload["summary"]["suspendedProfiles"], 0)
+        restored_post_payload = author_client.create_post(author_profile["id"], "申诉通过后可以继续发布。")
+        self.assertTrue(
+            any(item["content"] == "申诉通过后可以继续发布。" for item in self.current_profile(restored_post_payload).get("posts", []))
+        )

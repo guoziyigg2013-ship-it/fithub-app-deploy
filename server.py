@@ -501,6 +501,19 @@ def sanitize_state(state):
     return state
 
 
+def is_profile_suspended(state, profile_id):
+    profile_id = resolve_canonical_profile_id(state, profile_id)
+    profile = (state.get("profiles") or {}).get(profile_id)
+    return bool(profile and profile.get("moderationStatus") == "suspended")
+
+
+def ensure_profile_not_suspended(state, profile_id, action_label="继续操作"):
+    profile_id = resolve_canonical_profile_id(state, profile_id)
+    if is_profile_suspended(state, profile_id):
+        raise ValueError(f"该身份已被运营限制，暂时不能{action_label}。")
+    return profile_id
+
+
 def parse_optional_float(value):
     if value in (None, ""):
         return None
@@ -5042,6 +5055,7 @@ def serialize_profile_brief(state, profile_id):
             "ratingAvg": 0,
             "ratingCount": 0,
             "avatarImage": "",
+            "moderationStatus": "",
         }
 
     reviews = [serialize_review(state, item) for item in sorted_by_created_at(profile.get("reviews", []), reverse=True)]
@@ -5060,6 +5074,8 @@ def serialize_profile_brief(state, profile_id):
         "ratingAvg": rating_avg,
         "ratingCount": rating_count,
         "avatarImage": compact_avatar_image(profile.get("avatarImage"), profile.get("role", "")),
+        "moderationStatus": profile.get("moderationStatus", ""),
+        "suspensionReason": profile.get("suspensionReason", ""),
     }
 
 
@@ -5685,6 +5701,11 @@ def build_moderation_dashboard(state):
     reports = state.setdefault("reports", [])
     queue = state.setdefault("moderationQueue", [])
     deletion_requests = state.setdefault("deletionRequests", [])
+    suspended_profiles = [
+        serialize_profile_brief(state, profile_id)
+        for profile_id, profile in (state.get("profiles") or {}).items()
+        if profile.get("moderationStatus") == "suspended"
+    ]
     open_reports = [item for item in reports if item.get("status", "open") == "open"]
     pending_queue = [item for item in queue if item.get("status", "pending") == "pending"]
     pending_deletions = [item for item in deletion_requests if item.get("status", "pending") == "pending"]
@@ -5697,10 +5718,12 @@ def build_moderation_dashboard(state):
             "totalReports": len(reports),
             "totalQueued": len(queue),
             "totalDeletionRequests": len(deletion_requests),
+            "suspendedProfiles": len(suspended_profiles),
         },
         "reports": [serialize_moderation_item(state, item) for item in reports[:100]],
         "moderationQueue": [serialize_moderation_item(state, item) for item in queue[:100]],
         "deletionRequests": [serialize_deletion_request(state, item) for item in deletion_requests[:100]],
+        "suspendedProfiles": suspended_profiles[:100],
         "adminActions": state.setdefault("adminActions", [])[:50],
     }
 
@@ -7162,6 +7185,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 target_profile_id = resolve_canonical_profile_id(state, payload["targetProfileId"])
                 if not allowed or not source_profile_id:
                     raise ValueError("请先注册后再关注。")
+                ensure_profile_not_suspended(state, source_profile_id, "关注")
                 if not target_profile_id or target_profile_id not in state.get("profiles", {}):
                     raise ValueError("没有找到要关注的对象。")
                 if target_profile_id == source_profile_id:
@@ -7217,6 +7241,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 target_profile_id = resolve_canonical_profile_id(state, payload.get("targetProfileId"))
                 if not allowed or not source_profile_id:
                     raise ValueError("请先登录后再操作。")
+                ensure_profile_not_suspended(state, source_profile_id, "拉黑或解除拉黑")
                 if not target_profile_id or target_profile_id not in state.get("profiles", {}):
                     raise ValueError("没有找到要拉黑的对象。")
                 if target_profile_id == source_profile_id:
@@ -7315,6 +7340,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 )
                 if not allowed:
                     raise ValueError("只能用当前设备已注册的身份发布动态。")
+                ensure_profile_not_suspended(state, profile_id, "发布动态")
                 media_items = [deepcopy(item) for item in (payload.get("media") or []) if isinstance(item, dict)]
                 post_id = f"post-{uuid.uuid4().hex[:10]}"
                 content = payload.get("content") or "分享了一条新的动态。"
@@ -7513,6 +7539,49 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             return
 
+        if parsed.path == f"{API_PREFIX}/admin/profile/moderation":
+            if not moderation_admin_authorized(self.headers, payload=payload):
+                self._write_json({"error": "没有权限管理账号状态。"}, status=HTTPStatus.FORBIDDEN)
+                return
+
+            def action(state):
+                profile_id = resolve_canonical_profile_id(state, payload.get("profileId"))
+                profile = (state.get("profiles") or {}).get(profile_id)
+                if not profile:
+                    raise ValueError("没有找到这个用户身份。")
+                next_status = str(payload.get("status") or "").strip()
+                if next_status not in {"active", "suspended"}:
+                    raise ValueError("账号状态不正确。")
+                reason = str(payload.get("reason") or "").strip()[:300]
+                now = iso_at()
+                if next_status == "suspended":
+                    profile["moderationStatus"] = "suspended"
+                    profile["suspendedAt"] = now
+                    profile["suspensionReason"] = reason or "运营后台限制"
+                else:
+                    profile["moderationStatus"] = "active"
+                    profile["restoredAt"] = now
+                    profile["suspensionReason"] = ""
+                state.setdefault("adminActions", []).insert(
+                    0,
+                    {
+                        "id": f"admin-action-{uuid.uuid4().hex[:10]}",
+                        "kind": "profile-moderation",
+                        "targetId": profile_id,
+                        "status": next_status,
+                        "note": reason,
+                        "createdAt": now,
+                    },
+                )
+                del state["adminActions"][100:]
+                return build_moderation_dashboard(state)
+
+            try:
+                self._write_json(self._with_state(action))
+            except ValueError as exc:
+                self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if parsed.path == f"{API_PREFIX}/account/delete-request":
             def action(state):
                 session = ensure_session(state, session_id)
@@ -7539,6 +7608,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 )
                 if not allowed:
                     raise ValueError("请先注册后再打卡。")
+                ensure_profile_not_suspended(state, profile_id, "打卡")
                 profile = state["profiles"][profile_id]
                 if profile.get("role") != "enthusiast":
                     raise ValueError("当前只有健身爱好者身份支持训练打卡。")
@@ -7593,6 +7663,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 actor = session.get("currentActorProfileId")
                 if not actor:
                     raise ValueError("请先注册后再点赞。")
+                ensure_profile_not_suspended(state, actor, "点赞")
                 post = state["posts"][payload["postId"]]
                 likes = post.setdefault("likes", [])
                 if actor in likes:
@@ -7614,6 +7685,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 actor = session.get("currentActorProfileId")
                 if not actor:
                     raise ValueError("请先注册后再收藏。")
+                ensure_profile_not_suspended(state, actor, "收藏")
                 post = state["posts"][payload["postId"]]
                 favorites = state.setdefault("postFavorites", [])
                 existing = next(
@@ -7651,6 +7723,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 actor = session.get("currentActorProfileId")
                 if not actor:
                     raise ValueError("请先注册后再评论。")
+                ensure_profile_not_suspended(state, actor, "评论")
                 text = (payload.get("text") or "").strip()
                 if not text:
                     raise ValueError("评论内容不能为空。")
@@ -7679,6 +7752,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 target_profile_id = resolve_canonical_profile_id(state, payload.get("targetProfileId"))
                 if not actor:
                     raise ValueError("请先注册后再发送私信。")
+                ensure_profile_not_suspended(state, actor, "发送私信")
                 if not target_profile_id or target_profile_id not in state.get("profiles", {}):
                     raise ValueError("没有找到私信对象。")
                 if is_blocking_profile(state, actor, target_profile_id):
@@ -7712,6 +7786,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 actor = session.get("currentActorProfileId")
                 if not actor:
                     raise ValueError("请先注册后再评分。")
+                ensure_profile_not_suspended(state, actor, "评分")
                 target_profile = state["profiles"][payload["targetProfileId"]]
                 score = int(payload.get("score", 0))
                 if score < 1 or score > 5:
@@ -7748,6 +7823,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 )
                 if not allowed or not actor:
                     raise ValueError("请先登录对应身份后再发布可预约时间。")
+                ensure_profile_not_suspended(state, actor, "发布可预约时间")
                 profile = state["profiles"].get(actor)
                 if not profile or profile.get("role") not in {"coach", "gym"}:
                     raise ValueError("只有健身教练和健身房可以发布可预约时间。")
@@ -7793,6 +7869,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 )
                 if not allowed or not actor:
                     raise ValueError("请先登录对应身份后再管理可预约时间。")
+                ensure_profile_not_suspended(state, actor, "管理可预约时间")
                 profile = state["profiles"].get(actor)
                 if not profile or profile.get("role") not in {"coach", "gym"}:
                     raise ValueError("只有健身教练和健身房可以管理可预约时间。")
@@ -7831,6 +7908,7 @@ class FitHubHandler(BaseHTTPRequestHandler):
                 )
                 if not allowed or not actor:
                     raise ValueError("请先注册后再预约。")
+                ensure_profile_not_suspended(state, actor, "预约")
                 target_profile_id = resolve_canonical_profile_id(state, payload.get("targetProfileId"))
                 target_profile = state["profiles"].get(target_profile_id)
                 if not target_profile:

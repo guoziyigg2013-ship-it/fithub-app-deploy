@@ -54,6 +54,8 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
                 "/report/create",
                 "/admin/moderation",
                 "/admin/moderation/resolve",
+                "/admin/profile/moderation",
+                "ensure_profile_not_suspended",
                 "review_media_safety",
                 "media-upload",
                 "/block/toggle",
@@ -113,13 +115,14 @@ def write_feature_inventory(root: Path, *, include_upload_file: bool = True) -> 
                 "risky_post_comment_and_message_are_queued_for_moderation",
                 "risky_media_upload_is_queued_for_moderation",
                 "user_report_is_persisted_and_admin_endpoint_is_protected",
+                "admin_can_suspend_and_restore_reported_profile",
                 "private_message_does_not_require_follow_but_respects_block",
             ]
         ),
     )
     write(root / "tests" / "api" / "test_tencent_cos_media.py", "upload_media_asset_uses_cos_provider_and_public_url")
     write(root / "tests" / "api" / "test_auth.py", "account_deletion_request")
-    write(root / "tests" / "e2e" / "admin.spec.js", "运营审核后台可以查看并处理媒体风险队列")
+    write(root / "tests" / "e2e" / "admin.spec.js", "运营审核后台可以查看并处理媒体风险队列\n运营审核后台可以限制并恢复风险内容作者")
     write(
         root / "tests" / "api" / "test_monitoring.py",
         "monitor_event_endpoint_records_sanitized_event_and_requires_admin_token\nmonitor_events_are_capped_and_classified",
